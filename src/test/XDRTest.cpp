@@ -3,7 +3,6 @@
 #include "ledger/LedgerTxn.h"
 #include "ledger/LedgerTxnEntry.h"
 #include "ledger/LedgerTxnHeader.h"
-#include "ledger/TrustLineWrapper.h"
 #include "lib/catch.hpp"
 #include "main/Application.h"
 #include "main/Config.h"
@@ -13,12 +12,11 @@
 #include "test/TestUtils.h"
 #include "test/TxTests.h"
 #include "test/test.h"
-#include "transactions/ChangeTrustOpFrame.h"
-#include "transactions/MergeOpFrame.h"
-#include "transactions/PaymentOpFrame.h"
-#include "transactions/TransactionUtils.h"
 #include "util/Logging.h"
 #include "util/Timer.h"
+#include "ledger/LedgerManagerImpl.h"
+#include "bucket/BucketManager.h"
+#include "transactions/TransactionFrameBase.h"
 
 #include "xdr/TestCase.h"
 
@@ -71,7 +69,7 @@ TEST_CASE("XDRTest", "TODO: what is this string for?")
     cfg.LEDGER_PROTOCOL_VERSION = 18;
 
     std::ifstream mIn;
-    const std::string filename = "/home/user/stellar-core/test-case.bin";
+    const std::string filename = "/home/user/test-case.bin";
 
     std::vector<uint8_t> data = readFile(filename.c_str());
     TestCase tc;
@@ -87,4 +85,20 @@ TEST_CASE("XDRTest", "TODO: what is this string for?")
 
     VirtualClock clock;
     auto app = createTestApplication(clock, cfg);
+
+    LedgerTxn ltx(app->getLedgerTxnRoot(), false);
+    ltx.loadHeader().current() = tc.ledgerHeader;
+    LedgerEntry rootEntry = tc.ledgerEntries.front();
+    ltx.create(rootEntry);
+
+    TransactionEnvelope txe = tc.transactionEnvelopes.front();
+    TransactionFrameBasePtr tx =
+      TransactionFrameBase::makeTransactionFromWire(app->getNetworkID(),
+          txe);
+
+    REQUIRE(tx->checkValid(ltx, 0, 0, 0));
+
+    TransactionMeta tm(2); // is this v2?
+    tx->apply(*app, ltx, tm);
+    ltx.commit();
 }
