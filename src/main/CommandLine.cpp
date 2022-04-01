@@ -26,6 +26,7 @@
 #include "util/Logging.h"
 #include "util/types.h"
 #include "work/WorkScheduler.h"
+#include <stdexcept>
 
 #ifdef BUILD_TESTS
 #include "test/Fuzzer.h"
@@ -1289,11 +1290,22 @@ int
 runRunModelBasedTest(CommandLineArgs const& args)
 {
     CommandLine::ConfigOption configOption;
-    std::string xdr;
+    LogLevel logLevel{LogLevel::LVL_DEBUG};
+    std::string inputLedger; // binary file containing ledger header and ledger entries
+    std::string inputTx; // binary file containing a transaction
 
     return runWithHelp(
-        args, {configurationParser(configOption), fileNameParser(xdr)}, [&] {
-        ModelBasedTesting::runModelBasedTest(configOption.getConfig(), xdr);
+        args, {configurationParser(configOption), fileNameParser(inputLedger), fileNameParser(inputTx)},
+        [&]
+        {
+            Logging::setLogLevel(logLevel, nullptr);
+            if (!fs::exists(inputLedger)) {
+              throw std::runtime_error("file not found");
+            }
+            if (!fs::exists(inputTx)) {
+              throw std::runtime_error("file not found");
+            }
+            ModelBasedTesting::runModelBasedTest(inputLedger, inputTx);
             return 0;
         });
 }

@@ -5,11 +5,10 @@
 namespace stellar
 {
 
-struct TestCase
+struct TestLedger
 {
   LedgerHeader ledgerHeader;
   LedgerEntry ledgerEntries<>;
-  TransactionEnvelope transactionEnvelopes<>;
 };
 
 struct TestCaseResult

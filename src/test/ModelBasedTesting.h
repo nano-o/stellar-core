@@ -12,9 +12,6 @@ namespace stellar
 class ModelBasedTesting
 {
   public:
-    static void runModelBasedTest(Config, std::string const&);
-  // private:
-    // static std::vector<uint8_t> readFile(const char*);
-    // static bool isValid(LedgerHeader const&);
+    static void runModelBasedTest(std::string const&, std::string const&);
 };
 }
