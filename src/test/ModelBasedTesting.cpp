@@ -19,6 +19,8 @@
 #include "test/ModelBasedTesting.h"
 #include "xdrpp/printer.h"
 #include "transactions/TransactionUtils.h"
+#include "herder/TxSetFrame.h"
+#include "ledger/LedgerManagerImpl.h"
 
 using namespace stellar;
 // using xdr::operator<<;
@@ -67,26 +69,38 @@ ModelBasedTesting::runModelBasedTest(std::string const& inputLedgerFile, std::st
   currentLH.totalCoins = testLH.totalCoins;
   // finally, create all ledger entries
   for (auto le : testLedger.ledgerEntries) {
+    CLOG_DEBUG(Ledger, "Deserialized ledger entry:\n {}", xdr::xdr_to_string(le));
     ltx.create(le);
   };
   ltx.commit();
   CLOG_INFO(Ledger, "Loaded ledger header and ledger entries from {}", inputLedgerFile);
 
   // Now execute the transaction
-  // TODO: ideally we should call closeLedger
-  LedgerTxn ltx2(root, false);
-  TransactionEnvelope tx = deserialize<TransactionEnvelope>(inputTxFile);
-  CLOG_DEBUG(Ledger, "Deserialized transaction:\n {}", xdr::xdr_to_string(tx));
+  LedgerTxn ltx2(root, false); // TODO can't we do everything in one transaction?
+  TransactionEnvelope txe = deserialize<TransactionEnvelope>(inputTxFile);
+  CLOG_DEBUG(Ledger, "Deserialized transaction:\n {}", xdr::xdr_to_string(txe));
 
   TransactionFrameBasePtr txfbp =
     TransactionFrameBase::makeTransactionFromWire(app->getNetworkID(),
-        tx);
-  TransactionMeta tm(2); // is this v2?
-  txfbp->apply(*app, ltx2, tm);
-  ltx2.commit();
+        txe);
 
-  // TODO: it looks like the meta is not even populated if the transaction fails some basic validity checks.
-  CLOG_DEBUG(Ledger, "TransactionMeta:\n {}", xdr::xdr_to_string(tm));
+  std::vector<TransactionFrameBasePtr> txs;
+  txs.push_back(txfbp);
+  // std::unique_ptr<TransactionResultSet> trs = std::make_unique<TransactionResultSet>();
+  TransactionResultSet trs;
+  std::unique_ptr<LedgerCloseMeta> ledgerCloseMeta = std::make_unique<LedgerCloseMeta>();
+  int64_t baseFee = testLH.baseFee;
+  app->getLedgerManager().processFeesSeqNumsAndApplyTransactions(txs, ltx2, trs, ledgerCloseMeta, baseFee);
+
+  // NOTE the following does not work because apply skips all operations unless
+  // mOperations has been populated first by calling, I believe,
+  // processFeeSeqNums
+
+  // TransactionMeta tm(2); // is this v2?
+  // txfbp->apply(*app, ltx2, tm);
+
+  ltx2.commit();
+  CLOG_DEBUG(Ledger, "LedgerCloseMeta:\n {}", xdr::xdr_to_string(*ledgerCloseMeta));
 
   // There's a comment somewhere saying this should be done:
   cleanupTmpDirs();
@@ -136,6 +150,7 @@ getConfig()
     cfg.QUORUM_INTERSECTION_CHECKER = false;
     cfg.PREFERRED_PEERS_ONLY = false;
     cfg.LEDGER_PROTOCOL_VERSION = 18;
+    cfg.NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 
     return cfg;
 }
