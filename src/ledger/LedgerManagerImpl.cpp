@@ -587,6 +587,18 @@ LedgerManagerImpl::emitNextMeta()
     mNextMetaToEmit.reset();
 }
 
+// the implementation of LedgerManagerImpl has been copied from ledgerClose; TODO this seems bad
+void LedgerManagerImpl::processFeesSeqNumsAndApplyTransactions(
+    std::vector<TransactionFrameBasePtr>& txs, AbstractLedgerTxn& ltx,
+    TransactionResultSet& txResultSet,
+    std::unique_ptr<LedgerCloseMeta> const& ledgerCloseMeta, int64_t baseFee)
+{
+    prefetchTxSourceIds(txs);
+    processFeesSeqNums(txs, ltx, baseFee, ledgerCloseMeta);
+    txResultSet.results.reserve(txs.size());
+    applyTransactions(txs, ltx, txResultSet, ledgerCloseMeta, baseFee);
+};
+
 /*
     This is the main method that closes the current ledger based on
 the close context that was computed by SCP or by the historical module

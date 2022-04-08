@@ -134,6 +134,12 @@ class LedgerManagerImpl : public LedgerManager
                  std::set<std::shared_ptr<Bucket>> bucketsToRetain) override;
 
     void closeLedger(LedgerCloseData const& ledgerData) override;
+
+    void processFeesSeqNumsAndApplyTransactions(
+        std::vector<TransactionFrameBasePtr>&, AbstractLedgerTxn&,
+        TransactionResultSet&,
+        std::unique_ptr<LedgerCloseMeta> const&, int64) override;
+
     void deleteOldEntries(Database& db, uint32_t ledgerSeq,
                           uint32_t count) override;
 

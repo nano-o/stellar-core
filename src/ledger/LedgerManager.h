@@ -157,6 +157,13 @@ class LedgerManager
     // permit testing.
     virtual void closeLedger(LedgerCloseData const& ledgerData) = 0;
 
+    // Does what it says; written to facilitate executing model-based tests
+    // without having to call closeLedger
+    virtual void processFeesSeqNumsAndApplyTransactions(
+        std::vector<TransactionFrameBasePtr>&, AbstractLedgerTxn&,
+        TransactionResultSet&,
+        std::unique_ptr<LedgerCloseMeta> const&, int64) = 0;
+
     // deletes old entries stored in the database
     virtual void deleteOldEntries(Database& db, uint32_t ledgerSeq,
                                   uint32_t count) = 0;
