@@ -9,6 +9,8 @@
 #include "crypto/SignerKey.h"
 #include "util/GlobalChecks.h"
 #include "xdr/Stellar-transaction.h"
+#include "util/Logging.h"
+#include "xdrpp/printer.h"
 #include <Tracy.hpp>
 
 namespace stellar
@@ -42,8 +44,11 @@ verify(DecoratedSignature const& sig, PublicKey const& pubKey, Hash const& hash)
     {
         return false;
     }
-    return true; // TODO temporary
-    // return PubKeyUtils::verifySig(pubKey, sig.signature, hash);
+    bool b = PubKeyUtils::verifySig(pubKey, sig.signature, hash);
+    if (!b) {
+        CLOG_DEBUG(Tx, "verifySig failed using pubkey {}", xdr::xdr_to_string(pubKey));
+    }
+    return b;
 }
 
 DecoratedSignature
