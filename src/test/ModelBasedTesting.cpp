@@ -90,14 +90,14 @@ ModelBasedTesting::runModelBasedTest(std::string const& inputLedgerFile, std::st
   TransactionResultSet trs;
   std::unique_ptr<LedgerCloseMeta> ledgerCloseMeta = std::make_unique<LedgerCloseMeta>();
   int64_t baseFee = testLH.baseFee;
+
   app->getLedgerManager().processFeesSeqNumsAndApplyTransactions(txs, ltx2, trs, ledgerCloseMeta, baseFee);
-
-  // NOTE the following does not work because apply skips all operations unless
-  // mOperations has been populated first by calling, I believe,
-  // processFeeSeqNums
-
-  // TransactionMeta tm(2); // is this v2?
-  // txfbp->apply(*app, ltx2, tm);
+  /*
+   * TODO Instead of the above:
+   *   - call TxSetFrame::checkValid first (no txset that doesn't pass the check can make it through nomination)
+   *   - then call closeLedger
+   *   This woule be closer to what would happen in production.
+   */
 
   ltx2.commit();
   CLOG_DEBUG(Ledger, "LedgerCloseMeta:\n {}", xdr::xdr_to_string(*ledgerCloseMeta));
