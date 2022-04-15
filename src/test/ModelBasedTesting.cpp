@@ -67,6 +67,7 @@ ModelBasedTesting::runModelBasedTest(std::string const& inputLedgerFile, std::st
   currentLH.baseReserve = testLH.baseReserve;
   currentLH.ledgerSeq = testLH.ledgerSeq;
   currentLH.totalCoins = testLH.totalCoins;
+  currentLH.ledgerVersion = testLH.ledgerVersion;
   // finally, create all ledger entries
   for (auto le : testLedger.ledgerEntries) {
     CLOG_DEBUG(Ledger, "Deserialized ledger entry:\n {}", xdr::xdr_to_string(le));
@@ -149,7 +150,7 @@ getConfig()
     cfg.WORKER_THREADS = 1;
     cfg.QUORUM_INTERSECTION_CHECKER = false;
     cfg.PREFERRED_PEERS_ONLY = false;
-    cfg.LEDGER_PROTOCOL_VERSION = 18;
+    cfg.LEDGER_PROTOCOL_VERSION = 0; // hopefully this makes it fail if we forget to set othe version in a test
     cfg.NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 
     return cfg;
