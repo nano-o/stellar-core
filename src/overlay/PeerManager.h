@@ -164,5 +164,9 @@ class PeerManager
 
     void update(PeerRecord& peer, TypeUpdate type);
     void update(PeerRecord& peer, BackOffUpdate backOff, Application& app);
+
+    stellar::stellar_default_random_engine mRand;
+    stellar::stellar_default_random_engine getRand(Application& app);
+    std::chrono::seconds computeBackoff(size_t numFailures);
 };
 }

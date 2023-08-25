@@ -88,7 +88,18 @@ PeerManager::PeerManager(Application& app)
           *this, RandomPeerSource::maxFailures(MAX_FAILURES, true)))
     , mInboundPeersToSend(std::make_unique<RandomPeerSource>(
           *this, RandomPeerSource::maxFailures(MAX_FAILURES, false)))
+    , mRand(getRand(app))
 {
+}
+
+stellar::stellar_default_random_engine PeerManager::getRand(Application& app)
+{
+    // Use the node's public key to seed the rng. The goal is to work around a
+    // bug in which nodes that try to connect to each other at the same time
+    // fail to establish connections
+    std::hash<std::string> strHash;
+    std::string seed = app.getConfig().NODE_SEED.getStrKeyPublic();
+    return stellar::stellar_default_random_engine(strHash(seed));
 }
 
 std::vector<PeerBareAddress>
@@ -356,11 +367,8 @@ PeerManager::update(PeerRecord& peer, TypeUpdate type)
     }
 }
 
-namespace
-{
-
-static std::chrono::seconds
-computeBackoff(size_t numFailures)
+std::chrono::seconds
+PeerManager::computeBackoff(size_t numFailures)
 {
     constexpr const uint32 SECONDS_PER_BACKOFF = 10;
     constexpr const size_t MAX_BACKOFF_EXPONENT = 10;
@@ -368,11 +376,10 @@ computeBackoff(size_t numFailures)
     uint32 backoffCount = static_cast<uint32>(
         std::min<size_t>(MAX_BACKOFF_EXPONENT, numFailures));
     auto nsecs =
-        std::chrono::seconds(static_cast<uint32>(gRandomEngine()) %
+        std::chrono::seconds(static_cast<uint32>(mRand()) %
                                  ((1u << backoffCount) * SECONDS_PER_BACKOFF) +
                              1);
     return nsecs;
-}
 }
 
 void
