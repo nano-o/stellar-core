@@ -208,8 +208,8 @@ PendingEnvelopes::getKnownTxSet(Hash const& hash, uint64 slot, bool touch)
         // Special case for the skip ledger hash
         CLOG_DEBUG(Proto, "Request for skip ledger hash {}", hexAbbrev(hash));
         // Return an empty tx set
-        // TODO(15): Is it right to use the LCL header here? I'm not so sure. Here
-        // are a couple cases I'm concerned about:
+        // TODO(15): Is it right to use the LCL header here? I'm not so sure.
+        // Here are a couple cases I'm concerned about:
         // 1. Ballot protocol for next ledger. Technically not the "last closed
         //    ledger" at that point. That being said, it looks like this is
         //    kinda what Herder does in building the tx set for nomination via
@@ -274,7 +274,8 @@ PendingEnvelopes::recvTxSet(Hash const& hash, TxSetXDRFrameConstPtr txset)
     auto waitingTime = mTxSetFetcher.getWaitingTime(hash);
     if (waitingTime.has_value())
     {
-        CLOG_DEBUG(Proto,
+        CLOG_DEBUG(
+            Proto,
             "Successfully downloaded tx set {} that was kAwaitingDownload - "
             "download took {} ms",
             hexAbbrev(hash), waitingTime.value().count());
@@ -734,8 +735,8 @@ PendingEnvelopes::pop(uint64 slotIndex)
             return ret;
         }
 
-        // TODO(17): Maybe should return all fully ready envelopes from ALL slots
-        // before proceeding to partially ready ones.
+        // TODO(17): Maybe should return all fully ready envelopes from ALL
+        // slots before proceeding to partially ready ones.
         auto& partial = it->second.mPartiallyReadyEnvelopes;
         if (partial.size() != 0)
         {

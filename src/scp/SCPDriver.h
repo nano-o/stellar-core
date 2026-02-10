@@ -35,7 +35,10 @@ class ValueWrapper : public NonMovableOrCopyable
 
     // Should be called when a tx set becomes available after this wrapper was
     // created without it.
-    virtual void setTxSet(TxSetXDRFrameConstPtr txSet) {}
+    virtual void
+    setTxSet(TxSetXDRFrameConstPtr txSet)
+    {
+    }
 };
 
 typedef std::shared_ptr<SCPQuorumSet> SCPQuorumSetPtr;
@@ -70,7 +73,10 @@ class SCPEnvelopeWrapper : public NonMovableOrCopyable
 
     // Should be called when a tx set becomes available after this wrapper was
     // created without it.
-    virtual void addTxSet(TxSetXDRFrameConstPtr txSet) {}
+    virtual void
+    addTxSet(TxSetXDRFrameConstPtr txSet)
+    {
+    }
 };
 
 typedef std::shared_ptr<SCPEnvelopeWrapper> SCPEnvelopeWrapperPtr;
@@ -111,8 +117,7 @@ class SCPDriver
 
     // Returns how long the ballot protocol should wait before replacing a
     // value whose transaction set has not finished downloading.
-    virtual std::chrono::milliseconds
-    getTxSetDownloadTimeout() const = 0;
+    virtual std::chrono::milliseconds getTxSetDownloadTimeout() const = 0;
 
     // Users of the SCP library should inherit from SCPDriver and implement the
     // virtual methods which are called by the SCP implementation to

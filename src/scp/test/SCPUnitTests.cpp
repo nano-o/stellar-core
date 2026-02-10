@@ -118,13 +118,15 @@ class TestNominationSCP : public SCPDriver
         return std::chrono::milliseconds(100);
     }
 
-    Value makeSkipLedgerValueFromValue(Value const& value) const override
+    Value
+    makeSkipLedgerValueFromValue(Value const& value) const override
     {
         // TODO: Implement?
         releaseAssert(false);
     }
 
-    bool isSkipLedgerValue(Value const& v) const override
+    bool
+    isSkipLedgerValue(Value const& v) const override
     {
         // TODO: Implement?
         releaseAssert(false);

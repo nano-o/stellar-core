@@ -374,10 +374,10 @@ BallotProtocol::maybeReplaceValueWithSkip(Value& v) const
                    ? std::to_string(waitingTime.value().count())
                    : "nullopt");
 
-    // TODO(22): What do we do in this case? Maybe have some way to feed back into
-    // Herder to start a timer? I really don't think this should be possible,
-    // but if this DOES happen we should probably log an error and start the
-    // timer rather than crash.
+    // TODO(22): What do we do in this case? Maybe have some way to feed back
+    // into Herder to start a timer? I really don't think this should be
+    // possible, but if this DOES happen we should probably log an error and
+    // start the timer rather than crash.
     releaseAssert(waitingTime.has_value());
 
     auto timeout = mSlot.getSCPDriver().getTxSetDownloadTimeout();
@@ -1166,9 +1166,9 @@ BallotProtocol::setConfirmPrepared(SCPBallot const& newC, SCPBallot const& newH)
 
         if (newC.counter != 0)
         {
-            // TODO(25): I *think* this is the setting of `c` corresponding to step
-            // 3 in the paper, as well as that final step in PREPARE from the
-            // IETF paper. Check needs to go here, or in the caller of this
+            // TODO(25): I *think* this is the setting of `c` corresponding to
+            // step 3 in the paper, as well as that final step in PREPARE from
+            // the IETF paper. Check needs to go here, or in the caller of this
             // function (`attemptConfirmPrepared`). Specifically, there is a
             // comment in that function before setting `newC` that says this is
             // step 3 from the paper.
@@ -1196,8 +1196,8 @@ BallotProtocol::setConfirmPrepared(SCPBallot const& newC, SCPBallot const& newH)
                 auto waitingTime =
                     mSlot.getSCPDriver().getTxSetDownloadWaitTime(newC.value);
 
-                // TODO(26): Need to think more about what to do if waitingTime is
-                // nullopt (e.g., transaction set not being fetched, or some
+                // TODO(26): Need to think more about what to do if waitingTime
+                // is nullopt (e.g., transaction set not being fetched, or some
                 // other edge case)
 
                 CLOG_DEBUG(
@@ -1223,12 +1223,12 @@ BallotProtocol::setConfirmPrepared(SCPBallot const& newC, SCPBallot const& newH)
             // catchup this expects maybe valid values?
             else
             {
-                // TODO(29): I don't understand why, but it seems like values can be
-                // "maybe valid" here. Looks like this code path is exercised
-                // during catchup, but before ledger manager "knows" it's in
-                // catchup mode. So I can't just assert as below. So instead I'm
-                // just checking that it's not invalid. That should pass at
-                // least?
+                // TODO(29): I don't understand why, but it seems like values
+                // can be "maybe valid" here. Looks like this code path is
+                // exercised during catchup, but before ledger manager "knows"
+                // it's in catchup mode. So I can't just assert as below. So
+                // instead I'm just checking that it's not invalid. That should
+                // pass at least?
                 // TODO: Seems like this happens when that log message about
                 // "NOT" being fully validated is emitted. Dig into that more.
                 // releaseAssert(validationLevel ==
@@ -1239,8 +1239,8 @@ BallotProtocol::setConfirmPrepared(SCPBallot const& newC, SCPBallot const& newH)
 
                 // Measure and record how long balloting was blocked on this
                 // txset
-                // TODO(30): This metric only works if we end up here only once per
-                // value. I think that's true, but I'm not 100% sure.
+                // TODO(30): This metric only works if we end up here only once
+                // per value. I think that's true, but I'm not 100% sure.
                 mSlot.getSCPDriver().measureAndRecordBallotBlockedOnTxSet(
                     mSlot.getSlotIndex(), newC.value);
 
@@ -2068,10 +2068,11 @@ BallotProtocol::advanceSlot(SCPStatement const& hint)
 
     didWork = attemptConfirmPrepared(hint) || didWork;
 
-    // TODO(31): As far as I can tell, `attemptAcceptCommit` is the first attempt*
-    // function for step 4, and it's not called for any earlier steps. Moreover,
-    // `attemptConfirmCommit` is only for steps 7 and 8. Therefore, I think that
-    // if `didWork` is false at this point, we need to have the preimage by now.
+    // TODO(31): As far as I can tell, `attemptAcceptCommit` is the first
+    // attempt* function for step 4, and it's not called for any earlier steps.
+    // Moreover, `attemptConfirmCommit` is only for steps 7 and 8. Therefore, I
+    // think that if `didWork` is false at this point, we need to have the
+    // preimage by now.
 
     didWork = attemptAcceptCommit(hint) || didWork;
 

@@ -349,8 +349,7 @@ NominationProtocol::getNewValueFromNomination(SCPNomination const& nom)
             CLOG_TRACE(Proto,
                        "NominationProtocol::updateRoundLeaders slot:{} "
                        "attempting to nominate value {} with {} status",
-                       mSlot.getSlotIndex(),
-                       hexAbbrev(value),
+                       mSlot.getSlotIndex(), hexAbbrev(value),
                        SCPDriver::validationLevelToString(vl));
             valueToNominate = mSlot.getSCPDriver().wrapValue(value);
         }
@@ -394,10 +393,12 @@ SCP::EnvelopeState
 NominationProtocol::processEnvelope(SCPEnvelopeWrapperPtr envelope)
 {
     ZoneScoped;
-    CLOG_TRACE(Proto, "NominationProtocol::processEnvelope slot:{} "
+    CLOG_TRACE(Proto,
+               "NominationProtocol::processEnvelope slot:{} "
                "received envelope from node:{}",
                mSlot.getSlotIndex(),
-               mSlot.getSCP().getDriver().toShortString(envelope->getStatement().nodeID));
+               mSlot.getSCP().getDriver().toShortString(
+                   envelope->getStatement().nodeID));
     auto const& st = envelope->getStatement();
     auto const& nom = st.pledges.nominate();
 
@@ -444,8 +445,7 @@ NominationProtocol::processEnvelope(SCPEnvelopeWrapperPtr envelope)
                         Proto,
                         "NominationProtocol::updateRoundLeaders slot:{} "
                         "accepting value {} with {} status in federated accept",
-                        mSlot.getSlotIndex(),
-                        hexAbbrev(v),
+                        mSlot.getSlotIndex(), hexAbbrev(v),
                         SCPDriver::validationLevelToString(vl));
                     mAccepted.emplace(vw);
                     mVotes.emplace(vw);

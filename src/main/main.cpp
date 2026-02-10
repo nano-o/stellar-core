@@ -370,7 +370,7 @@ main(int argc, char* const* argv)
         // Disable XDR hash checking in vnext builds
 #ifndef ENABLE_NEXT_PROTOCOL_VERSION_UNSAFE_FOR_PRODUCTION
 // TODO: Re-enable XDR check
-        //checkXDRFileIdentity();
+// checkXDRFileIdentity();
 #endif
     }
     catch (...)

@@ -2642,18 +2642,22 @@ HerderImpl::verifyStellarValueSignature(StellarValue const& sv)
         // TODO(3): What to do here?
         releaseAssert(false);
     case STELLAR_VALUE_SIGNED:
-        return PubKeyUtils::verifySig(
-            sv.ext.lcValueSignature().nodeID,
-            sv.ext.lcValueSignature().signature,
-            xdr::xdr_to_opaque(mApp.getNetworkID(), ENVELOPE_TYPE_SCPVALUE,
-                               sv.txSetHash, sv.closeTime)).valid;
+        return PubKeyUtils::verifySig(sv.ext.lcValueSignature().nodeID,
+                                      sv.ext.lcValueSignature().signature,
+                                      xdr::xdr_to_opaque(mApp.getNetworkID(),
+                                                         ENVELOPE_TYPE_SCPVALUE,
+                                                         sv.txSetHash,
+                                                         sv.closeTime))
+            .valid;
     case STELLAR_VALUE_SKIP:
     {
         auto const& ov = sv.ext.originalValue();
         return PubKeyUtils::verifySig(
-            ov.lcValueSignature.nodeID, ov.lcValueSignature.signature,
-            xdr::xdr_to_opaque(mApp.getNetworkID(), ENVELOPE_TYPE_SCPVALUE,
-                               ov.txSetHash, sv.closeTime)).valid;
+                   ov.lcValueSignature.nodeID, ov.lcValueSignature.signature,
+                   xdr::xdr_to_opaque(mApp.getNetworkID(),
+                                      ENVELOPE_TYPE_SCPVALUE, ov.txSetHash,
+                                      sv.closeTime))
+            .valid;
     }
     default:
         releaseAssert(false);

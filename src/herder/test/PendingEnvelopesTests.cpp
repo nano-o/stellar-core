@@ -365,8 +365,8 @@ TEST_CASE("PendingEnvelopes recvSCPEnvelope", "[herder]")
         auto& scpDriver = herder.getHerderSCPDriver();
         auto txSetHash = txSet->getContentsHash();
 
-        StellarValue sv = herder.makeStellarValue(
-            txSetHash, 10, emptyUpgradeSteps, s);
+        StellarValue sv =
+            herder.makeStellarValue(txSetHash, 10, emptyUpgradeSteps, s);
 
         SECTION("wrapStellarValue registers and receives tx set")
         {

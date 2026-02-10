@@ -118,8 +118,8 @@ class LoopbackPeer : public Peer
     void setReorderProbability(double d);
 
     // TODO: Docs
-    void setOutgoingMessageFilter(
-        std::function<bool(StellarMessage const& msg)> f);
+    void
+    setOutgoingMessageFilter(std::function<bool(StellarMessage const& msg)> f);
 
     void clearInAndOutQueues();
 
@@ -164,7 +164,7 @@ class LoopbackPeer : public Peer
     using Peer::sendPeers;
 
     void sendMessage(std::shared_ptr<StellarMessage const> msg,
-                             bool log = true) override;
+                     bool log = true) override;
 
     friend class LoopbackPeerConnection;
 };

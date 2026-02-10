@@ -64,13 +64,13 @@ HerderSCPDriver::SCPMetrics::SCPMetrics(Application& app)
     , mFirstToSelfExternalizeLag(app.getMetrics().NewTimer(
           {"scp", "timing", "first-to-self-externalize-lag"}))
     , mSelfToOthersExternalizeLag(app.getMetrics().NewTimer(
-        {"scp", "timing", "self-to-others-externalize-lag"}))
-    , mBallotBlockedOnTxSet(
-          app.getMetrics().NewTimer({"scp", "timing", "ballot-blocked-on-txset"}))
+          {"scp", "timing", "self-to-others-externalize-lag"}))
+    , mBallotBlockedOnTxSet(app.getMetrics().NewTimer(
+          {"scp", "timing", "ballot-blocked-on-txset"}))
     , mSkipExternalized(
-        app.getMetrics().NewCounter({"scp", "skip", "externalized"}))
+          app.getMetrics().NewCounter({"scp", "skip", "externalized"}))
     , mSkipValueReplaced(
-        app.getMetrics().NewCounter({"scp", "skip", "value-replaced"}))
+          app.getMetrics().NewCounter({"scp", "skip", "value-replaced"}))
 {
 }
 
@@ -126,7 +126,8 @@ class SCPHerderEnvelopeWrapper : public SCPEnvelopeWrapper
     // Wrap an SCP envelope `e`, using `herder` to fetch the quorum set. This
     // function inserts hashes corresponding to missing transaction sets into
     // the output parameter `missingTxSets`.
-    explicit SCPHerderEnvelopeWrapper(SCPEnvelope const& e, HerderImpl& herder, std::set<Hash>& missingTxSets)
+    explicit SCPHerderEnvelopeWrapper(SCPEnvelope const& e, HerderImpl& herder,
+                                      std::set<Hash>& missingTxSets)
         : SCPEnvelopeWrapper(e), mHerder(herder)
     {
         releaseAssert(missingTxSets.empty());
@@ -167,7 +168,8 @@ SCPEnvelopeWrapperPtr
 HerderSCPDriver::wrapEnvelope(SCPEnvelope const& envelope)
 {
     std::set<Hash> missingTxSets;
-    auto r = std::make_shared<SCPHerderEnvelopeWrapper>(envelope, mHerder, missingTxSets);
+    auto r = std::make_shared<SCPHerderEnvelopeWrapper>(envelope, mHerder,
+                                                        missingTxSets);
 
     // Register this wrapper for any tx sets that weren't available
     // so we can update it later when the tx set arrives
@@ -885,8 +887,9 @@ HerderSCPDriver::combineCandidates(uint64_t slotIndex,
             auto cApplicableTxSet =
                 cTxSet ? cTxSet->prepareForApply(mApp, lcl.header) : nullptr;
             // releaseAssert(cApplicableTxSet);
-            // TODO(12): I added the `!cTxSet` check here to allow this to proceed
-            // without a tx set, but it seems important that `previousLedgerHash
+            // TODO(12): I added the `!cTxSet` check here to allow this to
+            // proceed without a tx set, but it seems important that
+            // `previousLedgerHash
             // == lcl.hash`. Is that checked later during validation? Should
             // write a test that causes `combineCandidates` to use a tx set with
             // a bad previous ledger hash (can do this easily by ensuring that
@@ -1148,7 +1151,7 @@ HerderSCPDriver::ballotDidHearFromQuorum(uint64_t, SCPBallot const&)
 
 void
 HerderSCPDriver::recordBallotBlockedOnTxSet(uint64_t slotIndex,
-                                             Value const& value)
+                                            Value const& value)
 {
     auto& timing = mSCPExecutionTimes[slotIndex];
     if (timing.mBallotBlockedOnTxSetStart.find(value) ==
@@ -1160,7 +1163,7 @@ HerderSCPDriver::recordBallotBlockedOnTxSet(uint64_t slotIndex,
 
 void
 HerderSCPDriver::measureAndRecordBallotBlockedOnTxSet(uint64_t slotIndex,
-                                                       Value const& value)
+                                                      Value const& value)
 {
     auto it = mSCPExecutionTimes.find(slotIndex);
     if (it != mSCPExecutionTimes.end())
@@ -1567,8 +1570,9 @@ class SCPHerderValueWrapper : public ValueWrapper
         : ValueWrapper(value), mHerder(herder), mTxSetHash(sv.txSetHash)
     {
         mTxSet = mHerder.getTxSet(sv.txSetHash);
-        // mTxSet may be null if tx set hasn't been received yet (parallel downloading).
-        // It will be set later via setTxSet() when the tx set arrives.
+        // mTxSet may be null if tx set hasn't been received yet (parallel
+        // downloading). It will be set later via setTxSet() when the tx set
+        // arrives.
     }
 
     bool

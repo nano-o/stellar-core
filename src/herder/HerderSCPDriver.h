@@ -130,10 +130,12 @@ class HerderSCPDriver : public SCPDriver
 
     // Ballot blocked on txset tracking methods
     // Called when balloting becomes blocked waiting for a txset download
-    void recordBallotBlockedOnTxSet(uint64_t slotIndex, Value const& value) override;
+    void recordBallotBlockedOnTxSet(uint64_t slotIndex,
+                                    Value const& value) override;
     // Called when balloting is unblocked (setting mCommit) to measure and
     // record how long we were blocked
-    void measureAndRecordBallotBlockedOnTxSet(uint64_t slotIndex, Value const& value) override;
+    void measureAndRecordBallotBlockedOnTxSet(uint64_t slotIndex,
+                                              Value const& value) override;
 
     std::optional<VirtualClock::time_point> getPrepareStart(uint64_t slotIndex);
 
@@ -150,7 +152,8 @@ class HerderSCPDriver : public SCPDriver
     void purgeSlots(uint64_t maxSlotIndex, uint64 slotToKeep);
 
     // Called when a tx set is received to update any ValueWrappers that were
-    // created before the tx set was available (for parallel tx set downloading).
+    // created before the tx set was available (for parallel tx set
+    // downloading).
     void onTxSetReceived(Hash const& txSetHash, TxSetXDRFrameConstPtr txSet);
 
     double getExternalizeLag(NodeID const& id) const;
@@ -211,7 +214,8 @@ class HerderSCPDriver : public SCPDriver
     // available. Maps txSetHash -> weak_ptrs to wrappers awaiting that tx set.
     // When onTxSetReceived() is called, we update any waiting wrappers.
     // Cleanup of expired weak_ptrs happens in purgeSlots().
-    std::map<Hash, std::vector<std::weak_ptr<ValueWrapper>>> mPendingTxSetWrappers;
+    std::map<Hash, std::vector<std::weak_ptr<ValueWrapper>>>
+        mPendingTxSetWrappers;
 
     // Registry of EnvelopeWrappers that were created before their tx set was
     // available. Maps txSetHash -> weak_ptrs to wrappers awaiting that tx set.
@@ -242,11 +246,11 @@ class HerderSCPDriver : public SCPDriver
         // download (time spent in kAwaitingDownload before setting mCommit)
         medida::Timer& mBallotBlockedOnTxSet;
 
-    // Tracks how many ledgers we externalized using a skip value.
-    medida::Counter& mSkipExternalized;
-    // Counts replacements of proposed values with the synthesized skip
-    // value.
-    medida::Counter& mSkipValueReplaced;
+        // Tracks how many ledgers we externalized using a skip value.
+        medida::Counter& mSkipExternalized;
+        // Counts replacements of proposed values with the synthesized skip
+        // value.
+        medida::Counter& mSkipValueReplaced;
 
         SCPMetrics(Application& app);
     };

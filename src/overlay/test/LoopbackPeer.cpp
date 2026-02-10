@@ -587,13 +587,12 @@ LoopbackPeer::checkCapacity(std::shared_ptr<LoopbackPeer> otherPeer) const
 }
 
 void
-LoopbackPeer::sendMessage(std::shared_ptr<StellarMessage const> msg,
-                          bool log)
+LoopbackPeer::sendMessage(std::shared_ptr<StellarMessage const> msg, bool log)
 {
-    // TODO(19): Drop here so that we don't run into issues with authenticated MAC
-    // counters. This is hacky and not great. Probably want a boolean in peer1's
-    // Herder called something like "ignoreTxSetRequestsForTesting" or something
-    // that just ignores any inbound requests for tx sets.
+    // TODO(19): Drop here so that we don't run into issues with authenticated
+    // MAC counters. This is hacky and not great. Probably want a boolean in
+    // peer1's Herder called something like "ignoreTxSetRequestsForTesting" or
+    // something that just ignores any inbound requests for tx sets.
     if (mOutgoingMessageFilter(*msg))
     {
         Peer::sendMessage(msg, log);
