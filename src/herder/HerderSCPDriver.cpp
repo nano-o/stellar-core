@@ -333,6 +333,8 @@ HerderSCPDriver::validateValueAgainstLocalState(uint64_t slotIndex,
             if (mPendingEnvelopes.getTxSetWaitingTime(txSetHash).has_value())
             {
                 // TODO: I have yet to see this one fire vv, which is weird.
+                // TODO: ^ The fact that I commented the log line below out
+                // tells me that the above comment was likely out of date?
                 // CLOG_ERROR(Herder,
                 //            "validateValue i:{} marking txSet {} as "
                 //            "kAwaitingDownload - "
@@ -342,8 +344,6 @@ HerderSCPDriver::validateValueAgainstLocalState(uint64_t slotIndex,
             }
             else
             {
-                // TODO(7): Instead of returning "invalid" here, should this
-                // schedule a download?
                 CLOG_DEBUG(Proto, "validateValue i:{} unknown txSet {}",
                            slotIndex, hexAbbrev(txSetHash));
 
@@ -467,10 +467,8 @@ HerderSCPDriver::extractValidValue(uint64_t slotIndex, Value const& value)
         return nullptr;
     }
     ValueWrapperPtr res;
-    // TODO(9): Should this conditional accept "kAwaitingDownload" too? I think
-    // so, given this only seems to care about upgrades (not txset values).
     if (validateValueAgainstLocalState(slotIndex, b, true) >=
-        SCPDriver::kFullyValidatedValue)
+        SCPDriver::kAwaitingDownload)
     {
         // remove the upgrade steps we don't like
         LedgerUpgradeType thisUpgradeType;
@@ -740,7 +738,6 @@ compareTxSets(ApplicableTxSetFrameConstPtr const& l,
     if (protocolVersionStartsFrom(header.ledgerVersion,
                                   SOROBAN_PROTOCOL_VERSION))
     {
-        // TODO(10): Error handling check that encoded sizes have a values?
         if (lEncodedSize.value() != rEncodedSize.value())
         {
             // Look for the smallest encoded size.
