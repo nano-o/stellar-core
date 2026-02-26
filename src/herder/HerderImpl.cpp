@@ -887,14 +887,10 @@ HerderImpl::recvSCPEnvelope(SCPEnvelope const& envelope)
     else
     {
         SCPStatementType type = envelope.statement.pledges.type();
-        // TODO(1): I gated this behind an application state check because there
-        // seem to be some bugs with catchup and `kAwaitingDownload` values
-        // making it further than they should. I don't think this state check is
-        // the right long-term solution, but for the prototype it's probably
-        // fine.  Specifically, I'm concerned about how this all works if a
-        // running node loses sync. Will there be issues with flipping the
-        // feature off and on again while running? Feels like downstream code
-        // should handle this, but I'm not sure how at the moment.
+        // Allow parallel tx set downloading if the node is in sync and this is
+        // a NOMINATE or PREPARE message. Technically both of these criteria
+        // should be properly handled downstream, but this provides some
+        // additional assurance.
         if (mApp.getState() == Application::State::APP_SYNCED_STATE &&
             status == Herder::ENVELOPE_STATUS_FETCHING &&
             (type == SCP_ST_NOMINATE || type == SCP_ST_PREPARE))
@@ -903,11 +899,6 @@ HerderImpl::recvSCPEnvelope(SCPEnvelope const& envelope)
             ZoneText(txt.c_str(), txt.size());
 
             // If we have the quorum set, then proceed without the tx set.
-            //
-            // TODO(2): In the draft PR this is gated behind a check that the
-            // message is a nomination message. We definitely want to go further
-            // than that, but should there be a limit? Is there any harm to
-            // proceeding without limit?
             auto qSetHash = Slot::getCompanionQuorumSetHashFromStatement(
                 envelope.statement);
             auto maybeQSet = mApp.getHerder().getQSet(qSetHash);
