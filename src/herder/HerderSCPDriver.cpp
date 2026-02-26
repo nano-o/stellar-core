@@ -222,7 +222,6 @@ HerderSCPDriver::checkCloseTime(uint64_t slotIndex, uint64_t lastCloseTime,
     return true;
 }
 
-// TODO(6): Does this need updating for "kAwaitingDownload"?
 SCPDriver::ValidationLevel
 HerderSCPDriver::validatePastOrFutureValue(
     uint64_t slotIndex, StellarValue const& b,
