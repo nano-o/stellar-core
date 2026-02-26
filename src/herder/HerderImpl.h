@@ -228,7 +228,7 @@ class HerderImpl : public Herder
     // helper function to sign envelopes
     void signEnvelope(SecretKey const& s, SCPEnvelope& envelope);
 
-    // helper function to verify SCPValues are signed
+    // helper function to verify SCPValues signatures
     bool verifyStellarValueSignature(StellarValue const& sv);
 
     size_t getMaxQueueSizeOps() const override;

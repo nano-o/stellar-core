@@ -2630,7 +2630,7 @@ HerderImpl::verifyStellarValueSignature(StellarValue const& sv)
     switch (sv.ext.v())
     {
     case STELLAR_VALUE_BASIC:
-        // TODO(3): What to do here?
+        // This function should never be called with an unsigned value
         releaseAssert(false);
     case STELLAR_VALUE_SIGNED:
         return PubKeyUtils::verifySig(sv.ext.lcValueSignature().nodeID,
