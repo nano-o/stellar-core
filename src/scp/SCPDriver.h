@@ -111,7 +111,8 @@ class SCPDriver
 
     // `getTxSetDownloadWaitTime` returns how long the fetcher has been waiting
     // for the transaction set identified by @p hash. Returns nullopt if the
-    // transaction set is not being fetched.
+    // transaction set is not being fetched. May throw if `hash` cannot be
+    // converted to a `StellarValue`.
     virtual std::optional<std::chrono::milliseconds>
     getTxSetDownloadWaitTime(Value const& hash) const = 0;
 

@@ -76,7 +76,8 @@ class HerderSCPDriver : public SCPDriver
     std::string toShortString(NodeID const& pk) const override;
     std::string getValueString(Value const& v) const override;
 
-    // TODO: Docs
+    // TODO: Docs. Mention that this function can throw if `v` cannot be
+    // converted to a `StellarValue`
     Value makeSkipLedgerValueFromValue(Value const& v) const override;
 
     // TODO(4): Do I even need this function?

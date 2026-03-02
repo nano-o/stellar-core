@@ -523,10 +523,7 @@ Value
 HerderSCPDriver::makeSkipLedgerValueFromValue(Value const& v) const
 {
     ZoneScoped;
-    StellarValue originalValue;
-    bool success = toStellarValue(v, originalValue);
-    // TODO: Handle failure
-    releaseAssert(success);
+    StellarValue originalValue = toStellarValueOrThrow(v);
 
     StellarValue sv;
     sv.ext.v(STELLAR_VALUE_SKIP);
@@ -969,12 +966,7 @@ HerderSCPDriver::getUpgradeNominationTimeoutLimit() const
 std::optional<std::chrono::milliseconds>
 HerderSCPDriver::getTxSetDownloadWaitTime(Value const& v) const
 {
-    StellarValue sv;
-    bool success = toStellarValue(v, sv);
-
-    // TODO(13): Handle error here
-    releaseAssert(success);
-
+    StellarValue sv = toStellarValueOrThrow(v);
     return mPendingEnvelopes.getTxSetWaitingTime(sv.txSetHash);
 }
 
@@ -1068,8 +1060,7 @@ HerderSCPDriver::valueExternalized(uint64_t slotIndex, Value const& value)
     }
 }
 
-void
-HerderSCPDriver::noteSkipValueReplaced(uint64_t)
+void HerderSCPDriver::noteSkipValueReplaced(uint64_t)
 {
     ZoneScoped;
     mSCPMetrics.mSkipValueReplaced.inc();
@@ -1597,14 +1588,7 @@ class SCPHerderValueWrapper : public ValueWrapper
 ValueWrapperPtr
 HerderSCPDriver::wrapValue(Value const& val)
 {
-    StellarValue sv;
-    auto b = toStellarValue(val, sv);
-    if (!b)
-    {
-        throw std::runtime_error(
-            fmt::format(FMT_STRING("Invalid value in SCPHerderValueWrapper {}"),
-                        binToHex(val)));
-    }
+    StellarValue sv = toStellarValueOrThrow(val);
     auto res = std::make_shared<SCPHerderValueWrapper>(sv, val, mHerder);
 
     // If tx set wasn't available, register this wrapper to be updated later
