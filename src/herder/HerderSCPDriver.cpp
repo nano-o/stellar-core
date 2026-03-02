@@ -872,25 +872,28 @@ HerderSCPDriver::combineCandidates(uint64_t slotIndex,
         {
             auto const& sv = *it;
             auto cTxSet = mPendingEnvelopes.getTxSet(sv.txSetHash);
-            // TODO(11): I've changed this function to combine as follows:
-            // * If both `highestTxSet` and `cApplicableTxSet` exist, choose the
-            //   largest one (like today)
-            // * If only one exists, choose the one that exists
-            // * If neither exists, choose the one with the highest hash
-            // Add this to the design doc and solicit feedback on it ^^
+            // TODO(11): Combining strategy when tx sets may be missing:
+            // * Both exist: choose the largest (unchanged from before)
+            // * One exists: choose the one that exists
+            // * Neither exists: compare by hash
+            // This is safe because combineCandidates doesn't need to be
+            // deterministic across nodes -- balloting handles divergence.
+            // Note: this may bias toward smaller tx sets (they download
+            // faster and are more likely to be present), which seems
+            // acceptable but deserves further evaluation.
             // releaseAssert(cTxSet);
             // Only valid applicable tx sets should be combined.
             auto cApplicableTxSet =
                 cTxSet ? cTxSet->prepareForApply(mApp, lcl.header) : nullptr;
             // releaseAssert(cApplicableTxSet);
-            // TODO(12): I added the `!cTxSet` check here to allow this to
-            // proceed without a tx set, but it seems important that
-            // `previousLedgerHash
-            // == lcl.hash`. Is that checked later during validation? Should
-            // write a test that causes `combineCandidates` to use a tx set with
-            // a bad previous ledger hash (can do this easily by ensuring that
-            // the node doesn't have any candidates, and making all candidates
-            // "bad") to check that it gets caught later.
+            // TODO(12): When cTxSet is null we skip the previousLedgerHash
+            // check here, but it will be caught later: once the tx set is
+            // downloaded, checkAndCacheTxSetValid (called from validateValue)
+            // checks previousLedgerHash == lcl.hash before prepareForApply.
+            // A mismatch makes validateValue return kInvalidValue, preventing
+            // the node from voting to commit.
+            // Should write a test that causes combineCandidates to use a tx
+            // set with a bad previous ledger hash to verify this.
             if (!cTxSet || cTxSet->previousLedgerHash() == lcl.hash)
             {
 
