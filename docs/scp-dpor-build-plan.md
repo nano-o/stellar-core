@@ -421,3 +421,25 @@ The DPOR-facing side should mirror the existing prototype structure:
   include path in `common.mk`, adding `src/scp/test/SCPDporSmokeTests.cpp`,
   and verifying `src/stellar-core test '[scp][dpor]'` passes after regenerating
   the autotools build files.
+- 2026-03-11: Landed the Milestone 1 harness skeleton by adding
+  `src/scp/test/DporNominationSimulation.{h,cpp}` and
+  `src/scp/test/SCPDporNominationTests.cpp`, creating a deterministic
+  nomination-only SCP simulation that reproduces a simple leader-driven flow to
+  the first `PREPARE`.
+- 2026-03-11: Refined the nomination harness by splitting nomination and ballot
+  timeout handling, documenting why both raw and normalized quorum sets are
+  stored, and adding explicit nomination-boundary tracking so tests can detect
+  the first non-nomination envelope directly.
+- 2026-03-11: Tightened nomination-boundary handling by preventing the first
+  non-nomination envelope from being requeued into the simulated network,
+  asserting that behavior in the nomination test, and regrouping the
+  simulation-facing API and `SCPDriver` hooks in
+  `src/scp/test/DporNominationSimulation.h`.
+- 2026-03-11: Landed the Milestone 2 replay adapter by adding
+  `src/scp/test/DporNominationDporAdapter.{h,cpp}` and
+  `src/scp/test/SCPDporReplayTests.cpp`, encoding nomination-envelope
+  deliveries as DPOR values, replaying trace observations through fresh SCP
+  nodes one step at a time, and reconstructing the first nomination-boundary
+  `PREPARE` from a traced run. The adapter also replays bottom observations as
+  nomination-timer firings, but a dedicated timer-fire test did not land in
+  this commit.
