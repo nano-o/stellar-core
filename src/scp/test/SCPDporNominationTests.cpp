@@ -122,6 +122,7 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
     REQUIRE(boundaryEnvelope != nullptr);
     requirePrepareEnvelope(*boundaryEnvelope, nodeIDs[0], localQSetHash(0), 0,
                            SCPBallot{1, xValue});
+    REQUIRE(simulation.getNode(0).takePendingEnvelopes().empty());
     REQUIRE_FALSE(
         simulation.getNode(0).hasActiveTimer(0, Slot::NOMINATION_TIMER));
 }

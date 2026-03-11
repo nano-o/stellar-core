@@ -36,6 +36,7 @@ class DporNominationNode : public SCPDriver
     explicit DporNominationNode(SecretKey const& secretKey,
                                 SCPQuorumSet const& localQSet);
 
+    // Simulation-facing API.
     NodeID const&
     getNodeID() const;
 
@@ -81,6 +82,7 @@ class DporNominationNode : public SCPDriver
 
     SCPEnvelope const* getNominationBoundaryEnvelope() const;
 
+    // SCPDriver hooks used by the embedded SCP instance.
     void signEnvelope(SCPEnvelope& envelope) override;
     SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
     void emitEnvelope(SCPEnvelope const& envelope) override;
@@ -104,20 +106,23 @@ class DporNominationNode : public SCPDriver
   private:
     using TimerKey = std::pair<uint64, int>;
 
+    // Core SCP object and deterministic test configuration.
     SecretKey mSecretKey;
     SCP mSCP;
-    std::map<Hash, SCPQuorumSetPtr> mQuorumSets;
-    std::vector<SCPEnvelope> mEmittedEnvelopes;
-    std::vector<SCPEnvelope> mPendingEnvelopes;
-    std::map<TimerKey, TimerState> mTimers;
     std::function<uint64(Value const&)> mValueHash;
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
-    std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
+
+    // Simulation-observed state.
+    std::map<Hash, SCPQuorumSetPtr> mQuorumSets;
+    std::vector<SCPEnvelope> mEmittedEnvelopes;
+    std::vector<SCPEnvelope> mPendingEnvelopes;
+    std::map<TimerKey, TimerState> mTimers;
+    std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
 };
 
 class DporNominationSimulation

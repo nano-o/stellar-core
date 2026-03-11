@@ -208,13 +208,17 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
-    if (!mNominationBoundaryEnvelope &&
-        envelope.statement.pledges.type() != SCP_ST_NOMINATE)
+    auto const crossesBoundary =
+        envelope.statement.pledges.type() != SCP_ST_NOMINATE;
+    if (!mNominationBoundaryEnvelope && crossesBoundary)
     {
         mNominationBoundaryEnvelope = envelope;
     }
     mEmittedEnvelopes.push_back(envelope);
-    mPendingEnvelopes.push_back(envelope);
+    if (!crossesBoundary)
+    {
+        mPendingEnvelopes.push_back(envelope);
+    }
 }
 
 SCPDriver::ValidationLevel
