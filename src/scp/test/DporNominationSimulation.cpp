@@ -44,6 +44,9 @@ DporNominationNode::DporNominationNode(SecretKey const& secretKey,
     , mSCP(*this, mSecretKey.getPublicKey(), true, localQSet)
     , mValueHash(defaultValueHash)
 {
+    // Register both the caller-provided qset and the LocalNode-normalized form,
+    // because emitted envelopes carry the normalized hash while future
+    // heterogeneous tests may still want access to the original shape.
     storeQuorumSet(localQSet);
     storeQuorumSet(mSCP.getLocalNode()->getQuorumSet());
 }
@@ -173,6 +176,19 @@ DporNominationNode::fireTimer(uint64 slotIndex, int timerID)
     return true;
 }
 
+bool
+DporNominationNode::hasCrossedNominationBoundary() const
+{
+    return mNominationBoundaryEnvelope.has_value();
+}
+
+SCPEnvelope const*
+DporNominationNode::getNominationBoundaryEnvelope() const
+{
+    return mNominationBoundaryEnvelope ? &*mNominationBoundaryEnvelope
+                                       : nullptr;
+}
+
 void
 DporNominationNode::signEnvelope(SCPEnvelope&)
 {
@@ -192,6 +208,11 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
+    if (!mNominationBoundaryEnvelope &&
+        envelope.statement.pledges.type() != SCP_ST_NOMINATE)
+    {
+        mNominationBoundaryEnvelope = envelope;
+    }
     mEmittedEnvelopes.push_back(envelope);
     mPendingEnvelopes.push_back(envelope);
 }
@@ -269,9 +290,15 @@ DporNominationNode::stopTimer(uint64 slotIndex, int timerID)
 }
 
 std::chrono::milliseconds
-DporNominationNode::computeTimeout(uint32 roundNumber, bool)
+DporNominationNode::computeTimeout(uint32 roundNumber, bool isNomination)
 {
-    return std::chrono::milliseconds(1000 * roundNumber);
+    auto const initialTimeoutMS =
+        isNomination ? mInitialNominationTimeoutMS : mInitialBallotTimeoutMS;
+    auto const incrementTimeoutMS = isNomination
+                                        ? mIncrementNominationTimeoutMS
+                                        : mIncrementBallotTimeoutMS;
+    return std::chrono::milliseconds(initialTimeoutMS +
+                                     (roundNumber - 1) * incrementTimeoutMS);
 }
 
 DporNominationSimulation::DporNominationSimulation(

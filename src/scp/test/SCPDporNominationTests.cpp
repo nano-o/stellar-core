@@ -116,15 +116,11 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
 
     REQUIRE(simulation.broadcastPendingEnvelopesOnce() > 0);
 
-    auto const& finalLeaderEnvelopes = simulation.getNode(0).getEmittedEnvelopes();
-    auto prepareIt = std::find_if(finalLeaderEnvelopes.begin(),
-                                  finalLeaderEnvelopes.end(),
-                                  [](SCPEnvelope const& envelope) {
-                                      return envelope.statement.pledges.type() ==
-                                             SCP_ST_PREPARE;
-                                  });
-    REQUIRE(prepareIt != finalLeaderEnvelopes.end());
-    requirePrepareEnvelope(*prepareIt, nodeIDs[0], localQSetHash(0), 0,
+    auto const* boundaryEnvelope =
+        simulation.getNode(0).getNominationBoundaryEnvelope();
+    REQUIRE(simulation.getNode(0).hasCrossedNominationBoundary());
+    REQUIRE(boundaryEnvelope != nullptr);
+    requirePrepareEnvelope(*boundaryEnvelope, nodeIDs[0], localQSetHash(0), 0,
                            SCPBallot{1, xValue});
     REQUIRE_FALSE(
         simulation.getNode(0).hasActiveTimer(0, Slot::NOMINATION_TIMER));

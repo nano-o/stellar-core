@@ -77,6 +77,10 @@ class DporNominationNode : public SCPDriver
 
     bool fireTimer(uint64 slotIndex, int timerID);
 
+    bool hasCrossedNominationBoundary() const;
+
+    SCPEnvelope const* getNominationBoundaryEnvelope() const;
+
     void signEnvelope(SCPEnvelope& envelope) override;
     SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
     void emitEnvelope(SCPEnvelope const& envelope) override;
@@ -109,6 +113,11 @@ class DporNominationNode : public SCPDriver
     std::function<uint64(Value const&)> mValueHash;
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
+    std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
+    uint32_t mInitialNominationTimeoutMS{1000};
+    uint32_t mIncrementNominationTimeoutMS{1000};
+    uint32_t mInitialBallotTimeoutMS{1000};
+    uint32_t mIncrementBallotTimeoutMS{1000};
 };
 
 class DporNominationSimulation
