@@ -1,0 +1,169 @@
+# dev-container
+
+Sandboxed CLI development container for `stellar-core` and the planned in-tree
+DPOR integration. This mirrors the standalone workflow in `~/code/dpor`:
+build an image once, run it against the mounted repo, and do all build/test
+work inside the container.
+
+## Why a container?
+
+Coding agents and local shell workflows both run arbitrary commands. The
+container limits the blast radius: by default it only sees the mounted project
+directory plus the bind-mounted agent state directories (`~/.codex` and,
+optionally, `~/.claude`). If something goes wrong, `git checkout` restores the
+working tree and nothing outside the mounts is touched.
+
+## Quick start
+
+```bash
+# 1. Build the image (once, or after Dockerfile changes)
+dev-container/build-image.sh
+
+# 2. Run it from the repo root
+dev-container/run-container.sh
+```
+
+Inside the container you land in `/home/dev/project` and can build normally:
+
+```bash
+git submodule update --init --recursive
+./autogen.sh
+./configure --enable-tests
+make -j"$(nproc)"
+```
+
+For a heavier CI-like pass with temporary PostgreSQL:
+
+```bash
+./ci-build.sh --use-temp-db --protocol current
+```
+
+Once the DPOR integration lands as `external/dpor`, no special container
+handling is needed beyond updating submodules:
+
+```bash
+git submodule update --init --recursive external/dpor
+```
+
+## What's in the image
+
+| Category | Packages / tooling |
+|---|---|
+| C++ toolchains | `clang-20`, `gcc-14`, `g++-14`, `clang-format-20`, `clangd-20`, `gdb`, `lldb` |
+| Build system | `autoconf`, `automake`, `libtool`, `pkg-config`, `cmake`, `ninja-build`, `make` |
+| Static analysis | `ccache`, `bear`, `cppcheck`, `iwyu` |
+| Databases / tests | `postgresql`, `libpq-dev`, `sqlite3` |
+| Rust | repo-pinned root toolchain via `install-rust.sh`, `rustfmt`, `clippy`, `rust-src`, `wasm32-unknown-unknown`, `wasm32v1-none`, `cargo-cache`, `cargo-sweep` |
+| AI agents | Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`) |
+| Shell / editor | `bash`, `tmux`, `vim`, `fzf`, `ripgrep`, `fd`, `bat`, `jq`, `rsync` |
+| Networking | `curl`, `wget`, `openssh-client` |
+
+The image runs as a non-root `dev` user (UID/GID matched to the host) with
+passwordless `sudo`.
+
+By default the environment uses `clang-20`:
+
+```bash
+echo "$CC"   # clang-20
+echo "$CXX"  # clang++-20
+```
+
+Switch to GCC in the container if you want parity with the other CI lane:
+
+```bash
+export CC=gcc
+export CXX=g++
+./ci-build.sh --use-temp-db --protocol current
+```
+
+## Git identity
+
+On startup, `run-container.sh` reads `user.name` and `user.email` from your
+host global Git config and applies them inside the container. No other host Git
+config is imported.
+
+## Agent login
+
+The launcher bind-mounts `~/.codex` into the container so Codex auth persists
+across runs. If you also want Claude Code, pass `--mount-claude-dir` and log in
+inside the container:
+
+```bash
+codex auth
+claude login
+```
+
+## Debug modes
+
+For GDB, LLDB, `strace`, or sanitizer workflows that need ptrace support:
+
+```bash
+dev-container/run-container.sh --debug
+```
+
+For fully privileged debugging (ASLR disabled, unrestricted ptrace):
+
+```bash
+dev-container/run-container.sh --debug-full
+```
+
+The default mode keeps the hardened baseline enabled.
+
+## Hardening
+
+The default container adds a few restrictions on top of standard Docker
+isolation:
+
+| Measure | Flag | Effect |
+|---|---|---|
+| Drop capabilities | `--cap-drop=ALL` | Removes default Linux capabilities |
+| No new privileges | `--security-opt=no-new-privileges` | Blocks setuid/setgid escalation |
+| PID limit | `--pids-limit=1024` | Prevents runaway process trees |
+| Memory limit | `--memory=32g` | Caps memory usage during builds/tests |
+
+`--debug` and `--debug-full` selectively relax these restrictions.
+
+## Options
+
+```text
+dev-container/run-container.sh [tag] [options] [-- command...]
+```
+
+| Option | Description |
+|---|---|
+| `tag` | Docker image tag (default: `stellar-core-dev`) |
+| `--name NAME` | Custom container name (default: `dev-<project>`) |
+| `--debug` | Add `SYS_PTRACE` and disable seccomp/apparmor |
+| `--debug-full` | Privileged mode with ASLR and ptrace scope disabled |
+| `--persist` | Keep the stopped container instead of removing it |
+| `--mount-claude-dir` | Bind-mount `~/.claude` into the container |
+| `-- command...` | Override the default shell |
+
+If you use `--persist`, reconnect later with `docker start -ai <container>`.
+
+## Rebuilding
+
+```bash
+# normal rebuild
+dev-container/build-image.sh
+
+# force a full rebuild
+dev-container/build-image.sh --no-cache
+```
+
+If you use an alternate Ubuntu mirror, set `APT_MIRROR` before building:
+
+```bash
+APT_MIRROR=mirror://mirrors.ubuntu.com/mirrors.txt dev-container/build-image.sh
+```
+
+## Files
+
+| File | Purpose |
+|---|---|
+| `Dockerfile` | Image definition |
+| `build-image.sh` | Build the image with host UID/GID |
+| `run-container.sh` | Launch the container with the repo + agent state mounted |
+| `tmux.conf` | tmux defaults (vim keys, OSC52 clipboard, 256-color) |
+| `osc52-tmux` | Clipboard helper for tmux over SSH/containers |
+| `project-title.sh` | Sets the terminal title to the project name |
