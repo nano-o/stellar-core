@@ -37,6 +37,7 @@ endif # USE_TRACY
 
 if BUILD_TESTS
 AM_CPPFLAGS += -DBUILD_TESTS=1
+AM_CPPFLAGS += -I"$(top_srcdir)/external/dpor/include"
 endif # BUILD_TESTS
 
 if USE_SPDLOG
