@@ -57,6 +57,8 @@ struct ReplayFixture
         , mAdapter(mValidators, mQSet, 0, mPreviousValue,
                    std::vector<Value>{mXValue, mYValue, mYValue})
     {
+        // These Milestone 2 replay checks stay below candidate combination, so
+        // the node driver's default combineCandidates implementation is enough.
         mAdapter.setPriorityLookup([nodeIDs = mNodeIDs](NodeID const& nodeID) {
             return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max()
                                         : 1;
@@ -104,9 +106,9 @@ requireReceive(DporNominationDporAdapter::EventLabel const& label)
 }
 
 void
-deliverPendingEnvelopesCapturingTrace(DporNominationSimulation& simulation,
-                                      ThreadId destinationThread,
-                                      DporNominationDporAdapter::ThreadTrace& trace)
+deliverAndRecordTraceForThread(
+    DporNominationSimulation& simulation, ThreadId destinationThread,
+    DporNominationDporAdapter::ThreadTrace& trace)
 {
     for (std::size_t senderIndex = 0; senderIndex < simulation.size();
          ++senderIndex)
@@ -217,9 +219,9 @@ TEST_CASE("dpor nomination replay detects the first ballot boundary",
     REQUIRE_FALSE(simulation.getNode(3).nominate(0, yValue, previousValue));
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    deliverPendingEnvelopesCapturingTrace(simulation, 0, leaderTrace);
-    deliverPendingEnvelopesCapturingTrace(simulation, 0, leaderTrace);
-    deliverPendingEnvelopesCapturingTrace(simulation, 0, leaderTrace);
+    deliverAndRecordTraceForThread(simulation, 0, leaderTrace);
+    deliverAndRecordTraceForThread(simulation, 0, leaderTrace);
+    deliverAndRecordTraceForThread(simulation, 0, leaderTrace);
     REQUIRE(simulation.getNode(0).hasCrossedNominationBoundary());
 
     auto boundaryEnvelope = adapter.getNominationBoundaryEnvelope(0, leaderTrace);

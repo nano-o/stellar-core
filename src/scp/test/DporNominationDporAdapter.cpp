@@ -6,8 +6,8 @@
 
 #include "scp/Slot.h"
 
-#include <deque>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 
@@ -29,17 +29,6 @@ toThreadID(std::size_t nodeIndex)
     return static_cast<ThreadId>(nodeIndex);
 }
 
-struct ThreadReplayState
-{
-    ThreadReplayState(SecretKey const& secretKey, SCPQuorumSet const& qSet)
-        : mNode(secretKey, qSet)
-    {
-    }
-
-    DporNominationNode mNode;
-    std::deque<DporNominationDporAdapter::SendLabel> mPendingSends;
-};
-
 void
 requireNominationEnvelope(SCPEnvelope const& envelope)
 {
@@ -53,8 +42,7 @@ DporNominationDporAdapter::ReceiveLabel
 makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
 {
     auto matcher = [destinationThread](DporNominationValue const& value) {
-        return value.mDestinationThread == destinationThread &&
-               value.mEnvelope.statement.pledges.type() == SCP_ST_NOMINATE;
+        return value.mDestinationThread == destinationThread;
     };
 
     if (nonBlocking)
@@ -66,44 +54,12 @@ makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
         std::move(matcher));
 }
 
-void
-queuePendingNominationSends(ThreadReplayState& state, std::size_t senderIndex,
-                            uint64_t slotIndex, std::size_t validatorCount)
-{
-    auto pendingEnvelopes = state.mNode.takePendingEnvelopes();
-    if (state.mNode.hasCrossedNominationBoundary() && !pendingEnvelopes.empty())
-    {
-        throw std::logic_error(
-            "nomination replay does not support pending nomination sends after "
-            "crossing the nomination boundary");
-    }
-
-    auto const senderThread = toThreadID(senderIndex);
-    for (auto const& envelope : pendingEnvelopes)
-    {
-        requireNominationEnvelope(envelope);
-        for (std::size_t receiverIndex = 0; receiverIndex < validatorCount;
-             ++receiverIndex)
-        {
-            if (receiverIndex == senderIndex)
-            {
-                continue;
-            }
-            auto const receiverThread = toThreadID(receiverIndex);
-            state.mPendingSends.push_back(
-                DporNominationDporAdapter::SendLabel{
-                    .destination = receiverThread,
-                    .value = DporNominationValue{
-                        .mSenderThread = senderThread,
-                        .mDestinationThread = receiverThread,
-                        .mSlotIndex = slotIndex,
-                        .mEnvelope = envelope,
-                    },
-                });
-        }
-    }
 }
 
+DporNominationDporAdapter::ReplayState::ReplayState(SecretKey const& secretKey,
+                                                    SCPQuorumSet const& qSet)
+    : mNode(secretKey, qSet)
+{
 }
 
 DporNominationDporAdapter::DporNominationDporAdapter(
@@ -161,6 +117,108 @@ DporNominationDporAdapter::setCombineCandidates(
     mCombineCandidates = fn;
 }
 
+void
+DporNominationDporAdapter::configureNode(DporNominationNode& node) const
+{
+    if (mPriorityLookup)
+    {
+        node.setPriorityLookup(mPriorityLookup);
+    }
+    if (mValueHash)
+    {
+        node.setValueHash(mValueHash);
+    }
+    if (mCombineCandidates)
+    {
+        node.setCombineCandidates(mCombineCandidates);
+    }
+}
+
+void
+DporNominationDporAdapter::initializeNode(ReplayState& state,
+                                          std::size_t nodeIndex) const
+{
+    configureNode(state.mNode);
+    state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
+                         mPreviousValue);
+    queuePendingNominationSends(state, nodeIndex);
+}
+
+void
+DporNominationDporAdapter::replayObservation(DporNominationNode& node,
+                                             std::size_t nodeIndex,
+                                             ObservedValue const& observed) const
+{
+    auto const localThread = toThreadID(nodeIndex);
+    if (observed.is_bottom())
+    {
+        if (!node.fireTimer(mSlotIndex, Slot::NOMINATION_TIMER))
+        {
+            throw std::logic_error(
+                "trace requested a timer firing without an active nomination "
+                "timer");
+        }
+        return;
+    }
+
+    auto const& delivery = observed.value();
+    if (delivery.mDestinationThread != localThread)
+    {
+        throw std::logic_error(
+            "trace delivered an envelope to the wrong thread");
+    }
+    if (delivery.mSlotIndex != mSlotIndex)
+    {
+        throw std::logic_error("trace delivered an envelope for the wrong slot");
+    }
+    requireNominationEnvelope(delivery.mEnvelope);
+    node.receiveEnvelope(delivery.mEnvelope);
+}
+
+void
+DporNominationDporAdapter::discardPendingEnvelopes(DporNominationNode& node) const
+{
+    static_cast<void>(node.takePendingEnvelopes());
+}
+
+void
+DporNominationDporAdapter::queuePendingNominationSends(
+    ReplayState& state, std::size_t senderIndex) const
+{
+    auto pendingEnvelopes = state.mNode.takePendingEnvelopes();
+    if (state.mNode.hasCrossedNominationBoundary() && !pendingEnvelopes.empty())
+    {
+        throw std::logic_error(
+            "nomination replay does not support pending nomination sends after "
+            "crossing the nomination boundary");
+    }
+
+    auto const senderThread = toThreadID(senderIndex);
+    for (auto const& envelope : pendingEnvelopes)
+    {
+        requireNominationEnvelope(envelope);
+        for (std::size_t receiverIndex = 0; receiverIndex < mValidators.size();
+             ++receiverIndex)
+        {
+            if (receiverIndex == senderIndex)
+            {
+                continue;
+            }
+            auto const receiverThread = toThreadID(receiverIndex);
+            state.mPendingSends.push_back(
+                SendLabel{
+                    .destination = receiverThread,
+                    .value = DporNominationValue{
+                        .mSenderThread = senderThread,
+                        .mDestinationThread = receiverThread,
+                        .mSlotIndex = mSlotIndex,
+                        .mEnvelope = envelope,
+                    },
+                });
+        }
+    }
+}
+
 std::optional<DporNominationDporAdapter::EventLabel>
 DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
                                             ThreadTrace const& trace,
@@ -171,23 +229,8 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
         throw std::out_of_range("node index out of range");
     }
 
-    ThreadReplayState state(mValidators.at(nodeIndex), mQSet);
-    if (mPriorityLookup)
-    {
-        state.mNode.setPriorityLookup(mPriorityLookup);
-    }
-    if (mValueHash)
-    {
-        state.mNode.setValueHash(mValueHash);
-    }
-    if (mCombineCandidates)
-    {
-        state.mNode.setCombineCandidates(mCombineCandidates);
-    }
-
-    state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
-                         mPreviousValue);
-    queuePendingNominationSends(state, nodeIndex, mSlotIndex, mValidators.size());
+    ReplayState state(mValidators.at(nodeIndex), mQSet);
+    initializeNode(state, nodeIndex);
 
     std::size_t eventCount = 0;
     std::size_t observedCount = 0;
@@ -229,39 +272,9 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
                 "requested step");
         }
 
-        auto const& observed = trace.at(observedCount++);
-        if (observed.is_bottom())
-        {
-            if (!hasNominationTimer)
-            {
-                throw std::logic_error(
-                    "bottom observation without an active nomination timer");
-            }
-            if (!state.mNode.fireTimer(mSlotIndex, Slot::NOMINATION_TIMER))
-            {
-                throw std::logic_error(
-                    "failed to fire the active nomination timer");
-            }
-        }
-        else
-        {
-            auto const& delivery = observed.value();
-            if (delivery.mDestinationThread != localThread)
-            {
-                throw std::logic_error(
-                    "trace delivered an envelope to the wrong thread");
-            }
-            if (delivery.mSlotIndex != mSlotIndex)
-            {
-                throw std::logic_error(
-                    "trace delivered an envelope for the wrong slot");
-            }
-            requireNominationEnvelope(delivery.mEnvelope);
-            state.mNode.receiveEnvelope(delivery.mEnvelope);
-        }
+        replayObservation(state.mNode, nodeIndex, trace.at(observedCount++));
 
-        queuePendingNominationSends(state, nodeIndex, mSlotIndex,
-                                    mValidators.size());
+        queuePendingNominationSends(state, nodeIndex);
     }
 }
 
@@ -269,13 +282,14 @@ DporNominationDporAdapter::Program
 DporNominationDporAdapter::makeProgram() const
 {
     Program program;
+    auto self = std::make_shared<DporNominationDporAdapter const>(*this);
     for (std::size_t nodeIndex = 0; nodeIndex < mValidators.size(); ++nodeIndex)
     {
         program.threads[toThreadID(nodeIndex)] =
-            [adapter = *this, nodeIndex](
+            [self, nodeIndex](
                 ThreadTrace const& trace,
                 std::size_t step) -> std::optional<EventLabel> {
-            return adapter.captureNextEvent(nodeIndex, trace, step);
+            return self->captureNextEvent(nodeIndex, trace, step);
         };
     }
     return program;
@@ -290,60 +304,22 @@ DporNominationDporAdapter::getNominationBoundaryEnvelope(
         throw std::out_of_range("node index out of range");
     }
 
-    DporNominationNode node(mValidators.at(nodeIndex), mQSet);
-    if (mPriorityLookup)
-    {
-        node.setPriorityLookup(mPriorityLookup);
-    }
-    if (mValueHash)
-    {
-        node.setValueHash(mValueHash);
-    }
-    if (mCombineCandidates)
-    {
-        node.setCombineCandidates(mCombineCandidates);
-    }
+    ReplayState state(mValidators.at(nodeIndex), mQSet);
+    initializeNode(state, nodeIndex);
+    discardPendingEnvelopes(state.mNode);
 
-    node.nominate(mSlotIndex, mInitialValues.at(nodeIndex), mPreviousValue);
-    static_cast<void>(node.takePendingEnvelopes());
-
-    auto const localThread = toThreadID(nodeIndex);
     for (auto const& observed : trace)
     {
-        if (node.hasCrossedNominationBoundary())
+        if (state.mNode.hasCrossedNominationBoundary())
         {
             break;
         }
 
-        if (observed.is_bottom())
-        {
-            if (!node.fireTimer(mSlotIndex, Slot::NOMINATION_TIMER))
-            {
-                throw std::logic_error(
-                    "trace requested a timer firing without an active "
-                    "nomination timer");
-            }
-        }
-        else
-        {
-            auto const& delivery = observed.value();
-            if (delivery.mDestinationThread != localThread)
-            {
-                throw std::logic_error(
-                    "trace delivered an envelope to the wrong thread");
-            }
-            if (delivery.mSlotIndex != mSlotIndex)
-            {
-                throw std::logic_error(
-                    "trace delivered an envelope for the wrong slot");
-            }
-            requireNominationEnvelope(delivery.mEnvelope);
-            node.receiveEnvelope(delivery.mEnvelope);
-        }
-        static_cast<void>(node.takePendingEnvelopes());
+        replayObservation(state.mNode, nodeIndex, observed);
+        discardPendingEnvelopes(state.mNode);
     }
 
-    auto const* boundaryEnvelope = node.getNominationBoundaryEnvelope();
+    auto const* boundaryEnvelope = state.mNode.getNominationBoundaryEnvelope();
     if (!boundaryEnvelope)
     {
         return std::nullopt;

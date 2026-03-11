@@ -10,9 +10,11 @@
 #include <dpor/algo/program.hpp>
 #include <dpor/model/event.hpp>
 
+#include <deque>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -71,6 +73,27 @@ class DporNominationDporAdapter
                                   ThreadTrace const& trace) const;
 
   private:
+    struct ReplayState
+    {
+        explicit ReplayState(SecretKey const& secretKey,
+                             SCPQuorumSet const& qSet);
+
+        DporNominationNode mNode;
+        std::deque<SendLabel> mPendingSends;
+    };
+
+    void configureNode(DporNominationNode& node) const;
+
+    void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
+
+    void replayObservation(DporNominationNode& node, std::size_t nodeIndex,
+                           ObservedValue const& observed) const;
+
+    void discardPendingEnvelopes(DporNominationNode& node) const;
+
+    void queuePendingNominationSends(ReplayState& state,
+                                     std::size_t senderIndex) const;
+
     std::vector<SecretKey> mValidators;
     SCPQuorumSet mQSet;
     uint64_t mSlotIndex;
