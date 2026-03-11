@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/DporNominationDporAdapter.h"
+#include "scp/test/DporNominationSimulation.h"
 
 #include "crypto/SHA.h"
 #include "scp/LocalNode.h"
