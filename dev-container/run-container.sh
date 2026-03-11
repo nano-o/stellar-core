@@ -63,7 +63,7 @@ docker_args=(
   --name "${container_name}"
   -e PROJECT_NAME="${project_name}"
   -e COLORTERM=truecolor
-  -v "${PWD}:/home/dev/project"
+  -v "${PWD}:/home/dev/stellar-core"
   -v "${codex_state_dir}:/home/dev/.codex"
   --cap-drop=ALL
   --security-opt=no-new-privileges

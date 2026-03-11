@@ -53,7 +53,7 @@ RUN set -eux; \
         libpq-dev \
         libstdc++-14-dev \
         libtool \
-        libunwind-dev \
+        libunwind-20-dev \
         lldb \
         locales \
         lsof \
@@ -80,6 +80,16 @@ RUN set -eux; \
         llvm-20; \
     locale-gen en_US.UTF-8; \
     rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    git clone --depth 1 --branch v3.8.0 https://github.com/catchorg/Catch2.git /tmp/catch2; \
+    cmake -S /tmp/catch2 -B /tmp/catch2/build -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCATCH_INSTALL_DOCS=OFF \
+        -DCATCH_INSTALL_EXTRAS=ON; \
+    cmake --build /tmp/catch2/build; \
+    cmake --install /tmp/catch2/build; \
+    rm -rf /tmp/catch2
 
 RUN set -eux; \
     if [ -x /usr/bin/batcat ] && [ ! -e /usr/local/bin/bat ]; then \
@@ -148,7 +158,7 @@ RUN rm -rf /tmp/stellar-core
 RUN install -d -o "${UID}" -g "${GID}" \
     "/home/${USER}/.claude" \
     "/home/${USER}/.codex" \
-    "/home/${USER}/project"
+    "/home/${USER}/stellar-core"
 
 COPY --chown=${UID}:${GID} dev-container/tmux.conf /home/${USER}/.tmux.conf
 COPY --chown=${UID}:${GID} dev-container/osc52-tmux /home/${USER}/.local/bin/osc52-tmux
@@ -170,4 +180,4 @@ ENV CC=clang-20 \
     CXX=clang++-20
 
 USER ${USER}
-WORKDIR /home/${USER}/project
+WORKDIR /home/${USER}/stellar-core

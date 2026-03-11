@@ -23,7 +23,7 @@ dev-container/build-image.sh
 dev-container/run-container.sh
 ```
 
-Inside the container you land in `/home/dev/project` and can build normally:
+Inside the container you land in `/home/dev/stellar-core` and can build normally:
 
 ```bash
 git submodule update --init --recursive
