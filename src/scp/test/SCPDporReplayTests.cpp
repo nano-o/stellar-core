@@ -3,7 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/DporNominationDporAdapter.h"
-#include "scp/test/DporNominationHarness.h"
+#include "scp/test/DporNominationSanityCheckHarness.h"
 
 #include "crypto/SHA.h"
 #include "scp/LocalNode.h"
@@ -47,10 +47,11 @@ struct ReplayFixture
     DporNominationDporAdapter mAdapter;
 
     ReplayFixture()
-        : mValidators(DporNominationHarness::makeValidatorSecretKeys(
+        : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
               "dpor-replay-", 3))
-        , mNodeIDs(DporNominationHarness::getNodeIDs(mValidators))
-        , mQSet(DporNominationHarness::makeQuorumSet(mNodeIDs, 2))
+        , mNodeIDs(DporNominationSanityCheckHarness::getNodeIDs(mValidators))
+        , mQSet(
+              DporNominationSanityCheckHarness::makeQuorumSet(mNodeIDs, 2))
         , mQSetHash(getNormalizedQSetHash(mValidators[0], mQSet))
         , mPreviousValue(makeValue("previous"))
         , mXValue(makeValue("x"))
@@ -108,15 +109,18 @@ requireReceive(DporNominationDporAdapter::EventLabel const& label)
 
 void
 deliverAndRecordTraceForThread(
-    DporNominationHarness& harness, ThreadId destinationThread,
+    DporNominationSanityCheckHarness& sanityCheckHarness,
+    ThreadId destinationThread,
     DporNominationDporAdapter::ThreadTrace& trace)
 {
-    for (std::size_t senderIndex = 0; senderIndex < harness.size();
+    for (std::size_t senderIndex = 0; senderIndex < sanityCheckHarness.size();
          ++senderIndex)
     {
-        for (auto const& envelope : harness.getNode(senderIndex).takePendingEnvelopes())
+        for (auto const& envelope :
+             sanityCheckHarness.getNode(senderIndex).takePendingEnvelopes())
         {
-            for (std::size_t receiverIndex = 0; receiverIndex < harness.size();
+            for (std::size_t receiverIndex = 0;
+                 receiverIndex < sanityCheckHarness.size();
                  ++receiverIndex)
             {
                 if (receiverIndex == senderIndex)
@@ -136,7 +140,8 @@ deliverAndRecordTraceForThread(
                     });
                 }
 
-                harness.getNode(receiverIndex).receiveEnvelope(envelope);
+                sanityCheckHarness.getNode(receiverIndex).receiveEnvelope(
+                    envelope);
             }
         }
     }
@@ -193,10 +198,10 @@ TEST_CASE("dpor nomination replay captures stepwise send fanout and replay",
 TEST_CASE("dpor nomination replay detects the first ballot boundary",
           "[scp][dpor][nomination][replay]")
 {
-    auto validators = DporNominationHarness::makeValidatorSecretKeys(
+    auto validators = DporNominationSanityCheckHarness::makeValidatorSecretKeys(
         "dpor-replay-boundary-", 4);
-    auto nodeIDs = DporNominationHarness::getNodeIDs(validators);
-    auto qSet = DporNominationHarness::makeQuorumSet(nodeIDs, 3);
+    auto nodeIDs = DporNominationSanityCheckHarness::getNodeIDs(validators);
+    auto qSet = DporNominationSanityCheckHarness::makeQuorumSet(nodeIDs, 3);
     auto previousValue = makeValue("previous-boundary");
     auto xValue = makeValue("x-boundary");
     auto yValue = makeValue("y-boundary");
@@ -208,21 +213,25 @@ TEST_CASE("dpor nomination replay detects the first ballot boundary",
         return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max() : 1;
     });
 
-    DporNominationHarness harness(validators, qSet);
-    harness.setPriorityLookup([nodeIDs](NodeID const& nodeID) {
+    DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet);
+    sanityCheckHarness.setPriorityLookup([nodeIDs](NodeID const& nodeID) {
         return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max() : 1;
     });
 
-    REQUIRE(harness.getNode(0).nominate(0, xValue, previousValue));
-    REQUIRE_FALSE(harness.getNode(1).nominate(0, yValue, previousValue));
-    REQUIRE_FALSE(harness.getNode(2).nominate(0, yValue, previousValue));
-    REQUIRE_FALSE(harness.getNode(3).nominate(0, yValue, previousValue));
+    REQUIRE(
+        sanityCheckHarness.getNode(0).nominate(0, xValue, previousValue));
+    REQUIRE_FALSE(
+        sanityCheckHarness.getNode(1).nominate(0, yValue, previousValue));
+    REQUIRE_FALSE(
+        sanityCheckHarness.getNode(2).nominate(0, yValue, previousValue));
+    REQUIRE_FALSE(
+        sanityCheckHarness.getNode(3).nominate(0, yValue, previousValue));
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    deliverAndRecordTraceForThread(harness, 0, leaderTrace);
-    deliverAndRecordTraceForThread(harness, 0, leaderTrace);
-    deliverAndRecordTraceForThread(harness, 0, leaderTrace);
-    REQUIRE(harness.getNode(0).hasCrossedNominationBoundary());
+    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+    REQUIRE(sanityCheckHarness.getNode(0).hasCrossedNominationBoundary());
 
     auto boundaryEnvelope = adapter.getNominationBoundaryEnvelope(0, leaderTrace);
     REQUIRE(boundaryEnvelope.has_value());

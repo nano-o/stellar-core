@@ -16,16 +16,14 @@
 namespace stellar
 {
 
-// Concrete in-memory nomination harness built from live DporNominationNode
-// instances. Tests use this to execute real SCP behavior, deliver envelopes in
-// controlled rounds, and capture traces or boundary envelopes. This is not the
-// DPOR interface; it is a sanity-check helper layered on top of the reusable
-// DporNominationNode driver.
-class DporNominationHarness
+// Optional in-memory sanity-check helper built from live DporNominationNode
+// instances. This is not part of the DPOR replay path; it only exists for a
+// small number of direct helper tests and reference-trace generation.
+class DporNominationSanityCheckHarness
 {
   public:
-    explicit DporNominationHarness(std::vector<SecretKey> const& validators,
-                                   SCPQuorumSet const& qSet);
+    explicit DporNominationSanityCheckHarness(
+        std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet);
 
     static std::vector<SecretKey>
     makeValidatorSecretKeys(std::string const& seedPrefix, std::size_t count);

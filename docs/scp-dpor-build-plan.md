@@ -3,7 +3,7 @@
 ## Goal
 
 Define how to integrate the first DPOR-based SCP nomination experiment directly
-into the `stellar-core` tree, so the harness, test cases, and build wiring
+into the `stellar-core` tree, so the replay adapter, tests, and build wiring
 match the environment where we eventually want to use them.
 
 More specifically, this document sets the initial plan for:
@@ -12,10 +12,10 @@ More specifically, this document sets the initial plan for:
 - how the experiment should be wired into the existing `stellar-core` test
   build
 - where to place the protocol boundary between nomination and ballot behavior
-- how to model the first deterministic nomination-only simulation
+- how to structure the first deterministic nomination-only replay adapter
 
 This document covers the in-tree build shape, the nomination protocol
-boundary around `bumpState(...)`, and the initial simulation model.
+boundary around `bumpState(...)`, and the initial replay model.
 
 ## Recommendation
 
@@ -52,14 +52,24 @@ Recommended first layout:
 
 - `external/dpor/`
   - git submodule pointing at the DPOR repository
-- `src/scp/test/DporNominationHarness.h`
-  - SCP-specific DPOR adapter types and replay logic
-- `src/scp/test/DporNominationHarness.cpp`
-  - non-template helper code if needed
+- `src/scp/test/DporNominationNode.h`
+  - reusable deterministic `SCPDriver`-backed node/driver layer
+- `src/scp/test/DporNominationNode.cpp`
+  - non-template node/driver implementation
+- `src/scp/test/DporNominationDporAdapter.h`
+  - SCP-specific DPOR value types and replay adapter declarations
+- `src/scp/test/DporNominationDporAdapter.cpp`
+  - replay adapter implementation and DPOR program assembly
+- `src/scp/test/DporNominationSanityCheckHarness.h`
+  - optional live sanity-check helper used by a small number of non-DPOR tests
+- `src/scp/test/DporNominationSanityCheckHarness.cpp`
+  - optional harness implementation
 - `src/scp/test/SCPDporNominationTests.cpp`
-  - Catch2 test cases for the nomination experiment
+  - Catch2 sanity-check tests for the optional live harness
+- `src/scp/test/SCPDporReplayTests.cpp`
+  - Catch2 tests for DPOR replay and boundary reconstruction
 
-Optional later split if the harness grows:
+Optional later split if the node/adapter layer grows:
 
 - `src/scp/test/DporTestDriver.h`
 - `src/scp/test/DporTestDriver.cpp`
@@ -121,7 +131,7 @@ Important detail:
   is enabled
 - `make-mks` classifies files under paths containing `test` or `simulation` as
   test sources
-- therefore the SCP DPOR harness should live under `src/scp/test/`, not under
+- therefore the SCP DPOR adapter should live under `src/scp/test/`, not under
   production SCP directories
 - and the DPOR submodule should stay under `external/`, not under `src/`
 
@@ -173,8 +183,8 @@ The first experiment should stay narrow:
 - stop exploration at the first transition into ballot protocol behavior
 
 Even though the experiment is nomination-focused, it should still use the real
-`SCP`, `Slot`, and `NominationProtocol` types from `stellar-core`. The harness
-should not try to reimplement nomination semantics.
+`SCP`, `Slot`, and `NominationProtocol` types from `stellar-core`. The replay
+adapter should not try to reimplement nomination semantics.
 
 ## Protocol Boundary Discussion
 
@@ -235,7 +245,7 @@ Problems:
 
 Recommendation:
 
-- defer until the nomination harness is already working
+- defer until the nomination replay adapter is already working
 
 ### Recommended Boundary Rule
 
@@ -250,16 +260,20 @@ Operationally, that means:
 
 - nomination envelopes remain ordinary modeled network messages
 - the first `PREPARE`, `CONFIRM`, or `EXTERNALIZE` envelope is not fed back
-  into the simulated network for this experiment
+  into the modeled network for this experiment
 - instead, it marks that the node has crossed the nomination boundary
 
-## Simulation Discussion
+## Replay Adapter Discussion
 
-The simulation should follow the same high-level shape as the DPOR 2PC example (with timeouts),
-but the interception point is `stellar::SCPDriver`, not a custom environment
-interface.
+The DPOR replay adapter should follow the same high-level shape as the DPOR
+2PC adapter (with timeouts), but the interception point is `stellar::SCPDriver`,
+not a custom environment interface.
 
-### Simulation Model
+An optional lightweight live harness may still be useful for sanity checks or
+for generating reference traces outside `verify()`, but it is not part of the
+verification core.
+
+### Replay Model
 
 Each SCP node is represented as one DPOR thread.
 
@@ -273,9 +287,9 @@ Each thread function should:
 As in the existing DPOR prototype, the replay callback must be deterministic
 and side-effect free for the same trace and step.
 
-### What Gets Simulated
+### What The Replay Adapter Models
 
-The first experiment only needs to simulate:
+The first experiment only needs to model:
 
 - local node identity
 - local quorum set and known remote quorum sets
@@ -286,7 +300,7 @@ The first experiment only needs to simulate:
 - nomination timer setup/cancellation
 - delivery of inbound nomination envelopes
 
-The first experiment should not try to simulate:
+The first experiment should not try to model:
 
 - overlay/network stack
 - application objects
@@ -294,9 +308,10 @@ The first experiment should not try to simulate:
 - full externalize behavior
 - production `HerderSCPDriver`
 
-### Driver Shape
+### Node / Driver Shape
 
-The simulation driver should be a deterministic `SCPDriver` subclass that:
+The reusable node/driver layer should be a deterministic `SCPDriver`
+subclass that:
 
 - stores quorum sets by hash
 - returns fully validated values unless a test explicitly wants otherwise
@@ -343,7 +358,7 @@ That visible action is one of:
 - request the next timer-or-envelope race through a non-blocking receive
 - cross the nomination boundary by emitting the first non-nomination envelope
 
-### Boundary Handling In The Simulator
+### Boundary Handling In The Replay Adapter
 
 When the real SCP node emits its first non-nomination envelope:
 
@@ -355,13 +370,14 @@ When the real SCP node emits its first non-nomination envelope:
 This preserves the real local control flow up to the handoff without forcing
 the nomination experiment to include ballot exploration.
 
-If later we want a stronger cross-check, the simulator can optionally record
+If later we want a stronger cross-check, the adapter can optionally record
 the first ballot envelope in test diagnostics, but it should still be outside
 the explored message space for the first milestone.
 
-## Test Harness Plan
+## Adapter Construction Plan
 
-Build the adapter on top of the same seams used by existing SCP tests:
+Build the reusable node layer and replay adapter on top of the same seams used
+by existing SCP tests:
 
 - subclass `stellar::SCPDriver`
 - capture `emitEnvelope(...)`
@@ -369,6 +385,10 @@ Build the adapter on top of the same seams used by existing SCP tests:
 - provide deterministic `getQSet(...)`
 - provide deterministic hashing and candidate-combination callbacks
 - instantiate real `stellar::SCP` nodes and feed them replayed envelopes
+
+If useful, a tiny live harness can compose those deterministic nodes into a
+small in-memory cluster with controlled round-by-round delivery, but it should
+remain clearly secondary to the DPOR replay path.
 
 The DPOR-facing side should mirror the existing prototype structure:
 
@@ -387,12 +407,12 @@ The DPOR-facing side should mirror the existing prototype structure:
 - verify that `stellar-core` builds and the DPOR headers compile cleanly in the
   autotools environment
 
-### Milestone 1: SCP Harness Skeleton
+### Milestone 1: Deterministic Node Layer And Sanity Check
 
 - add a minimal `SCPDriver` subclass for deterministic nomination tests
-- instantiate a small fixed SCP node set
-- confirm that the harness can reproduce one simple nomination scenario without
-  DPOR
+- optionally instantiate a small fixed SCP node set
+- confirm that the deterministic node layer can reproduce one simple
+  nomination scenario without DPOR
 
 ### Milestone 2: DPOR-Driven Nomination Replay
 
