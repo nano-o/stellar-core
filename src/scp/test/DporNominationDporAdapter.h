@@ -6,7 +6,7 @@
 
 #include "crypto/SecretKey.h"
 // This adapter depends only on the reusable node/driver layer. The live
-// DporNominationSimulation wrapper is a separate sanity-check harness and is
+// DporNominationHarness wrapper is a separate sanity-check harness and is
 // intentionally not part of the replay dependency path.
 #include "scp/test/DporNominationNode.h"
 
@@ -38,8 +38,8 @@ struct DporNominationValue
 // DPOR-facing replay adapter for the nomination harness. Each thread query
 // rebuilds fresh local SCP state from the initial inputs and the supplied
 // per-thread trace, then returns the next deterministic event label. This does
-// not drive a live DporNominationSimulation instance; tests may use the
-// simulation to produce traces, but DPOR replay remains independent.
+// not drive a live DporNominationHarness instance; tests may use the harness
+// to produce traces, but DPOR replay remains independent.
 class DporNominationDporAdapter
 {
   public:

@@ -2,7 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-#include "scp/test/DporNominationSimulation.h"
+#include "scp/test/DporNominationHarness.h"
 
 #include "crypto/SHA.h"
 
@@ -12,7 +12,7 @@
 namespace stellar
 {
 
-DporNominationSimulation::DporNominationSimulation(
+DporNominationHarness::DporNominationHarness(
     std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet)
 {
     if (validators.empty())
@@ -29,8 +29,8 @@ DporNominationSimulation::DporNominationSimulation(
 }
 
 std::vector<SecretKey>
-DporNominationSimulation::makeValidatorSecretKeys(std::string const& seedPrefix,
-                                                  std::size_t count)
+DporNominationHarness::makeValidatorSecretKeys(std::string const& seedPrefix,
+                                               std::size_t count)
 {
     std::vector<SecretKey> validators;
     validators.reserve(count);
@@ -43,7 +43,7 @@ DporNominationSimulation::makeValidatorSecretKeys(std::string const& seedPrefix,
 }
 
 std::vector<NodeID>
-DporNominationSimulation::getNodeIDs(std::vector<SecretKey> const& validators)
+DporNominationHarness::getNodeIDs(std::vector<SecretKey> const& validators)
 {
     std::vector<NodeID> nodeIDs;
     nodeIDs.reserve(validators.size());
@@ -55,8 +55,8 @@ DporNominationSimulation::getNodeIDs(std::vector<SecretKey> const& validators)
 }
 
 SCPQuorumSet
-DporNominationSimulation::makeQuorumSet(std::vector<NodeID> const& nodeIDs,
-                                        uint32_t threshold)
+DporNominationHarness::makeQuorumSet(std::vector<NodeID> const& nodeIDs,
+                                     uint32_t threshold)
 {
     SCPQuorumSet qSet;
     qSet.threshold = threshold;
@@ -68,25 +68,25 @@ DporNominationSimulation::makeQuorumSet(std::vector<NodeID> const& nodeIDs,
 }
 
 std::size_t
-DporNominationSimulation::size() const
+DporNominationHarness::size() const
 {
     return mNodes.size();
 }
 
 DporNominationNode&
-DporNominationSimulation::getNode(std::size_t index)
+DporNominationHarness::getNode(std::size_t index)
 {
     return *mNodes.at(index);
 }
 
 DporNominationNode const&
-DporNominationSimulation::getNode(std::size_t index) const
+DporNominationHarness::getNode(std::size_t index) const
 {
     return *mNodes.at(index);
 }
 
 void
-DporNominationSimulation::setPriorityLookup(
+DporNominationHarness::setPriorityLookup(
     std::function<uint64(NodeID const&)> const& fn)
 {
     for (auto& node : mNodes)
@@ -96,7 +96,7 @@ DporNominationSimulation::setPriorityLookup(
 }
 
 void
-DporNominationSimulation::setValueHash(
+DporNominationHarness::setValueHash(
     std::function<uint64(Value const&)> const& fn)
 {
     for (auto& node : mNodes)
@@ -106,7 +106,7 @@ DporNominationSimulation::setValueHash(
 }
 
 void
-DporNominationSimulation::setCombineCandidates(
+DporNominationHarness::setCombineCandidates(
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const& fn)
 {
     for (auto& node : mNodes)
@@ -116,7 +116,7 @@ DporNominationSimulation::setCombineCandidates(
 }
 
 std::size_t
-DporNominationSimulation::broadcastPendingEnvelopesOnce()
+DporNominationHarness::broadcastPendingEnvelopesOnce()
 {
     using Delivery = std::pair<std::size_t, SCPEnvelope>;
 

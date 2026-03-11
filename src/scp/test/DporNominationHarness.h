@@ -21,11 +21,11 @@ namespace stellar
 // controlled rounds, and capture traces or boundary envelopes. This is not the
 // DPOR interface; it is a sanity-check helper layered on top of the reusable
 // DporNominationNode driver.
-class DporNominationSimulation
+class DporNominationHarness
 {
   public:
-    explicit DporNominationSimulation(std::vector<SecretKey> const& validators,
-                                      SCPQuorumSet const& qSet);
+    explicit DporNominationHarness(std::vector<SecretKey> const& validators,
+                                   SCPQuorumSet const& qSet);
 
     static std::vector<SecretKey>
     makeValidatorSecretKeys(std::string const& seedPrefix, std::size_t count);
