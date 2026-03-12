@@ -61,7 +61,8 @@ git submodule update --init --recursive external/dpor
 
 The image runs as a non-root `dev` user (UID/GID matched to the host). The
 default launcher keeps `no-new-privileges` enabled, so privileged commands such
-as `sudo` only work in relaxed modes like `--profile` or `--debug-full`.
+as `sudo` only work in modes that explicitly drop it, such as `--debug` or
+`--debug-full`.
 
 By default the environment uses `clang-20`:
 
@@ -105,7 +106,8 @@ dev-container/run-container.sh --profile
 ```
 
 This adds `CAP_PERFMON`, `CAP_SYS_PTRACE`, and disables seccomp/apparmor
-filtering without going fully privileged.
+filtering without going fully privileged. It still keeps
+`no-new-privileges` enabled.
 
 For GDB, LLDB, `strace`, or sanitizer workflows that need ptrace support:
 
@@ -119,10 +121,11 @@ For fully privileged debugging (ASLR disabled, unrestricted ptrace):
 dev-container/run-container.sh --debug-full
 ```
 
-The default mode keeps the hardened baseline enabled. If `perf` still reports
-permission errors in `--profile`, the host kernel's `perf_event_paranoid`
-setting is stricter than the container caps allow; use `--debug-full` or adjust
-the host sysctl.
+The default mode keeps the hardened baseline enabled. `--profile`, `--debug`,
+and `--debug-full` are mutually exclusive. If `perf` still reports permission
+errors in `--profile`, the host kernel's `perf_event_paranoid` setting is
+stricter than the container caps allow; use `--debug-full` or adjust the host
+sysctl.
 
 ## Profiling workflows
 

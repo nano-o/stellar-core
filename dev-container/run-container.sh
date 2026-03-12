@@ -5,8 +5,33 @@ tag="stellar-core-dev"
 container_name=""
 debug_mode=""
 profile_mode=""
+mode_flag=""
 persist=""
 mount_claude=""
+
+set_mode() {
+  local requested_flag="$1"
+  local requested_kind="$2"
+
+  if [[ -n "${mode_flag}" && "${mode_flag}" != "${requested_flag}" ]]; then
+    echo "Options ${mode_flag} and ${requested_flag} are mutually exclusive" >&2
+    exit 2
+  fi
+
+  mode_flag="${requested_flag}"
+
+  case "${requested_kind}" in
+    debug)
+      debug_mode="debug"
+      ;;
+    full)
+      debug_mode="full"
+      ;;
+    profile)
+      profile_mode=1
+      ;;
+  esac
+}
 
 if [[ $# -gt 0 && "$1" != -* ]]; then
   tag="$1"
@@ -24,15 +49,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --debug)
-      debug_mode="debug"
+      set_mode "--debug" "debug"
       shift
       ;;
     --profile)
-      profile_mode=1
+      set_mode "--profile" "profile"
       shift
       ;;
     --debug-full|--privileged)
-      debug_mode="full"
+      set_mode "--debug-full" "full"
       shift
       ;;
     --persist)
@@ -75,7 +100,7 @@ docker_args=(
   --memory=32g
 )
 
-if [[ "${debug_mode}" != "full" && -z "${profile_mode}" ]]; then
+if [[ -z "${debug_mode}" ]]; then
   docker_args+=(--security-opt=no-new-privileges)
 fi
 
