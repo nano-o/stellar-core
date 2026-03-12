@@ -234,13 +234,15 @@ struct InvestigationScenario
     {
         TwoFollowersAccepted,
         AllFollowersAcceptedOnce,
-        Largest
+        Largest,
+        UnrestrictedFollowers
     };
 
     Id mId;
     std::string mName;
     ProgressSteps mStopSteps;
     std::size_t mMaxDepth;
+    bool mIncludeInDefaultRuns{true};
 };
 
 struct ReplayMetricsSnapshot
@@ -306,6 +308,8 @@ scenarioName(InvestigationScenario::Id id)
         return "all-followers-once";
     case InvestigationScenario::Id::Largest:
         return "largest";
+    case InvestigationScenario::Id::UnrestrictedFollowers:
+        return "unrestricted-followers";
     }
     return "unknown";
 }
@@ -387,7 +391,11 @@ runtimeGrowthScenarios(std::size_t validatorCount)
         {InvestigationScenario::Id::Largest,
          "all followers accept and take one more peer receive",
          makeFollowerStopSteps(kFollowerStopAfterSecondPeerReceiveStep),
-         kMaxDepth / 4},
+         kMaxDepth / 4, true},
+        {InvestigationScenario::Id::UnrestrictedFollowers,
+         "followers unrestricted like the leader",
+         ProgressSteps(validatorCount, kUnlimitedProgressStep),
+         kMaxDepth / 8, false},
     };
 }
 
@@ -412,7 +420,15 @@ selectedRuntimeGrowthScenarios(
     auto scenarios = runtimeGrowthScenarios(validatorCount);
     if (!scenarioFilter)
     {
-        return scenarios;
+        std::vector<InvestigationScenario> selected;
+        for (auto const& scenario : scenarios)
+        {
+            if (scenario.mIncludeInDefaultRuns)
+            {
+                selected.push_back(scenario);
+            }
+        }
+        return selected;
     }
 
     std::vector<InvestigationScenario> selected;
