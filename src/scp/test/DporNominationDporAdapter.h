@@ -13,6 +13,7 @@
 #include <dpor/algo/program.hpp>
 #include <dpor/model/event.hpp>
 
+#include <atomic>
 #include <deque>
 #include <cstddef>
 #include <cstdint>
@@ -59,6 +60,15 @@ class DporNominationDporAdapter
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
 
+    struct ReplayMetrics
+    {
+        std::atomic<std::uint64_t> mCaptureNextEventCalls{0};
+        std::atomic<std::uint64_t> mReplayedObservationCountTotal{0};
+        std::atomic<std::uint64_t> mMaxReplayedObservationCount{0};
+        std::atomic<std::uint64_t> mQueuedNominationEnvelopeCount{0};
+        std::atomic<std::uint64_t> mQueuedSendCount{0};
+    };
+
     DporNominationDporAdapter(std::vector<SecretKey> const& validators,
                               SCPQuorumSet const& qSet, uint64_t slotIndex,
                               Value const& previousValue,
@@ -79,6 +89,9 @@ class DporNominationDporAdapter
     void setCombineCandidates(
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
+
+    void
+    setReplayMetrics(std::shared_ptr<ReplayMetrics> metrics);
 
     std::optional<EventLabel>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,
@@ -124,12 +137,15 @@ class DporNominationDporAdapter
                                           std::size_t nodeIndex,
                                           ThreadTrace const& trace) const;
 
+    void recordReplayObservationCount(std::size_t replayedObservationCount) const;
+
     std::vector<SecretKey> mValidators;
     SCPQuorumSet mQSet;
     uint64_t mSlotIndex;
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
     DporNominationNode::Configuration mConfig;
+    std::shared_ptr<ReplayMetrics> mReplayMetrics;
 };
 
 }

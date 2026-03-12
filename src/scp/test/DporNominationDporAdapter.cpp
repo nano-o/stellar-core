@@ -54,6 +54,17 @@ makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
         std::move(matcher));
 }
 
+void
+updateMax(std::atomic<std::uint64_t>& target, std::uint64_t value)
+{
+    auto current = target.load(std::memory_order_relaxed);
+    while (current < value &&
+           !target.compare_exchange_weak(current, value,
+                                         std::memory_order_relaxed))
+    {
+    }
+}
+
 }
 
 DporNominationDporAdapter::ReplayState::ReplayState(SecretKey const& secretKey,
@@ -123,6 +134,13 @@ DporNominationDporAdapter::setCombineCandidates(
 }
 
 void
+DporNominationDporAdapter::setReplayMetrics(
+    std::shared_ptr<ReplayMetrics> metrics)
+{
+    mReplayMetrics = std::move(metrics);
+}
+
+void
 DporNominationDporAdapter::initializeNode(ReplayState& state,
                                           std::size_t nodeIndex) const
 {
@@ -180,6 +198,12 @@ DporNominationDporAdapter::queuePendingNominationSends(
             "crossing the nomination boundary");
     }
 
+    if (mReplayMetrics && !pendingEnvelopes.empty())
+    {
+        mReplayMetrics->mQueuedNominationEnvelopeCount.fetch_add(
+            pendingEnvelopes.size(), std::memory_order_relaxed);
+    }
+
     auto const senderThread = toThreadID(senderIndex);
     for (auto const& envelope : pendingEnvelopes)
     {
@@ -192,6 +216,11 @@ DporNominationDporAdapter::queuePendingNominationSends(
                 continue;
             }
             auto const receiverThread = toThreadID(receiverIndex);
+            if (mReplayMetrics)
+            {
+                mReplayMetrics->mQueuedSendCount.fetch_add(
+                    1, std::memory_order_relaxed);
+            }
             state.mPendingSends.push_back(
                 SendLabel{
                     .destination = receiverThread,
@@ -216,12 +245,23 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
         throw std::out_of_range("node index out of range");
     }
 
+    if (mReplayMetrics)
+    {
+        mReplayMetrics->mCaptureNextEventCalls.fetch_add(
+            1, std::memory_order_relaxed);
+    }
+
     ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
     initializeNode(state, nodeIndex);
 
     std::size_t eventCount = 0;
     std::size_t observedCount = 0;
     auto const localThread = toThreadID(nodeIndex);
+    auto finish = [&](std::optional<EventLabel> event)
+        -> std::optional<EventLabel> {
+        recordReplayObservationCount(observedCount);
+        return event;
+    };
 
     while (true)
     {
@@ -231,7 +271,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             state.mPendingSends.pop_front();
             if (eventCount == step)
             {
-                return nextSend;
+                return finish(nextSend);
             }
             ++eventCount;
             continue;
@@ -239,7 +279,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
 
         if (state.mNode.hasCrossedNominationBoundary())
         {
-            return std::nullopt;
+            return finish(std::nullopt);
         }
 
         auto const hasNominationTimer =
@@ -248,7 +288,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             EventLabel{makeReceiveLabel(localThread, hasNominationTimer)};
         if (eventCount == step)
         {
-            return nextReceive;
+            return finish(nextReceive);
         }
         ++eventCount;
 
@@ -263,6 +303,21 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
 
         queuePendingNominationSends(state, nodeIndex);
     }
+}
+
+void
+DporNominationDporAdapter::recordReplayObservationCount(
+    std::size_t replayedObservationCount) const
+{
+    if (!mReplayMetrics)
+    {
+        return;
+    }
+
+    auto const count = static_cast<std::uint64_t>(replayedObservationCount);
+    mReplayMetrics->mReplayedObservationCountTotal.fetch_add(
+        count, std::memory_order_relaxed);
+    updateMax(mReplayMetrics->mMaxReplayedObservationCount, count);
 }
 
 DporNominationDporAdapter::Program

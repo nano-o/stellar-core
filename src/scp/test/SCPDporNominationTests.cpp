@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/DporNominationSanityCheckHarness.h"
+#include "scp/test/DporNominationInvestigation.h"
 #include "scp/test/DporNominationTestUtils.h"
 
 #include "scp/Slot.h"
@@ -11,10 +12,7 @@
 
 #include <dpor/algo/dpor.hpp>
 
-#include <array>
 #include <algorithm>
-#include <chrono>
-#include <limits>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -32,27 +30,14 @@ using VerifyResultKind = dpor::algo::VerifyResultKind;
 
 constexpr std::size_t kSmallTopologyValidatorCount = 3;
 constexpr std::size_t kSmallTopologyThreshold = 2;
-constexpr std::size_t kFourNodeTopologyValidatorCount = 4;
-constexpr std::size_t kFourNodeTopologyThreshold = 3;
 constexpr std::size_t kLeaderIndex = 0;
 constexpr std::size_t kFirstFollowerIndex = 1;
-constexpr std::size_t kUnlimitedProgressStep =
-    std::numeric_limits<std::size_t>::max();
-constexpr std::size_t kFollowerStopAfterInitialEchoStep = 4;
-constexpr std::size_t kFollowerStopAfterAcceptedEchoStep = 8;
-constexpr std::size_t kFollowerStopAfterSecondPeerReceiveStep = 12;
 // The current DPOR API exposes a depth budget but no execution-count budget.
 // Keep this just high enough for the 3-node topology to cover the prepare
 // boundary and the timer-versus-delivery races without masking state-space
 // growth.
 constexpr std::size_t kNominationVerifyMaxDepth = 16;
-constexpr std::size_t kFourNodeNominationVerifyMaxDepth = 128;
 constexpr std::size_t kRound3NominationVerifyMaxDepth = 32;
-using FourNodeProgressSteps =
-    std::array<std::size_t, kFourNodeTopologyValidatorCount>;
-constexpr FourNodeProgressSteps kFourNodeLeaderConvergenceStopSteps{
-    kUnlimitedProgressStep, kFollowerStopAfterAcceptedEchoStep,
-    kFollowerStopAfterAcceptedEchoStep, kFollowerStopAfterInitialEchoStep};
 
 struct SmallTopologyVerifyFixture
 {
@@ -107,48 +92,6 @@ struct SmallTopologyVerifyFixture
     }
 };
 
-struct FourNodeThresholdThreeVerifyFixture
-{
-    std::vector<SecretKey> mValidators;
-    std::vector<NodeID> mNodeIDs;
-    SCPQuorumSet mQSet;
-    std::vector<Hash> mQSetHashes;
-    Value mPreviousValue;
-    Value mV1Value;
-    Value mV2Value;
-    Value mV3Value;
-    Value mV4Value;
-    DporNominationDporAdapter mAdapter;
-
-    FourNodeThresholdThreeVerifyFixture()
-        : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
-              "dpor-nomination-verify-4node-",
-              kFourNodeTopologyValidatorCount))
-        , mNodeIDs(DporNominationSanityCheckHarness::getNodeIDs(mValidators))
-        , mQSet(DporNominationSanityCheckHarness::makeQuorumSet(
-              mNodeIDs, kFourNodeTopologyThreshold))
-        , mQSetHashes([&]() {
-            std::vector<Hash> hashes;
-            hashes.reserve(mValidators.size());
-            auto const qSetHash = getNormalizedQSetHash(mQSet);
-            for (std::size_t i = 0; i < mValidators.size(); ++i)
-            {
-                hashes.push_back(qSetHash);
-            }
-            return hashes;
-        }())
-        , mPreviousValue(makeValue("previous-verify-4node"))
-        , mV1Value(makeValue("v1-verify"))
-        , mV2Value(makeValue("v2-verify"))
-        , mV3Value(makeValue("v3-verify"))
-        , mV4Value(makeValue("v4-verify"))
-        , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
-                   std::vector<Value>{mV1Value, mV2Value, mV3Value, mV4Value},
-                   makeTopLeaderConfiguration(mNodeIDs, kLeaderIndex))
-    {
-    }
-};
-
 struct ThreadExecutionSummary
 {
     DporNominationDporAdapter::ThreadTrace mTrace;
@@ -167,46 +110,6 @@ struct VerifyExplorationSummary
     dpor::algo::VerifyResult mVerifyResult;
     std::vector<ExecutionSummary> mExecutions;
 };
-
-DporNominationDporAdapter::Program
-makeFourNodeBoundedProgram(FourNodeThresholdThreeVerifyFixture const& fixture,
-                           FourNodeProgressSteps const& stopSteps)
-{
-    auto program = fixture.mAdapter.makeProgram();
-    program.threads.for_each_assigned(
-        [&](auto tid, auto const& threadFn) {
-            auto const nodeIndex = static_cast<std::size_t>(tid);
-            program.threads[tid] =
-                [threadFn, stopSteps, nodeIndex](
-                    auto const& trace,
-                    std::size_t step) -> std::optional<
-                        DporNominationDporAdapter::EventLabel> {
-                if (step >= stopSteps.at(nodeIndex))
-                {
-                    return std::nullopt;
-                }
-
-                auto next = threadFn(trace, step);
-                if (!next)
-                {
-                    return std::nullopt;
-                }
-
-                auto const* receive =
-                    std::get_if<DporNominationDporAdapter::ReceiveLabel>(
-                        &*next);
-                if (receive == nullptr || receive->is_blocking())
-                {
-                    return next;
-                }
-
-                return DporNominationDporAdapter::EventLabel{
-                    dpor::model::make_receive_label<DporNominationValue>(
-                        receive->matches)};
-            };
-        });
-    return program;
-}
 
 template <typename Fixture>
 ExecutionSummary
@@ -291,14 +194,17 @@ exploreExecutions(Fixture const& fixture, bool blockingReceivesOnly = false,
 
 VerifyExplorationSummary
 exploreFourNodeLeaderConvergenceExecutions(
-    FourNodeThresholdThreeVerifyFixture const& fixture)
+    dpor_nomination_investigation::ThresholdFixture const& fixture)
 {
     VerifyExplorationSummary summary;
 
     VerifyConfig config;
     config.program =
-        makeFourNodeBoundedProgram(fixture, kFourNodeLeaderConvergenceStopSteps);
-    config.max_depth = kFourNodeNominationVerifyMaxDepth;
+        dpor_nomination_investigation::makeBoundedProgram(
+            fixture,
+            dpor_nomination_investigation::makeLeaderConvergenceStopSteps(
+                fixture.mValidatorCount));
+    config.max_depth = dpor_nomination_investigation::kMaxDepth;
     config.on_execution = [&summary, &fixture](auto const& graph) {
         summary.mExecutions.push_back(summarizeExecution(fixture, graph));
     };
@@ -439,20 +345,6 @@ requireTimeoutBoundaryExploration(
     REQUIRE(sawBoundaryReachedBeforeAnyBoundaryEnvelope);
 }
 
-char const*
-verifyResultKindName(VerifyResultKind kind)
-{
-    switch (kind)
-    {
-    case VerifyResultKind::AllExecutionsExplored:
-        return "all-explored";
-    case VerifyResultKind::ErrorFound:
-        return "error";
-    case VerifyResultKind::DepthLimitReached:
-        return "depth-limit";
-    }
-    return "unknown";
-}
 }
 
 TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
@@ -587,7 +479,7 @@ TEST_CASE("dpor nomination verify can reach a 4-validator threshold-3 "
           "prepare boundary", "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    FourNodeThresholdThreeVerifyFixture fixture;
+    dpor_nomination_investigation::ThresholdFixture fixture;
     auto const exploration = exploreFourNodeLeaderConvergenceExecutions(fixture);
 
     REQUIRE(exploration.mVerifyResult.kind ==
@@ -614,7 +506,8 @@ TEST_CASE("dpor nomination verify can reach a 4-validator threshold-3 "
         requirePrepareEnvelope(*leaderSummary.mBoundaryEnvelope,
                                fixture.mNodeIDs[kLeaderIndex],
                                fixture.mQSetHashes[kLeaderIndex], kSlotIndex,
-                               SCPBallot{1, fixture.mV1Value});
+                               SCPBallot{1,
+                                         fixture.mInitialValues[kLeaderIndex]});
     }
 
     REQUIRE(sawLeaderPrepareBoundary);
@@ -623,62 +516,31 @@ TEST_CASE("dpor nomination verify can reach a 4-validator threshold-3 "
 TEST_CASE("dpor nomination investigation reports 4-node runtime growth",
           "[.][dpor][investigation]")
 {
-    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    FourNodeThresholdThreeVerifyFixture fixture;
+    auto const workers = std::size_t{8};
+    auto const results =
+        dpor_nomination_investigation::runFourNodeRuntimeGrowthInvestigation(
+            workers);
 
-    struct InvestigationScenario
+    for (auto const& result : results)
     {
-        std::string mName;
-        FourNodeProgressSteps mStopSteps;
-        std::size_t mMaxDepth;
-    };
-
-    std::vector<InvestigationScenario> const scenarios{
-        {"two followers accepted, one vote-only witness",
-         kFourNodeLeaderConvergenceStopSteps, kFourNodeNominationVerifyMaxDepth},
-        {"all followers accepted once",
-         FourNodeProgressSteps{kUnlimitedProgressStep,
-                               kFollowerStopAfterAcceptedEchoStep,
-                               kFollowerStopAfterAcceptedEchoStep,
-                               kFollowerStopAfterAcceptedEchoStep},
-         kFourNodeNominationVerifyMaxDepth},
-        {"all followers accept and take one more peer receive",
-         FourNodeProgressSteps{kUnlimitedProgressStep,
-                               kFollowerStopAfterSecondPeerReceiveStep,
-                               kFollowerStopAfterSecondPeerReceiveStep,
-                               kFollowerStopAfterSecondPeerReceiveStep},
-         kFourNodeNominationVerifyMaxDepth / 4},
-    };
-
-    dpor::algo::ParallelVerifyOptions options;
-    options.max_workers = 8;
-
-    for (auto const& scenario : scenarios)
-    {
-        CAPTURE(scenario.mName);
-
-        VerifyConfig config;
-        config.program = makeFourNodeBoundedProgram(fixture,
-                                                    scenario.mStopSteps);
-        config.max_depth = scenario.mMaxDepth;
-
-        auto const start = std::chrono::steady_clock::now();
-        auto const result = dpor::algo::verify_parallel(config, options);
-        auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - start);
+        CAPTURE(result.mScenario.mName);
 
         LOG_INFO(DEFAULT_LOG,
                  "DPOR 4-node investigation '{}' workers={} depth={} "
                  "stop_steps=[{},{},{},{}] result={} executions={} "
                  "elapsed_ms={}",
-                 scenario.mName, options.max_workers, scenario.mMaxDepth,
-                 scenario.mStopSteps[0], scenario.mStopSteps[1],
-                 scenario.mStopSteps[2], scenario.mStopSteps[3],
-                 verifyResultKindName(result.kind),
-                 result.executions_explored, elapsed.count());
+                 result.mScenario.mName, workers, result.mScenario.mMaxDepth,
+                 result.mScenario.mStopSteps[0],
+                 result.mScenario.mStopSteps[1],
+                 result.mScenario.mStopSteps[2],
+                 result.mScenario.mStopSteps[3],
+                 dpor_nomination_investigation::verifyResultKindName(
+                     result.mVerifyResult.kind),
+                 result.mVerifyResult.executions_explored,
+                 result.mElapsed.count());
 
-        REQUIRE(result.kind != VerifyResultKind::ErrorFound);
-        REQUIRE(result.executions_explored > 0);
+        REQUIRE(result.mVerifyResult.kind != VerifyResultKind::ErrorFound);
+        REQUIRE(result.mVerifyResult.executions_explored > 0);
     }
 }
 

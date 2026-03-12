@@ -7,6 +7,7 @@ include $(top_srcdir)/common.mk
 include $(srcdir)/src.mk
 
 noinst_HEADERS = $(SRC_H_FILES)
+noinst_HEADERS += scp/test/DporNominationInvestigation.h
 
 # We sometimes specify a CXXFLAGS setting like -stdlib=libc++ that causes the
 # stdlib to change. When this makes it way down to Rust code building C++ code
@@ -55,6 +56,16 @@ endif
 
 if BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES) $(SRC_TEST_CXX_FILES)
+check_PROGRAMS = scp-dpor-nomination-investigation
+scp_dpor_nomination_investigation_SOURCES = \
+	scp/test/DporNominationInvestigation.h \
+	scp/test/DporNominationInvestigationMain.cpp
+scp_dpor_nomination_investigation_DEPENDENCIES = \
+	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
+	$(LIBRUST_STELLAR_CORE)
+scp_dpor_nomination_investigation_LDADD = \
+	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
+	$(stellar_core_LDADD)
 CARGO_FEATURE_TESTUTILS = --features testutils
 else # !BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES)
