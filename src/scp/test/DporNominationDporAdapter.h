@@ -130,9 +130,7 @@ class DporNominationDporAdapter
     void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
 
     void replayObservation(DporNominationNode& node, std::size_t nodeIndex,
-                           ObservedValue const& observed,
-                           ThreadTrace const& trace,
-                           std::size_t replayedObservationCount) const;
+                           ObservedValue const& observed) const;
 
     void discardPendingEnvelopes(DporNominationNode& node) const;
 
@@ -144,10 +142,7 @@ class DporNominationDporAdapter
                                           ThreadTrace const& trace) const;
 
     std::optional<int>
-    selectEnabledTimerID(DporNominationNode const& node,
-                         std::size_t nodeIndex,
-                         ThreadTrace const& trace,
-                         std::size_t replayedObservationCount) const;
+    selectEnabledTimerID(DporNominationNode const& node) const;
 
     void recordReplayObservationCount(std::size_t replayedObservationCount) const;
 

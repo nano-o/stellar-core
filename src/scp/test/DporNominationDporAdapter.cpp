@@ -8,9 +8,7 @@
 
 #include <limits>
 #include <memory>
-#include <sstream>
 #include <stdexcept>
-#include <string>
 #include <utility>
 
 namespace stellar
@@ -56,105 +54,6 @@ updateMax(std::atomic<std::uint64_t>& target, std::uint64_t value)
                                          std::memory_order_relaxed))
     {
     }
-}
-
-std::string
-formatEnvelopeSummary(SCPEnvelope const& envelope)
-{
-    std::ostringstream out;
-    switch (envelope.statement.pledges.type())
-    {
-    case SCP_ST_NOMINATE:
-    {
-        auto const& nomination = envelope.statement.pledges.nominate();
-        out << "nom(v=" << nomination.votes.size()
-            << ",a=" << nomination.accepted.size() << ")";
-        break;
-    }
-    case SCP_ST_PREPARE:
-    {
-        auto const& prepare = envelope.statement.pledges.prepare();
-        out << "prepare(b=" << prepare.ballot.counter << ")";
-        break;
-    }
-    case SCP_ST_CONFIRM:
-    {
-        auto const& confirm = envelope.statement.pledges.confirm();
-        out << "confirm(b=" << confirm.ballot.counter << ")";
-        break;
-    }
-    case SCP_ST_EXTERNALIZE:
-    {
-        auto const& externalize = envelope.statement.pledges.externalize();
-        out << "externalize(b=" << externalize.commit.counter << ")";
-        break;
-    }
-    default:
-        out << "stmt(" << static_cast<int>(envelope.statement.pledges.type())
-            << ")";
-        break;
-    }
-    return out.str();
-}
-
-std::string
-formatTracePrefix(DporNominationDporAdapter::ThreadTrace const& trace,
-                  std::size_t replayedObservationCount)
-{
-    std::ostringstream out;
-    bool first = true;
-    auto const prefixSize = std::min(replayedObservationCount, trace.size());
-    for (std::size_t i = 0; i < prefixSize; ++i)
-    {
-        if (!first)
-        {
-            out << ", ";
-        }
-        first = false;
-
-        auto const& observed = trace.at(i);
-        if (observed.is_bottom())
-        {
-            out << "timer";
-            continue;
-        }
-
-        auto const& delivery = observed.value();
-        out << "recv<-" << delivery.mSenderThread << ":"
-            << formatEnvelopeSummary(delivery.mEnvelope);
-    }
-
-    if (first)
-    {
-        out << "start";
-    }
-    return out.str();
-}
-
-std::string
-formatTimerSummary(DporNominationNode const& node, uint64_t slotIndex)
-{
-    std::ostringstream out;
-    auto appendTimer = [&](char const* label, int timerID) {
-        auto timer = node.getTimer(slotIndex, timerID);
-        if (!timer || !timer->mCallback)
-        {
-            return;
-        }
-        if (out.tellp() > 0)
-        {
-            out << ", ";
-        }
-        out << label << "=" << timer->mTimeout.count() << "ms";
-    };
-
-    appendTimer("nomination", Slot::NOMINATION_TIMER);
-    appendTimer("ballot", Slot::BALLOT_PROTOCOL_TIMER);
-    if (out.tellp() == 0)
-    {
-        out << "none";
-    }
-    return out.str();
 }
 
 }
@@ -242,8 +141,7 @@ DporNominationDporAdapter::setTimeoutModes(bool enableNominationTimeouts,
 
 std::optional<int>
 DporNominationDporAdapter::selectEnabledTimerID(
-    DporNominationNode const& node, std::size_t nodeIndex,
-    ThreadTrace const& trace, std::size_t replayedObservationCount) const
+    DporNominationNode const& node) const
 {
     auto hasFirableTimer = [&](int timerID) {
         auto timer = node.getTimer(mSlotIndex, timerID);
@@ -259,15 +157,8 @@ DporNominationDporAdapter::selectEnabledTimerID(
 
     if (nominationTimerEnabled && ballotingTimerEnabled)
     {
-        std::ostringstream out;
-        out << "DPOR replay does not support simultaneous nomination and "
-               "balloting timer bottoms"
-            << " node=" << nodeIndex
-            << " active_timers=[" << formatTimerSummary(node, mSlotIndex)
-            << "]"
-            << " replayed_trace=[" 
-            << formatTracePrefix(trace, replayedObservationCount) << "]";
-        throw std::logic_error(out.str());
+        // If both phases are live, follow the more advanced phase.
+        return Slot::BALLOT_PROTOCOL_TIMER;
     }
 
     if (nominationTimerEnabled)
@@ -293,16 +184,12 @@ DporNominationDporAdapter::initializeNode(ReplayState& state,
 void
 DporNominationDporAdapter::replayObservation(DporNominationNode& node,
                                              std::size_t nodeIndex,
-                                             ObservedValue const& observed,
-                                             ThreadTrace const& trace,
-                                             std::size_t replayedObservationCount) const
+                                             ObservedValue const& observed) const
 {
     auto const localThread = toThreadID(nodeIndex);
     if (observed.is_bottom())
     {
-        auto const timerID =
-            selectEnabledTimerID(node, nodeIndex, trace,
-                                 replayedObservationCount);
+        auto const timerID = selectEnabledTimerID(node);
         if (!timerID)
         {
             throw std::logic_error(
@@ -425,8 +312,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             return finish(std::nullopt);
         }
 
-        auto const enabledTimerID =
-            selectEnabledTimerID(state.mNode, nodeIndex, trace, observedCount);
+        auto const enabledTimerID = selectEnabledTimerID(state.mNode);
         auto nextReceive =
             EventLabel{makeReceiveLabel(localThread,
                                         static_cast<bool>(enabledTimerID))};
@@ -443,8 +329,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
                 "requested step");
         }
 
-        replayObservation(state.mNode, nodeIndex, trace.at(observedCount), trace,
-                          observedCount);
+        replayObservation(state.mNode, nodeIndex, trace.at(observedCount));
         ++observedCount;
 
         queuePendingEnvelopeSends(state, nodeIndex);
@@ -498,8 +383,7 @@ DporNominationDporAdapter::replayTraceForBoundaryInspection(
             break;
         }
 
-        replayObservation(state.mNode, nodeIndex, trace.at(observedIndex),
-                          trace, observedIndex);
+        replayObservation(state.mNode, nodeIndex, trace.at(observedIndex));
         discardPendingEnvelopes(state.mNode);
     }
 }
