@@ -130,8 +130,8 @@ class DporNominationDporAdapter
 
     void discardPendingEnvelopes(DporNominationNode& node) const;
 
-    void queuePendingNominationSends(ReplayState& state,
-                                     std::size_t senderIndex) const;
+    void queuePendingEnvelopeSends(ReplayState& state,
+                                   std::size_t senderIndex) const;
 
     void replayTraceForBoundaryInspection(ReplayState& state,
                                           std::size_t nodeIndex,

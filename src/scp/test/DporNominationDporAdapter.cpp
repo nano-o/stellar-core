@@ -29,15 +29,6 @@ toThreadID(std::size_t nodeIndex)
     return static_cast<ThreadId>(nodeIndex);
 }
 
-void
-requireNominationEnvelope(SCPEnvelope const& envelope)
-{
-    if (envelope.statement.pledges.type() != SCP_ST_NOMINATE)
-    {
-        throw std::logic_error("DPOR replay only accepts nomination envelopes");
-    }
-}
-
 DporNominationDporAdapter::ReceiveLabel
 makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
 {
@@ -146,7 +137,7 @@ DporNominationDporAdapter::initializeNode(ReplayState& state,
 {
     state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
                          mPreviousValue);
-    queuePendingNominationSends(state, nodeIndex);
+    queuePendingEnvelopeSends(state, nodeIndex);
 }
 
 void
@@ -176,7 +167,6 @@ DporNominationDporAdapter::replayObservation(DporNominationNode& node,
     {
         throw std::logic_error("trace delivered an envelope for the wrong slot");
     }
-    requireNominationEnvelope(delivery.mEnvelope);
     node.receiveEnvelope(delivery.mEnvelope);
 }
 
@@ -187,17 +177,10 @@ DporNominationDporAdapter::discardPendingEnvelopes(DporNominationNode& node) con
 }
 
 void
-DporNominationDporAdapter::queuePendingNominationSends(
+DporNominationDporAdapter::queuePendingEnvelopeSends(
     ReplayState& state, std::size_t senderIndex) const
 {
     auto pendingEnvelopes = state.mNode.takePendingEnvelopes();
-    if (state.mNode.hasCrossedNominationBoundary() && !pendingEnvelopes.empty())
-    {
-        throw std::logic_error(
-            "nomination replay does not support pending nomination sends after "
-            "crossing the nomination boundary");
-    }
-
     if (mReplayMetrics && !pendingEnvelopes.empty())
     {
         mReplayMetrics->mQueuedNominationEnvelopeCount.fetch_add(
@@ -207,7 +190,6 @@ DporNominationDporAdapter::queuePendingNominationSends(
     auto const senderThread = toThreadID(senderIndex);
     for (auto const& envelope : pendingEnvelopes)
     {
-        requireNominationEnvelope(envelope);
         for (std::size_t receiverIndex = 0; receiverIndex < mValidators.size();
              ++receiverIndex)
         {
@@ -282,6 +264,8 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             return finish(std::nullopt);
         }
 
+        // Replay intentionally ignores ballot timers and only exposes
+        // nomination timer bottoms to DPOR.
         auto const hasNominationTimer =
             state.mNode.hasActiveTimer(mSlotIndex, Slot::NOMINATION_TIMER);
         auto nextReceive =
@@ -301,7 +285,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
 
         replayObservation(state.mNode, nodeIndex, trace.at(observedCount++));
 
-        queuePendingNominationSends(state, nodeIndex);
+        queuePendingEnvelopeSends(state, nodeIndex);
     }
 }
 

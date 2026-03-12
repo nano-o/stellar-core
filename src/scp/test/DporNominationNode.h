@@ -28,13 +28,22 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
+    enum class BoundaryMode : std::uint8_t
+    {
+        Prepare,
+        Commit
+    };
+
     // Default replay/test cutoff for nomination-only exploration.
     static constexpr uint32_t DEFAULT_NOMINATION_ROUND_BOUNDARY = 2;
+    static constexpr BoundaryMode DEFAULT_BOUNDARY_MODE =
+        BoundaryMode::Prepare;
 
     struct Configuration
     {
         Configuration()
             : mNominationRoundBoundary(DEFAULT_NOMINATION_ROUND_BOUNDARY)
+            , mBoundaryMode(DEFAULT_BOUNDARY_MODE)
         {
         }
 
@@ -43,6 +52,7 @@ class DporNominationNode : public SCPDriver
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
         uint32_t mNominationRoundBoundary;
+        BoundaryMode mBoundaryMode;
     };
 
     struct TimerState
@@ -133,6 +143,7 @@ class DporNominationNode : public SCPDriver
     uint32_t
     inferNominationRound(std::chrono::milliseconds timeout) const;
     bool isRoundBoundaryNominationEnvelope(SCPEnvelope const& envelope) const;
+    bool isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
 
     SecretKey mSecretKey;
     SCP mSCP;
@@ -140,6 +151,7 @@ class DporNominationNode : public SCPDriver
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
     uint32_t mNominationRoundBoundary{DEFAULT_NOMINATION_ROUND_BOUNDARY};
+    BoundaryMode mBoundaryMode{DEFAULT_BOUNDARY_MODE};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};

@@ -87,6 +87,8 @@ computeTwoThirdsThreshold(std::size_t validatorCount)
 inline DporNominationNode::Configuration
 makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
                            std::size_t leaderIndex,
+                           DporNominationNode::BoundaryMode boundaryMode =
+                               DporNominationNode::DEFAULT_BOUNDARY_MODE,
                            uint32_t nominationRoundBoundary =
                                DporNominationNode::
                                    DEFAULT_NOMINATION_ROUND_BOUNDARY)
@@ -97,6 +99,7 @@ makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
         return nodeID == sharedNodeIDs->at(leaderIndex) ? kTopLeaderPriority
                                                         : 1;
     };
+    config.mBoundaryMode = boundaryMode;
     config.mNominationRoundBoundary = nominationRoundBoundary;
     return config;
 }
@@ -117,6 +120,8 @@ struct ThresholdFixture
     explicit ThresholdFixture(
         std::size_t validatorCount = kDefaultValidatorCount,
         bool fixedTopLeader = true,
+        DporNominationNode::BoundaryMode boundaryMode =
+            DporNominationNode::DEFAULT_BOUNDARY_MODE,
         uint32_t nominationRoundBoundary =
             DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY)
         : mValidatorCount(validatorCount)
@@ -160,12 +165,13 @@ struct ThresholdFixture
                        if (fixedTopLeader)
                        {
                            return makeTopLeaderConfiguration(
-                               mNodeIDs, kLeaderIndex,
+                               mNodeIDs, kLeaderIndex, boundaryMode,
                                nominationRoundBoundary);
                        }
                        DporNominationNode::Configuration config;
                        config.mNominationRoundBoundary =
                            nominationRoundBoundary;
+                       config.mBoundaryMode = boundaryMode;
                        return config;
                    }())
     {
@@ -235,13 +241,16 @@ struct InvestigationScenario
         TwoFollowersAccepted,
         AllFollowersAcceptedOnce,
         Largest,
-        UnrestrictedFollowers
+        UnrestrictedFollowers,
+        CommitBoundary
     };
 
     Id mId;
     std::string mName;
     ProgressSteps mStopSteps;
     std::size_t mMaxDepth;
+    DporNominationNode::BoundaryMode mBoundaryMode{
+        DporNominationNode::BoundaryMode::Prepare};
     bool mIncludeInDefaultRuns{true};
 };
 
@@ -310,6 +319,21 @@ scenarioName(InvestigationScenario::Id id)
         return "largest";
     case InvestigationScenario::Id::UnrestrictedFollowers:
         return "unrestricted-followers";
+    case InvestigationScenario::Id::CommitBoundary:
+        return "commit-boundary";
+    }
+    return "unknown";
+}
+
+inline char const*
+boundaryModeName(DporNominationNode::BoundaryMode mode)
+{
+    switch (mode)
+    {
+    case DporNominationNode::BoundaryMode::Prepare:
+        return "prepare";
+    case DporNominationNode::BoundaryMode::Commit:
+        return "commit";
     }
     return "unknown";
 }
@@ -383,19 +407,33 @@ runtimeGrowthScenarios(std::size_t validatorCount)
              }
              return steps;
          }(),
-         kMaxDepth},
+         kMaxDepth,
+         DporNominationNode::BoundaryMode::Prepare,
+         true},
         {InvestigationScenario::Id::AllFollowersAcceptedOnce,
          "all followers accepted once",
          makeFollowerStopSteps(kFollowerStopAfterAcceptedEchoStep),
-         kMaxDepth},
+         kMaxDepth,
+         DporNominationNode::BoundaryMode::Prepare,
+         true},
         {InvestigationScenario::Id::Largest,
          "all followers accept and take one more peer receive",
          makeFollowerStopSteps(kFollowerStopAfterSecondPeerReceiveStep),
-         kMaxDepth / 4, true},
+         kMaxDepth / 4,
+         DporNominationNode::BoundaryMode::Prepare,
+         true},
         {InvestigationScenario::Id::UnrestrictedFollowers,
          "followers unrestricted like the leader",
          ProgressSteps(validatorCount, kUnlimitedProgressStep),
-         kMaxDepth / 8, false},
+         kMaxDepth / 8,
+         DporNominationNode::BoundaryMode::Prepare,
+         false},
+        {InvestigationScenario::Id::CommitBoundary,
+         "ballot replay to the first commit-side boundary",
+         ProgressSteps(validatorCount, kUnlimitedProgressStep),
+         kMaxDepth / 2,
+         DporNominationNode::BoundaryMode::Commit,
+         false},
     };
 }
 
@@ -453,11 +491,6 @@ runRuntimeGrowthInvestigation(
     bool allowTimeouts = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    ThresholdFixture fixture(
-        validatorCount,
-        !allowTimeouts,
-        boundaryOverride.value_or(
-            DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY));
 
     dpor::algo::ParallelVerifyOptions options;
     options.max_workers = workers;
@@ -472,6 +505,11 @@ runRuntimeGrowthInvestigation(
                                      ? std::numeric_limits<std::size_t>::max()
                                      : *depthOverride;
         }
+
+        ThresholdFixture fixture(
+            validatorCount, !allowTimeouts, scenario.mBoundaryMode,
+            boundaryOverride.value_or(
+                DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY));
 
         auto replayMetrics =
             std::make_shared<DporNominationDporAdapter::ReplayMetrics>();
@@ -566,6 +604,8 @@ printInvestigationResults(std::ostream& out,
             << " num_nodes=" << validatorCount
             << " threshold=" << threshold
             << " timeouts=" << (allowTimeouts ? "on" : "off")
+            << " boundary_mode="
+            << boundaryModeName(result.mScenario.mBoundaryMode)
             << " workers=" << workers
             << " boundary=" << nominationRoundBoundary
             << " depth=";

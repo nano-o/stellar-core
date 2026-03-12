@@ -156,6 +156,7 @@ DporNominationNode::applyConfiguration(Configuration const& config)
         config.mNominationRoundBoundary == 0
             ? DEFAULT_NOMINATION_ROUND_BOUNDARY
             : config.mNominationRoundBoundary;
+    mBoundaryMode = config.mBoundaryMode;
 
     if (config.mPriorityLookup)
     {
@@ -221,6 +222,25 @@ DporNominationNode::isRoundBoundaryNominationEnvelope(
     auto const it = mNominationRoundBySlot.find(envelope.statement.slotIndex);
     return it != mNominationRoundBySlot.end() &&
            it->second >= mNominationRoundBoundary;
+}
+
+bool
+DporNominationNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
+{
+    auto const type = envelope.statement.pledges.type();
+    if (type == SCP_ST_NOMINATE)
+    {
+        return false;
+    }
+
+    switch (mBoundaryMode)
+    {
+    case BoundaryMode::Prepare:
+        return true;
+    case BoundaryMode::Commit:
+        return type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE;
+    }
+    throw std::logic_error("unknown replay boundary mode");
 }
 
 bool
@@ -290,14 +310,13 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
-    auto const isNominationEnvelope =
-        envelope.statement.pledges.type() == SCP_ST_NOMINATE;
     auto const isRoundBoundaryNomination =
         isRoundBoundaryNominationEnvelope(envelope);
+    auto const isModeBoundaryEnvelope = isEnvelopeBoundaryForMode(envelope);
     auto const alreadyCrossedBoundary = mHasCrossedNominationBoundary;
     auto const crossesBoundaryNow =
         !alreadyCrossedBoundary &&
-        (!isNominationEnvelope || isRoundBoundaryNomination);
+        (isRoundBoundaryNomination || isModeBoundaryEnvelope);
 
     if (crossesBoundaryNow)
     {
@@ -305,7 +324,8 @@ DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
     }
 
     // Two boundary triggers matter here:
-    // 1. the first non-nomination envelope, which is the PREPARE-side handoff
+    // 1. the first envelope that matches the configured replay boundary mode
+    //    (PREPARE-side handoff by default, COMMIT-side handoff in ballot mode)
     // 2. the first nomination envelope emitted once the boundary round has
     //    been armed
     // The round boundary can also be reached earlier in setupTimer() before
@@ -314,16 +334,14 @@ DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
     // appears for diagnostics.
     auto const shouldCaptureBoundaryEnvelope =
         !mNominationBoundaryEnvelope &&
-        ((!isNominationEnvelope && crossesBoundaryNow) ||
-         isRoundBoundaryNomination);
+        (crossesBoundaryNow || isRoundBoundaryNomination);
     if (shouldCaptureBoundaryEnvelope)
     {
         mNominationBoundaryEnvelope = envelope;
     }
 
     mEmittedEnvelopes.push_back(envelope);
-    if (isNominationEnvelope && !alreadyCrossedBoundary &&
-        !isRoundBoundaryNomination)
+    if (!alreadyCrossedBoundary && !crossesBoundaryNow)
     {
         mPendingEnvelopes.push_back(envelope);
     }

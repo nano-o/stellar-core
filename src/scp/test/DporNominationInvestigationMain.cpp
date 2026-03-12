@@ -33,7 +33,7 @@ printUsage(char const* argv0)
               << " [--workers N] [--num-nodes N] [--depth N] [--boundary N]"
                  " [--scenario ID] [--timeouts]\n"
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
-                 "3|largest, 4|unrestricted-followers\n";
+                 "3|largest, 4|unrestricted-followers, 5|commit-boundary\n";
 }
 
 uint32_t
@@ -66,6 +66,10 @@ parseScenarioValue(std::string_view value)
     if (value == "4" || value == "unrestricted-followers")
     {
         return InvestigationScenario::Id::UnrestrictedFollowers;
+    }
+    if (value == "5" || value == "commit-boundary")
+    {
+        return InvestigationScenario::Id::CommitBoundary;
     }
     throw std::invalid_argument("unknown scenario: " + std::string(value));
 }
