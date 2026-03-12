@@ -169,7 +169,7 @@ struct ThresholdFixture
 
 inline DporNominationDporAdapter::Program
 makeBoundedProgram(ThresholdFixture const& fixture,
-                   ProgressSteps const& stopSteps)
+                   ProgressSteps const& stopSteps, bool allowTimeouts = false)
 {
     if (stopSteps.size() != fixture.mValidatorCount)
     {
@@ -182,7 +182,7 @@ makeBoundedProgram(ThresholdFixture const& fixture,
         [&](auto tid, auto const& threadFn) {
             auto const nodeIndex = static_cast<std::size_t>(tid);
             program.threads[tid] =
-                [threadFn, stopSteps, nodeIndex](
+                [threadFn, stopSteps, nodeIndex, allowTimeouts](
                     auto const& trace,
                     std::size_t step) -> std::optional<
                         DporNominationDporAdapter::EventLabel> {
@@ -201,6 +201,11 @@ makeBoundedProgram(ThresholdFixture const& fixture,
                     std::get_if<DporNominationDporAdapter::ReceiveLabel>(
                         &*next);
                 if (receive == nullptr || receive->is_blocking())
+                {
+                    return next;
+                }
+
+                if (allowTimeouts)
                 {
                     return next;
                 }
@@ -418,7 +423,8 @@ runRuntimeGrowthInvestigation(
     std::optional<uint32_t> boundaryOverride = std::nullopt,
     std::optional<InvestigationScenario::Id> scenarioFilter =
         std::nullopt,
-    std::size_t validatorCount = kDefaultValidatorCount)
+    std::size_t validatorCount = kDefaultValidatorCount,
+    bool allowTimeouts = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
     ThresholdFixture fixture(
@@ -446,7 +452,8 @@ runRuntimeGrowthInvestigation(
         fixture.mAdapter.setReplayMetrics(replayMetrics);
 
         dpor::algo::DporConfigT<DporNominationValue> config;
-        config.program = makeBoundedProgram(fixture, scenario.mStopSteps);
+        config.program =
+            makeBoundedProgram(fixture, scenario.mStopSteps, allowTimeouts);
         config.max_depth = scenario.mMaxDepth;
         config.on_receive_branches =
             [receiveBranchMetrics](dpor::model::ThreadId,
@@ -496,7 +503,7 @@ runFourNodeRuntimeGrowthInvestigation(
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          boundaryOverride, scenarioFilter,
-                                         kDefaultValidatorCount);
+                                         kDefaultValidatorCount, false);
 }
 
 inline std::string
@@ -521,7 +528,8 @@ printInvestigationResults(std::ostream& out,
                           std::vector<InvestigationResult> const& results,
                           std::size_t workers,
                           uint32_t nominationRoundBoundary,
-                          std::size_t validatorCount)
+                          std::size_t validatorCount,
+                          bool allowTimeouts)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -530,6 +538,7 @@ printInvestigationResults(std::ostream& out,
             << "' scenario=" << scenarioName(result.mScenario.mId)
             << " num_nodes=" << validatorCount
             << " threshold=" << threshold
+            << " timeouts=" << (allowTimeouts ? "on" : "off")
             << " workers=" << workers
             << " boundary=" << nominationRoundBoundary
             << " depth=";
