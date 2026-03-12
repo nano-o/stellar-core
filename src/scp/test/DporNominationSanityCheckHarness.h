@@ -23,7 +23,8 @@ class DporNominationSanityCheckHarness
 {
   public:
     explicit DporNominationSanityCheckHarness(
-        std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet);
+        std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet,
+        DporNominationNode::Configuration const& config = {});
 
     static std::vector<SecretKey>
     makeValidatorSecretKeys(std::string const& seedPrefix, std::size_t count);
@@ -50,6 +51,8 @@ class DporNominationSanityCheckHarness
     void setCombineCandidates(
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
+
+    void applyConfiguration(DporNominationNode::Configuration const& config);
 
     std::size_t broadcastPendingEnvelopesOnce();
 

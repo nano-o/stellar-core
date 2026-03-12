@@ -28,6 +28,14 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
+    struct Configuration
+    {
+        std::function<uint64(NodeID const&)> mPriorityLookup;
+        std::function<uint64(Value const&)> mValueHash;
+        std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
+            mCombineCandidates;
+    };
+
     struct TimerState
     {
         uint64 mSlotIndex;
@@ -37,7 +45,8 @@ class DporNominationNode : public SCPDriver
     };
 
     explicit DporNominationNode(SecretKey const& secretKey,
-                                SCPQuorumSet const& localQSet);
+                                SCPQuorumSet const& localQSet,
+                                Configuration const& config = {});
 
     NodeID const&
     getNodeID() const;
@@ -73,6 +82,8 @@ class DporNominationNode : public SCPDriver
     void setCombineCandidates(
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
+
+    void applyConfiguration(Configuration const& config);
 
     bool hasActiveTimer(uint64 slotIndex, int timerID) const;
 

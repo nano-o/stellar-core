@@ -4,15 +4,9 @@
 
 #include "scp/test/DporNominationDporAdapter.h"
 #include "scp/test/DporNominationSanityCheckHarness.h"
+#include "scp/test/DporNominationTestUtils.h"
 
-#include "crypto/SHA.h"
-#include "scp/LocalNode.h"
 #include "test/Catch2.h"
-#include "xdrpp/marshal.h"
-
-#include <algorithm>
-#include <limits>
-#include <string>
 
 namespace stellar
 {
@@ -21,19 +15,7 @@ namespace
 {
 
 using ThreadId = dpor::model::ThreadId;
-
-Value
-makeValue(std::string const& label)
-{
-    return xdr::xdr_to_opaque(sha256(label));
-}
-
-Hash
-getNormalizedQSetHash(SecretKey const& secretKey, SCPQuorumSet const& qSet)
-{
-    DporNominationNode node(secretKey, qSet);
-    return node.getSCP().getLocalNode()->getQuorumSetHash();
-}
+using namespace dpor_nomination_test;
 
 struct ReplayFixture
 {
@@ -56,38 +38,14 @@ struct ReplayFixture
         , mPreviousValue(makeValue("previous"))
         , mXValue(makeValue("x"))
         , mYValue(makeValue("y"))
-        , mAdapter(mValidators, mQSet, 0, mPreviousValue,
-                   std::vector<Value>{mXValue, mYValue, mYValue})
+        , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
+                   std::vector<Value>{mXValue, mYValue, mYValue},
+                   makeTopLeaderConfiguration(mNodeIDs, 0))
     {
         // These Milestone 2 replay checks stay below candidate combination, so
         // the node driver's default combineCandidates implementation is enough.
-        mAdapter.setPriorityLookup([nodeIDs = mNodeIDs](NodeID const& nodeID) {
-            return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max()
-                                        : 1;
-        });
     }
 };
-
-void
-requireNominationEnvelope(SCPEnvelope const& envelope, NodeID const& nodeID,
-                          Hash const& qSetHash, uint64 slotIndex,
-                          std::vector<Value> votes,
-                          std::vector<Value> accepted)
-{
-    std::sort(votes.begin(), votes.end());
-    std::sort(accepted.begin(), accepted.end());
-
-    REQUIRE(envelope.statement.nodeID == nodeID);
-    REQUIRE(envelope.statement.slotIndex == slotIndex);
-    REQUIRE(envelope.statement.pledges.type() == SCP_ST_NOMINATE);
-
-    auto const& nomination = envelope.statement.pledges.nominate();
-    REQUIRE(nomination.quorumSetHash == qSetHash);
-    REQUIRE(std::vector<Value>(nomination.votes.begin(), nomination.votes.end()) ==
-            votes);
-    REQUIRE(std::vector<Value>(nomination.accepted.begin(),
-                               nomination.accepted.end()) == accepted);
-}
 
 DporNominationDporAdapter::SendLabel const&
 requireSend(DporNominationDporAdapter::EventLabel const& label)
@@ -161,16 +119,18 @@ TEST_CASE("dpor nomination replay captures stepwise send fanout and replay",
     REQUIRE(leaderSend0.destination == 1);
     REQUIRE(leaderSend0.value.mSenderThread == 0);
     REQUIRE(leaderSend0.value.mDestinationThread == 1);
-    REQUIRE(leaderSend0.value.mSlotIndex == 0);
+    REQUIRE(leaderSend0.value.mSlotIndex == kSlotIndex);
     requireNominationEnvelope(leaderSend0.value.mEnvelope, fixture.mNodeIDs[0],
-                              fixture.mQSetHash, 0, {fixture.mXValue}, {});
+                              fixture.mQSetHash, kSlotIndex,
+                              {fixture.mXValue}, {});
 
     auto leaderStep1 = program.threads.at(0)({}, 1);
     REQUIRE(leaderStep1.has_value());
     auto const& leaderSend1 = requireSend(*leaderStep1);
     REQUIRE(leaderSend1.destination == 2);
     requireNominationEnvelope(leaderSend1.value.mEnvelope, fixture.mNodeIDs[0],
-                              fixture.mQSetHash, 0, {fixture.mXValue}, {});
+                              fixture.mQSetHash, kSlotIndex,
+                              {fixture.mXValue}, {});
 
     auto leaderStep2 = program.threads.at(0)({}, 2);
     REQUIRE(leaderStep2.has_value());
@@ -191,7 +151,7 @@ TEST_CASE("dpor nomination replay captures stepwise send fanout and replay",
     REQUIRE(followerSend.value.mSenderThread == 1);
     REQUIRE(followerSend.value.mDestinationThread == 0);
     requireNominationEnvelope(followerSend.value.mEnvelope, fixture.mNodeIDs[1],
-                              fixture.mQSetHash, 0, {fixture.mXValue},
+                              fixture.mQSetHash, kSlotIndex, {fixture.mXValue},
                               {fixture.mXValue});
 }
 
@@ -206,31 +166,44 @@ TEST_CASE("dpor nomination replay detects the first ballot boundary",
     auto xValue = makeValue("x-boundary");
     auto yValue = makeValue("y-boundary");
 
-    DporNominationDporAdapter adapter(validators, qSet, 0, previousValue,
-                                      std::vector<Value>{xValue, yValue,
-                                                         yValue, yValue});
-    adapter.setPriorityLookup([nodeIDs](NodeID const& nodeID) {
-        return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max() : 1;
-    });
+    auto config = makeTopLeaderConfiguration(nodeIDs, 0);
 
-    DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet);
-    sanityCheckHarness.setPriorityLookup([nodeIDs](NodeID const& nodeID) {
-        return nodeID == nodeIDs[0] ? std::numeric_limits<uint64_t>::max() : 1;
-    });
+    DporNominationDporAdapter adapter(validators, qSet, kSlotIndex,
+                                      previousValue,
+                                      std::vector<Value>{xValue, yValue,
+                                                         yValue, yValue},
+                                      config);
+
+    // This bootstrap cross-check still uses the live harness to generate a
+    // trace for the replay adapter. The harness itself is sanity-checked in
+    // SCPDporNominationTests.cpp; later verify()-driven milestone 3 tests
+    // should reduce reliance on harness-generated traces.
+    DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet,
+                                                        config);
 
     REQUIRE(
-        sanityCheckHarness.getNode(0).nominate(0, xValue, previousValue));
+        sanityCheckHarness.getNode(0).nominate(kSlotIndex, xValue,
+                                               previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(1).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(1).nominate(kSlotIndex, yValue,
+                                               previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(2).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(2).nominate(kSlotIndex, yValue,
+                                               previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(3).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(3).nominate(kSlotIndex, yValue,
+                                               previousValue));
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
-    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
-    deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+    // First pass delivers the leader's initial nomination, the second pass
+    // delivers the followers' nomination echoes, and the third pass lets the
+    // leader observe the quorum-supported accepted state and cross the
+    // nomination boundary.
+    constexpr std::size_t kBoundaryTraceDeliveryPasses = 3;
+    for (std::size_t i = 0; i < kBoundaryTraceDeliveryPasses; ++i)
+    {
+        deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+    }
     REQUIRE(sanityCheckHarness.getNode(0).hasCrossedNominationBoundary());
 
     auto boundaryEnvelope = adapter.getNominationBoundaryEnvelope(0, leaderTrace);

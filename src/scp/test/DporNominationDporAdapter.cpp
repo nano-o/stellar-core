@@ -65,7 +65,8 @@ DporNominationDporAdapter::ReplayState::ReplayState(SecretKey const& secretKey,
 DporNominationDporAdapter::DporNominationDporAdapter(
     std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet,
     uint64_t slotIndex, Value const& previousValue,
-    std::vector<Value> const& initialValues)
+    std::vector<Value> const& initialValues,
+    DporNominationNode::Configuration const& config)
     : mValidators(validators)
     , mQSet(qSet)
     , mSlotIndex(slotIndex)
@@ -81,6 +82,7 @@ DporNominationDporAdapter::DporNominationDporAdapter(
         throw std::invalid_argument(
             "initialValues must match validator count");
     }
+    applyConfiguration(config);
 }
 
 std::size_t
@@ -115,6 +117,24 @@ DporNominationDporAdapter::setCombineCandidates(
         fn)
 {
     mCombineCandidates = fn;
+}
+
+void
+DporNominationDporAdapter::applyConfiguration(
+    DporNominationNode::Configuration const& config)
+{
+    if (config.mPriorityLookup)
+    {
+        setPriorityLookup(config.mPriorityLookup);
+    }
+    if (config.mValueHash)
+    {
+        setValueHash(config.mValueHash);
+    }
+    if (config.mCombineCandidates)
+    {
+        setCombineCandidates(config.mCombineCandidates);
+    }
 }
 
 void

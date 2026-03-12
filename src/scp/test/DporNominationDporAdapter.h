@@ -53,7 +53,9 @@ class DporNominationDporAdapter
     DporNominationDporAdapter(std::vector<SecretKey> const& validators,
                               SCPQuorumSet const& qSet, uint64_t slotIndex,
                               Value const& previousValue,
-                              std::vector<Value> const& initialValues);
+                              std::vector<Value> const& initialValues,
+                              DporNominationNode::Configuration const& config =
+                                  {});
 
     std::size_t
     size() const;
@@ -68,6 +70,8 @@ class DporNominationDporAdapter
     void setCombineCandidates(
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
+
+    void applyConfiguration(DporNominationNode::Configuration const& config);
 
     std::optional<EventLabel>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,

@@ -434,3 +434,109 @@ The DPOR-facing side should mirror the existing prototype structure:
 - no attempt to model full SCP ballot/externalize behavior yet
 - no attempt to absorb the full DPOR repo into `src/`
 - no attempt to upstream the prototype repo's full build, API, or examples
+
+## Milestone 3 Implementation Plan
+
+Start milestone 3 with one very small DPOR-backed nomination topology:
+
+- 3 validators
+- one homogeneous quorum set shared by all nodes
+- quorum threshold 2
+- one fixed slot index
+- deterministic leader priority with node 0 as the top leader
+- initial values chosen to create a simple leader/follower split, such as
+  `[x, y, y]`
+
+This is the smallest topology that still exercises:
+
+- real leader selection
+- message fanout across multiple receivers
+- timer-versus-delivery races
+- transition to the first ballot boundary
+
+Do not start with a 2-node topology unless needed for debugging. It is smaller,
+but too degenerate to serve as a useful bridge to the existing `core5`
+nomination tests.
+
+### Phase 1: Add Small-Topology DPOR Property Tests
+
+Add the first real `verify()`-driven nomination tests in
+`src/scp/test/SCPDporNominationTests.cpp`.
+
+These tests should:
+
+- construct a `DporNominationDporAdapter` for the 3-node topology
+- run `dpor::algo::verify(...)` on the adapter program
+- use `on_execution` to inspect each explored execution
+- reconstruct per-thread outcomes from `graph.thread_trace(threadID)`
+- use `getNominationBoundaryEnvelope(...)` to recover the first ballot boundary
+  reached by a thread, when present
+
+The first execution-summary helpers only need to record:
+
+- whether a thread observed a timer bottom
+- whether a thread crossed the nomination boundary
+- the first boundary envelope, if any
+
+Keep this helper logic local to the test file unless adapter refactoring is
+required to avoid duplication.
+
+### Phase 2: Add Two Initial Real Tests
+
+Add one small leader-focused test and one small timeout-focused test.
+
+Leader test:
+
+- fixed leader priority with node 0 highest
+- initial values like `[x, y, y]`
+- require `verify()` to finish with `AllExecutionsExplored`
+- assert that every observed nomination boundary envelope is a `PREPARE`
+  envelope for ballot `(1, x)`
+
+Timeout test:
+
+- use the same 3-node topology
+- require `verify()` to finish with `AllExecutionsExplored`
+- assert that DPOR explores at least one execution where a follower observes a
+  nomination timer firing
+- assert that DPOR also explores at least one execution where message delivery
+  wins before that timeout
+
+This gives milestone 3 a real DPOR property-checking foothold without yet
+trying to port the entire `core5` matrix.
+
+### Phase 3: Keep Support Changes Minimal
+
+The preferred first implementation should avoid production SCP changes.
+
+Expected code changes should stay in:
+
+- `src/scp/test/SCPDporNominationTests.cpp`
+- optionally `src/scp/test/DporNominationDporAdapter.h`
+- optionally `src/scp/test/DporNominationDporAdapter.cpp`
+
+Only add adapter helpers if test-side graph inspection becomes too awkward.
+Prefer small replay-oriented helpers over broad restructuring.
+
+### Phase 4: Use The Small Topology As The Bridge To Core5
+
+Once the 3-node DPOR tests are stable, adapt selected nomination cases from
+`src/scp/test/SCPTests.cpp`.
+
+Start with the cases most aligned with the current replay model:
+
+- `nomination - v0 is top`
+- simple quorum-driven acceptance of the leader value
+- simple timeout-driven follow-up behavior
+
+Defer cases that need behavior the current adapter does not model well yet,
+especially:
+
+- dead or inactive validators
+- explicit restored-state scenarios
+- larger `core5` quorum/v-blocking combinations whose purpose depends on the
+  5-node threshold geometry
+
+In particular, the `v1 dead, timeout` style cases should wait until the adapter
+can model nodes that are present in the quorum set but do not actively execute
+their nomination thread.

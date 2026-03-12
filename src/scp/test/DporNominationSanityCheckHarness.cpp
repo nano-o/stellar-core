@@ -13,7 +13,8 @@ namespace stellar
 {
 
 DporNominationSanityCheckHarness::DporNominationSanityCheckHarness(
-    std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet)
+    std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet,
+    DporNominationNode::Configuration const& config)
 {
     if (validators.empty())
     {
@@ -24,7 +25,7 @@ DporNominationSanityCheckHarness::DporNominationSanityCheckHarness(
     for (auto const& validator : validators)
     {
         mNodes.emplace_back(
-            std::make_unique<DporNominationNode>(validator, qSet));
+            std::make_unique<DporNominationNode>(validator, qSet, config));
     }
 }
 
@@ -113,6 +114,16 @@ DporNominationSanityCheckHarness::setCombineCandidates(
     for (auto& node : mNodes)
     {
         node->setCombineCandidates(fn);
+    }
+}
+
+void
+DporNominationSanityCheckHarness::applyConfiguration(
+    DporNominationNode::Configuration const& config)
+{
+    for (auto& node : mNodes)
+    {
+        node->applyConfiguration(config);
     }
 }
 

@@ -3,13 +3,10 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/DporNominationSanityCheckHarness.h"
+#include "scp/test/DporNominationTestUtils.h"
 
-#include "crypto/SHA.h"
 #include "scp/Slot.h"
 #include "test/Catch2.h"
-#include "xdrpp/marshal.h"
-
-#include <algorithm>
 
 namespace stellar
 {
@@ -17,46 +14,7 @@ namespace stellar
 namespace
 {
 
-Value
-makeValue(std::string const& label)
-{
-    return xdr::xdr_to_opaque(sha256(label));
-}
-
-void
-requireNominationEnvelope(SCPEnvelope const& envelope, NodeID const& nodeID,
-                          Hash const& qSetHash, uint64 slotIndex,
-                          std::vector<Value> votes,
-                          std::vector<Value> accepted)
-{
-    std::sort(votes.begin(), votes.end());
-    std::sort(accepted.begin(), accepted.end());
-
-    REQUIRE(envelope.statement.nodeID == nodeID);
-    REQUIRE(envelope.statement.slotIndex == slotIndex);
-    REQUIRE(envelope.statement.pledges.type() == SCP_ST_NOMINATE);
-
-    auto const& nomination = envelope.statement.pledges.nominate();
-    REQUIRE(nomination.quorumSetHash == qSetHash);
-    REQUIRE(std::vector<Value>(nomination.votes.begin(), nomination.votes.end()) ==
-            votes);
-    REQUIRE(std::vector<Value>(nomination.accepted.begin(),
-                               nomination.accepted.end()) == accepted);
-}
-
-void
-requirePrepareEnvelope(SCPEnvelope const& envelope, NodeID const& nodeID,
-                       Hash const& qSetHash, uint64 slotIndex,
-                       SCPBallot const& ballot)
-{
-    REQUIRE(envelope.statement.nodeID == nodeID);
-    REQUIRE(envelope.statement.slotIndex == slotIndex);
-    REQUIRE(envelope.statement.pledges.type() == SCP_ST_PREPARE);
-
-    auto const& prepare = envelope.statement.pledges.prepare();
-    REQUIRE(prepare.quorumSetHash == qSetHash);
-    REQUIRE(prepare.ballot == ballot);
-}
+using namespace dpor_nomination_test;
 
 }
 
@@ -72,11 +30,9 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
     auto previousValue = makeValue("previous");
     auto xValue = makeValue("x");
     auto yValue = makeValue("y");
+    auto config = makeTopLeaderConfiguration(nodeIDs, 0);
 
-    DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet);
-    sanityCheckHarness.setPriorityLookup([&](NodeID const& nodeID) {
-        return nodeID == nodeIDs[0] ? UINT64_MAX : 1;
-    });
+    DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet, config);
 
     auto localQSetHash = [&](std::size_t index) {
         return sanityCheckHarness.getNode(index)
@@ -87,45 +43,57 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
 
     REQUIRE(sanityCheckHarness.size() == 4);
 
-    REQUIRE(sanityCheckHarness.getNode(0).nominate(0, xValue, previousValue));
+    REQUIRE(sanityCheckHarness.getNode(0).nominate(kSlotIndex, xValue,
+                                                   previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(1).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(1).nominate(kSlotIndex, yValue,
+                                               previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(2).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(2).nominate(kSlotIndex, yValue,
+                                               previousValue));
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(3).nominate(0, yValue, previousValue));
+        sanityCheckHarness.getNode(3).nominate(kSlotIndex, yValue,
+                                               previousValue));
 
     REQUIRE(
-        sanityCheckHarness.getNode(1).hasActiveTimer(0, Slot::NOMINATION_TIMER));
+        sanityCheckHarness.getNode(1).hasActiveTimer(kSlotIndex,
+                                                     Slot::NOMINATION_TIMER));
     REQUIRE(
-        sanityCheckHarness.getNode(2).hasActiveTimer(0, Slot::NOMINATION_TIMER));
+        sanityCheckHarness.getNode(2).hasActiveTimer(kSlotIndex,
+                                                     Slot::NOMINATION_TIMER));
     REQUIRE(
-        sanityCheckHarness.getNode(3).hasActiveTimer(0, Slot::NOMINATION_TIMER));
+        sanityCheckHarness.getNode(3).hasActiveTimer(kSlotIndex,
+                                                     Slot::NOMINATION_TIMER));
 
     auto const& leaderEnvelopes =
         sanityCheckHarness.getNode(0).getEmittedEnvelopes();
     REQUIRE(leaderEnvelopes.size() == 1);
-    requireNominationEnvelope(leaderEnvelopes[0], nodeIDs[0], localQSetHash(0), 0,
-                              {xValue}, {});
+    requireNominationEnvelope(leaderEnvelopes[0], nodeIDs[0], localQSetHash(0),
+                              kSlotIndex, {xValue}, {});
 
-    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() == 3);
+    constexpr std::size_t kLeaderFanoutDeliveries = 3;
+    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() ==
+            kLeaderFanoutDeliveries);
 
     for (std::size_t i = 1; i < sanityCheckHarness.size(); ++i)
     {
         auto const& peerEnvelopes =
             sanityCheckHarness.getNode(i).getEmittedEnvelopes();
         REQUIRE(peerEnvelopes.size() == 1);
-        requireNominationEnvelope(peerEnvelopes[0], nodeIDs[i], localQSetHash(i), 0,
-                                  {xValue}, {});
+        requireNominationEnvelope(peerEnvelopes[0], nodeIDs[i], localQSetHash(i),
+                                  kSlotIndex, {xValue}, {});
     }
 
-    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() == 9);
+    // Three peers each fan out a single nomination to the other three nodes.
+    constexpr std::size_t kFollowerEchoDeliveries = 9;
+    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() ==
+            kFollowerEchoDeliveries);
 
     auto const& leaderUpdates =
         sanityCheckHarness.getNode(0).getEmittedEnvelopes();
     REQUIRE(leaderUpdates.size() >= 2);
-    requireNominationEnvelope(leaderUpdates[1], nodeIDs[0], localQSetHash(0), 0,
-                              {xValue}, {xValue});
+    requireNominationEnvelope(leaderUpdates[1], nodeIDs[0], localQSetHash(0),
+                              kSlotIndex, {xValue}, {xValue});
 
     REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() > 0);
 
@@ -133,11 +101,12 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
         sanityCheckHarness.getNode(0).getNominationBoundaryEnvelope();
     REQUIRE(sanityCheckHarness.getNode(0).hasCrossedNominationBoundary());
     REQUIRE(boundaryEnvelope != nullptr);
-    requirePrepareEnvelope(*boundaryEnvelope, nodeIDs[0], localQSetHash(0), 0,
-                           SCPBallot{1, xValue});
+    requirePrepareEnvelope(*boundaryEnvelope, nodeIDs[0], localQSetHash(0),
+                           kSlotIndex, SCPBallot{1, xValue});
     REQUIRE(sanityCheckHarness.getNode(0).takePendingEnvelopes().empty());
     REQUIRE_FALSE(
-        sanityCheckHarness.getNode(0).hasActiveTimer(0, Slot::NOMINATION_TIMER));
+        sanityCheckHarness.getNode(0).hasActiveTimer(kSlotIndex,
+                                                     Slot::NOMINATION_TIMER));
 }
 
 }

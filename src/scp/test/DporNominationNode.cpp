@@ -38,7 +38,8 @@ defaultValueHash(Value const& value)
 }
 
 DporNominationNode::DporNominationNode(SecretKey const& secretKey,
-                                       SCPQuorumSet const& localQSet)
+                                       SCPQuorumSet const& localQSet,
+                                       Configuration const& config)
     : mSecretKey(secretKey)
     , mSCP(*this, mSecretKey.getPublicKey(), true, localQSet)
     , mValueHash(defaultValueHash)
@@ -48,6 +49,7 @@ DporNominationNode::DporNominationNode(SecretKey const& secretKey,
     // heterogeneous tests may still want access to the original shape.
     storeQuorumSet(localQSet);
     storeQuorumSet(mSCP.getLocalNode()->getQuorumSet());
+    applyConfiguration(config);
 }
 
 NodeID const&
@@ -138,6 +140,23 @@ DporNominationNode::setCombineCandidates(
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const& fn)
 {
     mCombineCandidates = fn;
+}
+
+void
+DporNominationNode::applyConfiguration(Configuration const& config)
+{
+    if (config.mPriorityLookup)
+    {
+        setPriorityLookup(config.mPriorityLookup);
+    }
+    if (config.mValueHash)
+    {
+        setValueHash(config.mValueHash);
+    }
+    if (config.mCombineCandidates)
+    {
+        setCombineCandidates(config.mCombineCandidates);
+    }
 }
 
 bool
