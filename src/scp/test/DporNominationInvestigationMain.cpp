@@ -223,10 +223,15 @@ main(int argc, char* argv[])
         }
         return 0;
     }
-    catch (std::exception const& e)
+    catch (std::invalid_argument const& e)
     {
         std::cerr << e.what() << '\n';
         printUsage(argv[0]);
         return 2;
+    }
+    catch (std::exception const& e)
+    {
+        std::cerr << e.what() << '\n';
+        return 1;
     }
 }
