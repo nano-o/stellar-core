@@ -137,7 +137,8 @@ TEST_CASE("dpor nomination replay captures stepwise send fanout and replay",
                               {fixture.mXValue});
 }
 
-TEST_CASE("dpor nomination replay detects the first ballot boundary",
+TEST_CASE("dpor nomination replay detects a prepare boundary on the leader "
+          "path",
           "[scp][dpor][nomination][replay]")
 {
     auto validators = DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -192,6 +193,27 @@ TEST_CASE("dpor nomination replay detects the first ballot boundary",
     REQUIRE(boundaryEnvelope.has_value());
     REQUIRE(boundaryEnvelope->statement.nodeID == nodeIDs[0]);
     REQUIRE(boundaryEnvelope->statement.pledges.type() == SCP_ST_PREPARE);
+}
+
+TEST_CASE("dpor nomination replay detects the timer-driven round boundary",
+          "[scp][dpor][nomination][replay]")
+{
+    ReplayFixture fixture;
+    constexpr std::size_t kLeaderNodeIndex = 0;
+
+    DporNominationDporAdapter::ThreadTrace leaderTrace;
+    constexpr std::size_t kRoundBoundaryTimeouts =
+        DporNominationNode::NOMINATION_ROUND_BOUNDARY - 1;
+    for (std::size_t i = 0; i < kRoundBoundaryTimeouts; ++i)
+    {
+        leaderTrace.emplace_back(dpor::model::BottomValue{});
+    }
+
+    REQUIRE(fixture.mAdapter.hasReachedNominationBoundary(kLeaderNodeIndex,
+                                                          leaderTrace));
+    REQUIRE_FALSE(fixture.mAdapter.getNominationBoundaryEnvelope(kLeaderNodeIndex,
+                                                                 leaderTrace)
+                      .has_value());
 }
 
 }

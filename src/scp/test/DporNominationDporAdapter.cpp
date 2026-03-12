@@ -282,16 +282,10 @@ DporNominationDporAdapter::makeProgram() const
     return program;
 }
 
-std::optional<SCPEnvelope>
-DporNominationDporAdapter::getNominationBoundaryEnvelope(
-    std::size_t nodeIndex, ThreadTrace const& trace) const
+void
+DporNominationDporAdapter::replayTraceForBoundaryInspection(
+    ReplayState& state, std::size_t nodeIndex, ThreadTrace const& trace) const
 {
-    if (nodeIndex >= mValidators.size())
-    {
-        throw std::out_of_range("node index out of range");
-    }
-
-    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
     initializeNode(state, nodeIndex);
     discardPendingEnvelopes(state.mNode);
 
@@ -305,6 +299,33 @@ DporNominationDporAdapter::getNominationBoundaryEnvelope(
         replayObservation(state.mNode, nodeIndex, observed);
         discardPendingEnvelopes(state.mNode);
     }
+}
+
+bool
+DporNominationDporAdapter::hasReachedNominationBoundary(
+    std::size_t nodeIndex, ThreadTrace const& trace) const
+{
+    if (nodeIndex >= mValidators.size())
+    {
+        throw std::out_of_range("node index out of range");
+    }
+
+    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
+    replayTraceForBoundaryInspection(state, nodeIndex, trace);
+    return state.mNode.hasCrossedNominationBoundary();
+}
+
+std::optional<SCPEnvelope>
+DporNominationDporAdapter::getNominationBoundaryEnvelope(
+    std::size_t nodeIndex, ThreadTrace const& trace) const
+{
+    if (nodeIndex >= mValidators.size())
+    {
+        throw std::out_of_range("node index out of range");
+    }
+
+    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
+    replayTraceForBoundaryInspection(state, nodeIndex, trace);
 
     auto const* boundaryEnvelope = state.mNode.getNominationBoundaryEnvelope();
     if (!boundaryEnvelope)

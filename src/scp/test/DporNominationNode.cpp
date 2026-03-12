@@ -6,6 +6,7 @@
 
 #include "crypto/SHA.h"
 #include "scp/LocalNode.h"
+#include "scp/Slot.h"
 #include "xdrpp/marshal.h"
 
 #include <limits>
@@ -160,6 +161,20 @@ DporNominationNode::applyConfiguration(Configuration const& config)
 }
 
 bool
+DporNominationNode::isRoundBoundaryNominationEnvelope(
+    SCPEnvelope const& envelope) const
+{
+    if (envelope.statement.pledges.type() != SCP_ST_NOMINATE)
+    {
+        return false;
+    }
+
+    auto const it = mNominationRoundBySlot.find(envelope.statement.slotIndex);
+    return it != mNominationRoundBySlot.end() &&
+           it->second >= NOMINATION_ROUND_BOUNDARY;
+}
+
+bool
 DporNominationNode::hasActiveTimer(uint64 slotIndex, int timerID) const
 {
     return mTimers.find({slotIndex, timerID}) != mTimers.end();
@@ -197,7 +212,7 @@ DporNominationNode::fireTimer(uint64 slotIndex, int timerID)
 bool
 DporNominationNode::hasCrossedNominationBoundary() const
 {
-    return mNominationBoundaryEnvelope.has_value();
+    return mHasCrossedNominationBoundary;
 }
 
 SCPEnvelope const*
@@ -226,14 +241,28 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
-    auto const crossesBoundary =
-        envelope.statement.pledges.type() != SCP_ST_NOMINATE;
-    if (!mNominationBoundaryEnvelope && crossesBoundary)
+    auto const alreadyCrossedBoundary = mHasCrossedNominationBoundary;
+    auto const crossesBoundaryNow =
+        !alreadyCrossedBoundary &&
+        (envelope.statement.pledges.type() != SCP_ST_NOMINATE ||
+         isRoundBoundaryNominationEnvelope(envelope));
+
+    if (crossesBoundaryNow)
+    {
+        mHasCrossedNominationBoundary = true;
+    }
+
+    if (!mNominationBoundaryEnvelope &&
+        (crossesBoundaryNow ||
+         (alreadyCrossedBoundary &&
+          isRoundBoundaryNominationEnvelope(envelope))))
     {
         mNominationBoundaryEnvelope = envelope;
     }
+
     mEmittedEnvelopes.push_back(envelope);
-    if (!crossesBoundary)
+    if (envelope.statement.pledges.type() == SCP_ST_NOMINATE &&
+        !alreadyCrossedBoundary && !crossesBoundaryNow)
     {
         mPendingEnvelopes.push_back(envelope);
     }
@@ -302,6 +331,16 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
                                std::chrono::milliseconds timeout,
                                std::function<void()> cb)
 {
+    if (timerID == Slot::NOMINATION_TIMER && mPendingNominationRound)
+    {
+        mNominationRoundBySlot[slotIndex] = *mPendingNominationRound;
+        if (*mPendingNominationRound >= NOMINATION_ROUND_BOUNDARY)
+        {
+            mHasCrossedNominationBoundary = true;
+        }
+        mPendingNominationRound.reset();
+    }
+
     mTimers[{slotIndex, timerID}] = TimerState{slotIndex, timerID, timeout, cb};
 }
 
@@ -314,6 +353,11 @@ DporNominationNode::stopTimer(uint64 slotIndex, int timerID)
 std::chrono::milliseconds
 DporNominationNode::computeTimeout(uint32 roundNumber, bool isNomination)
 {
+    if (isNomination)
+    {
+        mPendingNominationRound = roundNumber;
+    }
+
     auto const initialTimeoutMS =
         isNomination ? mInitialNominationTimeoutMS : mInitialBallotTimeoutMS;
     auto const incrementTimeoutMS = isNomination

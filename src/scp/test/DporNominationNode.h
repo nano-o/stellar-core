@@ -28,6 +28,8 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
+    static constexpr uint32_t NOMINATION_ROUND_BOUNDARY = 3;
+
     struct Configuration
     {
         std::function<uint64(NodeID const&)> mPriorityLookup;
@@ -118,6 +120,7 @@ class DporNominationNode : public SCPDriver
     using TimerKey = std::pair<uint64, int>;
 
     void applyConfiguration(Configuration const& config);
+    bool isRoundBoundaryNominationEnvelope(SCPEnvelope const& envelope) const;
 
     SecretKey mSecretKey;
     SCP mSCP;
@@ -133,6 +136,9 @@ class DporNominationNode : public SCPDriver
     std::vector<SCPEnvelope> mEmittedEnvelopes;
     std::vector<SCPEnvelope> mPendingEnvelopes;
     std::map<TimerKey, TimerState> mTimers;
+    std::map<uint64, uint32_t> mNominationRoundBySlot;
+    std::optional<uint32_t> mPendingNominationRound;
+    bool mHasCrossedNominationBoundary{false};
     std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
 };
 

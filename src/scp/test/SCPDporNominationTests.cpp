@@ -8,6 +8,12 @@
 #include "scp/Slot.h"
 #include "test/Catch2.h"
 
+#include <dpor/algo/dpor.hpp>
+
+#include <algorithm>
+#include <optional>
+#include <vector>
+
 namespace stellar
 {
 
@@ -15,6 +21,125 @@ namespace
 {
 
 using namespace dpor_nomination_test;
+using VerifyConfig = dpor::algo::DporConfigT<DporNominationValue>;
+using VerifyResultKind = dpor::algo::VerifyResultKind;
+
+constexpr std::size_t kSmallTopologyValidatorCount = 3;
+constexpr std::size_t kSmallTopologyThreshold = 2;
+constexpr std::size_t kLeaderIndex = 0;
+constexpr std::size_t kFirstFollowerIndex = 1;
+constexpr std::size_t kNominationVerifyMaxDepth = 16;
+
+struct SmallTopologyVerifyFixture
+{
+    std::vector<SecretKey> mValidators;
+    std::vector<NodeID> mNodeIDs;
+    SCPQuorumSet mQSet;
+    Value mPreviousValue;
+    Value mXValue;
+    Value mYValue;
+    DporNominationDporAdapter mAdapter;
+
+    SmallTopologyVerifyFixture()
+        : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
+              "dpor-nomination-verify-", kSmallTopologyValidatorCount))
+        , mNodeIDs(DporNominationSanityCheckHarness::getNodeIDs(mValidators))
+        , mQSet(DporNominationSanityCheckHarness::makeQuorumSet(
+              mNodeIDs, kSmallTopologyThreshold))
+        , mPreviousValue(makeValue("previous-verify"))
+        , mXValue(makeValue("x-verify"))
+        , mYValue(makeValue("y-verify"))
+        , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
+                   std::vector<Value>{mXValue, mYValue, mYValue},
+                   makeTopLeaderConfiguration(mNodeIDs, kLeaderIndex))
+    {
+    }
+};
+
+struct ThreadExecutionSummary
+{
+    DporNominationDporAdapter::ThreadTrace mTrace;
+    std::size_t mTimerBottomCount{0};
+    bool mReachedBoundary{false};
+    std::optional<SCPEnvelope> mBoundaryEnvelope;
+};
+
+struct ExecutionSummary
+{
+    std::vector<ThreadExecutionSummary> mThreads;
+};
+
+struct VerifyExplorationSummary
+{
+    dpor::algo::VerifyResult mVerifyResult;
+    std::vector<ExecutionSummary> mExecutions;
+};
+
+ExecutionSummary
+summarizeExecution(
+    SmallTopologyVerifyFixture const& fixture,
+    dpor::model::ExplorationGraphT<DporNominationValue> const& graph)
+{
+    ExecutionSummary summary;
+    summary.mThreads.reserve(fixture.mAdapter.size());
+
+    for (std::size_t nodeIndex = 0; nodeIndex < fixture.mAdapter.size();
+         ++nodeIndex)
+    {
+        auto trace =
+            graph.thread_trace(DporNominationDporAdapter::toThreadID(nodeIndex));
+        auto const timerBottomCount =
+            static_cast<std::size_t>(std::count_if(
+                trace.begin(), trace.end(),
+                [](auto const& observed) { return observed.is_bottom(); }));
+        auto const reachedBoundary =
+            fixture.mAdapter.hasReachedNominationBoundary(nodeIndex, trace);
+        auto boundaryEnvelope =
+            reachedBoundary
+                ? fixture.mAdapter.getNominationBoundaryEnvelope(nodeIndex,
+                                                                 trace)
+                : std::nullopt;
+
+        ThreadExecutionSummary threadSummary;
+        threadSummary.mTrace = std::move(trace);
+        threadSummary.mTimerBottomCount = timerBottomCount;
+        threadSummary.mReachedBoundary = reachedBoundary;
+        threadSummary.mBoundaryEnvelope = std::move(boundaryEnvelope);
+        summary.mThreads.push_back(std::move(threadSummary));
+    }
+
+    return summary;
+}
+
+VerifyExplorationSummary
+exploreExecutions(SmallTopologyVerifyFixture const& fixture)
+{
+    VerifyExplorationSummary summary;
+
+    VerifyConfig config;
+    config.program = fixture.mAdapter.makeProgram();
+    config.max_depth = kNominationVerifyMaxDepth;
+    config.on_execution = [&summary, &fixture](auto const& graph) {
+        summary.mExecutions.push_back(summarizeExecution(fixture, graph));
+    };
+
+    summary.mVerifyResult = dpor::algo::verify(config);
+    return summary;
+}
+
+bool
+traceStartsWithTimerBottom(DporNominationDporAdapter::ThreadTrace const& trace)
+{
+    return !trace.empty() && trace.front().is_bottom();
+}
+
+bool
+traceStartsWithDeliveryFrom(DporNominationDporAdapter::ThreadTrace const& trace,
+                            dpor::model::ThreadId senderThread)
+{
+    return !trace.empty() && !trace.front().is_bottom() &&
+           trace.front().value().mSenderThread == senderThread;
+}
 
 }
 
@@ -107,6 +232,72 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
     REQUIRE_FALSE(
         sanityCheckHarness.getNode(0).hasActiveTimer(kSlotIndex,
                                                      Slot::NOMINATION_TIMER));
+}
+
+TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
+          "[scp][dpor][nomination]")
+{
+    SmallTopologyVerifyFixture fixture;
+    auto const exploration = exploreExecutions(fixture);
+
+    REQUIRE(exploration.mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE_FALSE(exploration.mExecutions.empty());
+
+    bool sawFollowerTimeoutBeforeDelivery = false;
+    bool sawFollowerDeliveryBeforeTimeout = false;
+    auto const leaderThread =
+        DporNominationDporAdapter::toThreadID(kLeaderIndex);
+
+    for (auto const& execution : exploration.mExecutions)
+    {
+        for (std::size_t followerIndex = kFirstFollowerIndex;
+             followerIndex < execution.mThreads.size(); ++followerIndex)
+        {
+            auto const& trace = execution.mThreads[followerIndex].mTrace;
+            sawFollowerTimeoutBeforeDelivery |=
+                traceStartsWithTimerBottom(trace);
+            sawFollowerDeliveryBeforeTimeout |=
+                traceStartsWithDeliveryFrom(trace, leaderThread);
+        }
+    }
+
+    REQUIRE(sawFollowerTimeoutBeforeDelivery);
+    REQUIRE(sawFollowerDeliveryBeforeTimeout);
+}
+
+TEST_CASE("dpor nomination verify terminates timeout-heavy executions at the "
+          "round boundary", "[scp][dpor][nomination]")
+{
+    SmallTopologyVerifyFixture fixture;
+    auto const exploration = exploreExecutions(fixture);
+
+    REQUIRE(exploration.mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+
+    bool sawTimerDrivenBoundary = false;
+    bool sawTimerBoundaryWithoutEnvelope = false;
+    constexpr std::size_t kRoundBoundaryTimeouts =
+        DporNominationNode::NOMINATION_ROUND_BOUNDARY - 1;
+
+    for (auto const& execution : exploration.mExecutions)
+    {
+        for (auto const& threadSummary : execution.mThreads)
+        {
+            if (!threadSummary.mReachedBoundary ||
+                threadSummary.mTimerBottomCount < kRoundBoundaryTimeouts)
+            {
+                continue;
+            }
+
+            sawTimerDrivenBoundary = true;
+            sawTimerBoundaryWithoutEnvelope |=
+                !threadSummary.mBoundaryEnvelope.has_value();
+        }
+    }
+
+    REQUIRE(sawTimerDrivenBoundary);
+    REQUIRE(sawTimerBoundaryWithoutEnvelope);
 }
 
 }

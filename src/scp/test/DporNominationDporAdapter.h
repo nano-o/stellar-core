@@ -78,6 +78,10 @@ class DporNominationDporAdapter
     Program
     makeProgram() const;
 
+    bool
+    hasReachedNominationBoundary(std::size_t nodeIndex,
+                                 ThreadTrace const& trace) const;
+
     std::optional<SCPEnvelope>
     getNominationBoundaryEnvelope(std::size_t nodeIndex,
                                   ThreadTrace const& trace) const;
@@ -102,6 +106,10 @@ class DporNominationDporAdapter
 
     void queuePendingNominationSends(ReplayState& state,
                                      std::size_t senderIndex) const;
+
+    void replayTraceForBoundaryInspection(ReplayState& state,
+                                          std::size_t nodeIndex,
+                                          ThreadTrace const& trace) const;
 
     std::vector<SecretKey> mValidators;
     SCPQuorumSet mQSet;
