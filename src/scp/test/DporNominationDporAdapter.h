@@ -71,8 +71,6 @@ class DporNominationDporAdapter
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
 
-    void applyConfiguration(DporNominationNode::Configuration const& config);
-
     std::optional<EventLabel>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,
                      std::size_t step) const;
@@ -88,13 +86,12 @@ class DporNominationDporAdapter
     struct ReplayState
     {
         explicit ReplayState(SecretKey const& secretKey,
-                             SCPQuorumSet const& qSet);
+                             SCPQuorumSet const& qSet,
+                             DporNominationNode::Configuration const& config);
 
         DporNominationNode mNode;
         std::deque<SendLabel> mPendingSends;
     };
-
-    void configureNode(DporNominationNode& node) const;
 
     void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
 
@@ -111,10 +108,7 @@ class DporNominationDporAdapter
     uint64_t mSlotIndex;
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
-    std::function<uint64(NodeID const&)> mPriorityLookup;
-    std::function<uint64(Value const&)> mValueHash;
-    std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
-        mCombineCandidates;
+    DporNominationNode::Configuration mConfig;
 };
 
 }

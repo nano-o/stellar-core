@@ -52,8 +52,6 @@ class DporNominationSanityCheckHarness
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
 
-    void applyConfiguration(DporNominationNode::Configuration const& config);
-
     std::size_t broadcastPendingEnvelopesOnce();
 
   private:

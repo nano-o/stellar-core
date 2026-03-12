@@ -117,16 +117,6 @@ DporNominationSanityCheckHarness::setCombineCandidates(
     }
 }
 
-void
-DporNominationSanityCheckHarness::applyConfiguration(
-    DporNominationNode::Configuration const& config)
-{
-    for (auto& node : mNodes)
-    {
-        node->applyConfiguration(config);
-    }
-}
-
 std::size_t
 DporNominationSanityCheckHarness::broadcastPendingEnvelopesOnce()
 {

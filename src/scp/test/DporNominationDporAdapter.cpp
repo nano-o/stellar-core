@@ -57,8 +57,11 @@ makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
 }
 
 DporNominationDporAdapter::ReplayState::ReplayState(SecretKey const& secretKey,
-                                                    SCPQuorumSet const& qSet)
-    : mNode(secretKey, qSet)
+                                                    SCPQuorumSet const& qSet,
+                                                    DporNominationNode::
+                                                        Configuration const&
+                                                            config)
+    : mNode(secretKey, qSet, config)
 {
 }
 
@@ -72,6 +75,7 @@ DporNominationDporAdapter::DporNominationDporAdapter(
     , mSlotIndex(slotIndex)
     , mPreviousValue(previousValue)
     , mInitialValues(initialValues)
+    , mConfig(config)
 {
     if (mValidators.empty())
     {
@@ -82,7 +86,6 @@ DporNominationDporAdapter::DporNominationDporAdapter(
         throw std::invalid_argument(
             "initialValues must match validator count");
     }
-    applyConfiguration(config);
 }
 
 std::size_t
@@ -101,14 +104,14 @@ void
 DporNominationDporAdapter::setPriorityLookup(
     std::function<uint64(NodeID const&)> const& fn)
 {
-    mPriorityLookup = fn;
+    mConfig.mPriorityLookup = fn;
 }
 
 void
 DporNominationDporAdapter::setValueHash(
     std::function<uint64(Value const&)> const& fn)
 {
-    mValueHash = fn;
+    mConfig.mValueHash = fn;
 }
 
 void
@@ -116,49 +119,13 @@ DporNominationDporAdapter::setCombineCandidates(
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
         fn)
 {
-    mCombineCandidates = fn;
-}
-
-void
-DporNominationDporAdapter::applyConfiguration(
-    DporNominationNode::Configuration const& config)
-{
-    if (config.mPriorityLookup)
-    {
-        setPriorityLookup(config.mPriorityLookup);
-    }
-    if (config.mValueHash)
-    {
-        setValueHash(config.mValueHash);
-    }
-    if (config.mCombineCandidates)
-    {
-        setCombineCandidates(config.mCombineCandidates);
-    }
-}
-
-void
-DporNominationDporAdapter::configureNode(DporNominationNode& node) const
-{
-    if (mPriorityLookup)
-    {
-        node.setPriorityLookup(mPriorityLookup);
-    }
-    if (mValueHash)
-    {
-        node.setValueHash(mValueHash);
-    }
-    if (mCombineCandidates)
-    {
-        node.setCombineCandidates(mCombineCandidates);
-    }
+    mConfig.mCombineCandidates = fn;
 }
 
 void
 DporNominationDporAdapter::initializeNode(ReplayState& state,
                                           std::size_t nodeIndex) const
 {
-    configureNode(state.mNode);
     state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
                          mPreviousValue);
     queuePendingNominationSends(state, nodeIndex);
@@ -249,7 +216,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
         throw std::out_of_range("node index out of range");
     }
 
-    ReplayState state(mValidators.at(nodeIndex), mQSet);
+    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
     initializeNode(state, nodeIndex);
 
     std::size_t eventCount = 0;
@@ -324,7 +291,7 @@ DporNominationDporAdapter::getNominationBoundaryEnvelope(
         throw std::out_of_range("node index out of range");
     }
 
-    ReplayState state(mValidators.at(nodeIndex), mQSet);
+    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
     initializeNode(state, nodeIndex);
     discardPendingEnvelopes(state.mNode);
 

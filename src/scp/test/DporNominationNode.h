@@ -83,8 +83,6 @@ class DporNominationNode : public SCPDriver
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)> const&
             fn);
 
-    void applyConfiguration(Configuration const& config);
-
     bool hasActiveTimer(uint64 slotIndex, int timerID) const;
 
     std::optional<TimerState> getTimer(uint64 slotIndex, int timerID) const;
@@ -118,6 +116,8 @@ class DporNominationNode : public SCPDriver
 
   private:
     using TimerKey = std::pair<uint64, int>;
+
+    void applyConfiguration(Configuration const& config);
 
     SecretKey mSecretKey;
     SCP mSCP;

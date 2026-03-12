@@ -1,17 +1,18 @@
-// Copyright 2024 Stellar Development Foundation and contributors. Licensed
+// Copyright 2026 Stellar Development Foundation and contributors. Licensed
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #pragma once
 
 #include "crypto/SHA.h"
+#include "scp/test/DporNominationDporAdapter.h"
 #include "scp/LocalNode.h"
-#include "scp/test/DporNominationNode.h"
 #include "test/Catch2.h"
 #include "xdrpp/marshal.h"
 
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,8 @@ makeValue(std::string const& label)
 inline Hash
 getNormalizedQSetHash(SecretKey const& secretKey, SCPQuorumSet const& qSet)
 {
+    // SCP statements hash the LocalNode-normalized quorum set, which may
+    // differ from a plain hash of the caller-provided XDR shape.
     DporNominationNode node(secretKey, qSet);
     return node.getSCP().getLocalNode()->getQuorumSetHash();
 }
@@ -42,10 +45,30 @@ makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
                            std::size_t leaderIndex)
 {
     DporNominationNode::Configuration config;
-    config.mPriorityLookup = [nodeIDs, leaderIndex](NodeID const& nodeID) {
-        return nodeID == nodeIDs.at(leaderIndex) ? kTopLeaderPriority : 1;
+    auto sharedNodeIDs = std::make_shared<std::vector<NodeID> const>(nodeIDs);
+    config.mPriorityLookup = [sharedNodeIDs, leaderIndex](NodeID const& nodeID) {
+        return nodeID == sharedNodeIDs->at(leaderIndex) ? kTopLeaderPriority
+                                                        : 1;
     };
     return config;
+}
+
+inline DporNominationDporAdapter::SendLabel const&
+requireSend(DporNominationDporAdapter::EventLabel const& label)
+{
+    auto const* send =
+        std::get_if<DporNominationDporAdapter::SendLabel>(&label);
+    REQUIRE(send != nullptr);
+    return *send;
+}
+
+inline DporNominationDporAdapter::ReceiveLabel const&
+requireReceive(DporNominationDporAdapter::EventLabel const& label)
+{
+    auto const* receive =
+        std::get_if<DporNominationDporAdapter::ReceiveLabel>(&label);
+    REQUIRE(receive != nullptr);
+    return *receive;
 }
 
 inline void

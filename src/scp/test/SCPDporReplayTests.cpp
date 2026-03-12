@@ -47,24 +47,6 @@ struct ReplayFixture
     }
 };
 
-DporNominationDporAdapter::SendLabel const&
-requireSend(DporNominationDporAdapter::EventLabel const& label)
-{
-    auto const* send =
-        std::get_if<DporNominationDporAdapter::SendLabel>(&label);
-    REQUIRE(send != nullptr);
-    return *send;
-}
-
-DporNominationDporAdapter::ReceiveLabel const&
-requireReceive(DporNominationDporAdapter::EventLabel const& label)
-{
-    auto const* receive =
-        std::get_if<DporNominationDporAdapter::ReceiveLabel>(&label);
-    REQUIRE(receive != nullptr);
-    return *receive;
-}
-
 void
 deliverAndRecordTraceForThread(
     DporNominationSanityCheckHarness& sanityCheckHarness,
