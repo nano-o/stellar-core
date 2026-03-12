@@ -301,8 +301,8 @@ DporNominationDporAdapter::replayTraceForBoundaryInspection(
     }
 }
 
-bool
-DporNominationDporAdapter::hasReachedNominationBoundary(
+DporNominationDporAdapter::BoundaryInspection
+DporNominationDporAdapter::inspectNominationBoundary(
     std::size_t nodeIndex, ThreadTrace const& trace) const
 {
     if (nodeIndex >= mValidators.size())
@@ -312,27 +312,28 @@ DporNominationDporAdapter::hasReachedNominationBoundary(
 
     ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
     replayTraceForBoundaryInspection(state, nodeIndex, trace);
-    return state.mNode.hasCrossedNominationBoundary();
+
+    BoundaryInspection inspection;
+    inspection.mReachedBoundary = state.mNode.hasCrossedNominationBoundary();
+    if (auto const* boundaryEnvelope = state.mNode.getNominationBoundaryEnvelope())
+    {
+        inspection.mBoundaryEnvelope = *boundaryEnvelope;
+    }
+    return inspection;
+}
+
+bool
+DporNominationDporAdapter::hasReachedNominationBoundary(
+    std::size_t nodeIndex, ThreadTrace const& trace) const
+{
+    return inspectNominationBoundary(nodeIndex, trace).mReachedBoundary;
 }
 
 std::optional<SCPEnvelope>
 DporNominationDporAdapter::getNominationBoundaryEnvelope(
     std::size_t nodeIndex, ThreadTrace const& trace) const
 {
-    if (nodeIndex >= mValidators.size())
-    {
-        throw std::out_of_range("node index out of range");
-    }
-
-    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
-    replayTraceForBoundaryInspection(state, nodeIndex, trace);
-
-    auto const* boundaryEnvelope = state.mNode.getNominationBoundaryEnvelope();
-    if (!boundaryEnvelope)
-    {
-        return std::nullopt;
-    }
-    return *boundaryEnvelope;
+    return inspectNominationBoundary(nodeIndex, trace).mBoundaryEnvelope;
 }
 
 }

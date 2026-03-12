@@ -202,18 +202,20 @@ TEST_CASE("dpor nomination replay detects the timer-driven round boundary",
     constexpr std::size_t kLeaderNodeIndex = 0;
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    constexpr std::size_t kRoundBoundaryTimeouts =
+    // Round 1 starts from the initial nominate() call, so round 3 is reached
+    // after two timer bottoms.
+    constexpr std::size_t kTimeoutBottomsToReachRoundBoundary =
         DporNominationNode::NOMINATION_ROUND_BOUNDARY - 1;
-    for (std::size_t i = 0; i < kRoundBoundaryTimeouts; ++i)
+    for (std::size_t i = 0; i < kTimeoutBottomsToReachRoundBoundary; ++i)
     {
         leaderTrace.emplace_back(dpor::model::BottomValue{});
     }
 
-    REQUIRE(fixture.mAdapter.hasReachedNominationBoundary(kLeaderNodeIndex,
-                                                          leaderTrace));
-    REQUIRE_FALSE(fixture.mAdapter.getNominationBoundaryEnvelope(kLeaderNodeIndex,
-                                                                 leaderTrace)
-                      .has_value());
+    auto const boundaryInspection =
+        fixture.mAdapter.inspectNominationBoundary(kLeaderNodeIndex,
+                                                   leaderTrace);
+    REQUIRE(boundaryInspection.mReachedBoundary);
+    REQUIRE_FALSE(boundaryInspection.mBoundaryEnvelope.has_value());
 }
 
 }

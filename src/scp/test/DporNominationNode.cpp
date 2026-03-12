@@ -160,6 +160,44 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     }
 }
 
+uint32_t
+DporNominationNode::inferNominationRound(
+    std::chrono::milliseconds timeout) const
+{
+    // Boundary tracking derives the round from this driver's deterministic
+    // timeout schedule instead of relying on SCP to call computeTimeout() and
+    // setupTimer() in lockstep. If the timeout formula changes, fail loudly.
+    auto const timeoutMS = timeout.count();
+    if (timeoutMS < static_cast<int64_t>(mInitialNominationTimeoutMS))
+    {
+        throw std::logic_error(
+            "nomination timer timeout is below the configured initial value");
+    }
+
+    if (mIncrementNominationTimeoutMS == 0)
+    {
+        if (timeoutMS != static_cast<int64_t>(mInitialNominationTimeoutMS))
+        {
+            throw std::logic_error(
+                "nomination timer timeout does not match the configured "
+                "constant timeout");
+        }
+        return 1;
+    }
+
+    auto const deltaMS =
+        timeoutMS - static_cast<int64_t>(mInitialNominationTimeoutMS);
+    auto const incrementMS = static_cast<int64_t>(mIncrementNominationTimeoutMS);
+    if ((deltaMS % incrementMS) != 0)
+    {
+        throw std::logic_error(
+            "nomination timer timeout does not match the configured round "
+            "schedule");
+    }
+
+    return 1 + static_cast<uint32_t>(deltaMS / incrementMS);
+}
+
 bool
 DporNominationNode::isRoundBoundaryNominationEnvelope(
     SCPEnvelope const& envelope) const
@@ -241,28 +279,39 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
+    auto const isNominationEnvelope =
+        envelope.statement.pledges.type() == SCP_ST_NOMINATE;
+    auto const isRoundBoundaryNomination =
+        isRoundBoundaryNominationEnvelope(envelope);
     auto const alreadyCrossedBoundary = mHasCrossedNominationBoundary;
     auto const crossesBoundaryNow =
         !alreadyCrossedBoundary &&
-        (envelope.statement.pledges.type() != SCP_ST_NOMINATE ||
-         isRoundBoundaryNominationEnvelope(envelope));
+        (!isNominationEnvelope || isRoundBoundaryNomination);
 
     if (crossesBoundaryNow)
     {
         mHasCrossedNominationBoundary = true;
     }
 
-    if (!mNominationBoundaryEnvelope &&
-        (crossesBoundaryNow ||
-         (alreadyCrossedBoundary &&
-          isRoundBoundaryNominationEnvelope(envelope))))
+    // Two boundary triggers matter here:
+    // 1. the first non-nomination envelope, which is the PREPARE-side handoff
+    // 2. the first nomination envelope emitted once round 3 has been armed
+    // The round-3 boundary can also be reached earlier in setupTimer() before
+    // any envelope is emitted, so we keep a separate boolean boundary flag and
+    // still capture the first round-boundary nomination envelope later when it
+    // appears for diagnostics.
+    auto const shouldCaptureBoundaryEnvelope =
+        !mNominationBoundaryEnvelope &&
+        ((!isNominationEnvelope && crossesBoundaryNow) ||
+         isRoundBoundaryNomination);
+    if (shouldCaptureBoundaryEnvelope)
     {
         mNominationBoundaryEnvelope = envelope;
     }
 
     mEmittedEnvelopes.push_back(envelope);
-    if (envelope.statement.pledges.type() == SCP_ST_NOMINATE &&
-        !alreadyCrossedBoundary && !crossesBoundaryNow)
+    if (isNominationEnvelope && !alreadyCrossedBoundary &&
+        !isRoundBoundaryNomination)
     {
         mPendingEnvelopes.push_back(envelope);
     }
@@ -331,14 +380,14 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
                                std::chrono::milliseconds timeout,
                                std::function<void()> cb)
 {
-    if (timerID == Slot::NOMINATION_TIMER && mPendingNominationRound)
+    if (timerID == Slot::NOMINATION_TIMER)
     {
-        mNominationRoundBySlot[slotIndex] = *mPendingNominationRound;
-        if (*mPendingNominationRound >= NOMINATION_ROUND_BOUNDARY)
+        auto const roundNumber = inferNominationRound(timeout);
+        mNominationRoundBySlot[slotIndex] = roundNumber;
+        if (roundNumber >= NOMINATION_ROUND_BOUNDARY)
         {
             mHasCrossedNominationBoundary = true;
         }
-        mPendingNominationRound.reset();
     }
 
     mTimers[{slotIndex, timerID}] = TimerState{slotIndex, timerID, timeout, cb};
@@ -353,11 +402,6 @@ DporNominationNode::stopTimer(uint64 slotIndex, int timerID)
 std::chrono::milliseconds
 DporNominationNode::computeTimeout(uint32 roundNumber, bool isNomination)
 {
-    if (isNomination)
-    {
-        mPendingNominationRound = roundNumber;
-    }
-
     auto const initialTimeoutMS =
         isNomination ? mInitialNominationTimeoutMS : mInitialBallotTimeoutMS;
     auto const incrementTimeoutMS = isNomination

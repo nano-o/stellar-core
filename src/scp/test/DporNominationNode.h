@@ -28,6 +28,9 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
+    // Stop nomination-only exploration once a node reaches round 3. This is
+    // the first point where the 3-node timer tests can diverge meaningfully
+    // without forcing every execution to continue all the way to PREPARE.
     static constexpr uint32_t NOMINATION_ROUND_BOUNDARY = 3;
 
     struct Configuration
@@ -120,6 +123,8 @@ class DporNominationNode : public SCPDriver
     using TimerKey = std::pair<uint64, int>;
 
     void applyConfiguration(Configuration const& config);
+    uint32_t
+    inferNominationRound(std::chrono::milliseconds timeout) const;
     bool isRoundBoundaryNominationEnvelope(SCPEnvelope const& envelope) const;
 
     SecretKey mSecretKey;
@@ -137,7 +142,6 @@ class DporNominationNode : public SCPDriver
     std::vector<SCPEnvelope> mPendingEnvelopes;
     std::map<TimerKey, TimerState> mTimers;
     std::map<uint64, uint32_t> mNominationRoundBySlot;
-    std::optional<uint32_t> mPendingNominationRound;
     bool mHasCrossedNominationBoundary{false};
     std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
 };

@@ -50,6 +50,12 @@ class DporNominationDporAdapter
     using ThreadTrace = dpor::algo::ThreadTraceT<DporNominationValue>;
     using Program = dpor::algo::ProgramT<DporNominationValue>;
 
+    struct BoundaryInspection
+    {
+        bool mReachedBoundary{false};
+        std::optional<SCPEnvelope> mBoundaryEnvelope;
+    };
+
     DporNominationDporAdapter(std::vector<SecretKey> const& validators,
                               SCPQuorumSet const& qSet, uint64_t slotIndex,
                               Value const& previousValue,
@@ -77,6 +83,10 @@ class DporNominationDporAdapter
 
     Program
     makeProgram() const;
+
+    BoundaryInspection
+    inspectNominationBoundary(std::size_t nodeIndex,
+                              ThreadTrace const& trace) const;
 
     bool
     hasReachedNominationBoundary(std::size_t nodeIndex,

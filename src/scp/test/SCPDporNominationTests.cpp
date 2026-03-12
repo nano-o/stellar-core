@@ -28,6 +28,9 @@ constexpr std::size_t kSmallTopologyValidatorCount = 3;
 constexpr std::size_t kSmallTopologyThreshold = 2;
 constexpr std::size_t kLeaderIndex = 0;
 constexpr std::size_t kFirstFollowerIndex = 1;
+// The current DPOR API exposes a depth budget but no execution-count budget.
+// Keep this just high enough for the 3-node topology to cover multiple
+// timeout-versus-delivery races and fail fast if branching grows unexpectedly.
 constexpr std::size_t kNominationVerifyMaxDepth = 16;
 
 struct SmallTopologyVerifyFixture
@@ -92,19 +95,15 @@ summarizeExecution(
             static_cast<std::size_t>(std::count_if(
                 trace.begin(), trace.end(),
                 [](auto const& observed) { return observed.is_bottom(); }));
-        auto const reachedBoundary =
-            fixture.mAdapter.hasReachedNominationBoundary(nodeIndex, trace);
-        auto boundaryEnvelope =
-            reachedBoundary
-                ? fixture.mAdapter.getNominationBoundaryEnvelope(nodeIndex,
-                                                                 trace)
-                : std::nullopt;
+        auto const boundaryInspection =
+            fixture.mAdapter.inspectNominationBoundary(nodeIndex, trace);
 
         ThreadExecutionSummary threadSummary;
         threadSummary.mTrace = std::move(trace);
         threadSummary.mTimerBottomCount = timerBottomCount;
-        threadSummary.mReachedBoundary = reachedBoundary;
-        threadSummary.mBoundaryEnvelope = std::move(boundaryEnvelope);
+        threadSummary.mReachedBoundary = boundaryInspection.mReachedBoundary;
+        threadSummary.mBoundaryEnvelope =
+            boundaryInspection.mBoundaryEnvelope;
         summary.mThreads.push_back(std::move(threadSummary));
     }
 
@@ -276,8 +275,10 @@ TEST_CASE("dpor nomination verify terminates timeout-heavy executions at the "
             VerifyResultKind::AllExecutionsExplored);
 
     bool sawTimerDrivenBoundary = false;
-    bool sawTimerBoundaryWithoutEnvelope = false;
-    constexpr std::size_t kRoundBoundaryTimeouts =
+    bool sawBoundaryReachedBeforeAnyBoundaryEnvelope = false;
+    // Round 1 starts from the initial nominate() call, so only two timer
+    // bottoms are needed to reach the round-3 boundary.
+    constexpr std::size_t kTimeoutBottomsToReachRoundBoundary =
         DporNominationNode::NOMINATION_ROUND_BOUNDARY - 1;
 
     for (auto const& execution : exploration.mExecutions)
@@ -285,19 +286,24 @@ TEST_CASE("dpor nomination verify terminates timeout-heavy executions at the "
         for (auto const& threadSummary : execution.mThreads)
         {
             if (!threadSummary.mReachedBoundary ||
-                threadSummary.mTimerBottomCount < kRoundBoundaryTimeouts)
+                threadSummary.mTimerBottomCount <
+                    kTimeoutBottomsToReachRoundBoundary)
             {
                 continue;
             }
 
             sawTimerDrivenBoundary = true;
-            sawTimerBoundaryWithoutEnvelope |=
+            // The round boundary is marked as soon as round 3 is armed. Some
+            // timeout-only executions stop there without ever emitting another
+            // nomination or ballot envelope, so diagnostics legitimately have
+            // no boundary envelope to report.
+            sawBoundaryReachedBeforeAnyBoundaryEnvelope |=
                 !threadSummary.mBoundaryEnvelope.has_value();
         }
     }
 
     REQUIRE(sawTimerDrivenBoundary);
-    REQUIRE(sawTimerBoundaryWithoutEnvelope);
+    REQUIRE(sawBoundaryReachedBeforeAnyBoundaryEnvelope);
 }
 
 }
