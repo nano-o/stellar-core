@@ -29,13 +29,18 @@ using VerifyResultKind = dpor::algo::VerifyResultKind;
 
 constexpr std::size_t kSmallTopologyValidatorCount = 3;
 constexpr std::size_t kSmallTopologyThreshold = 2;
+constexpr std::size_t kFourNodeTopologyValidatorCount = 4;
+constexpr std::size_t kFourNodeTopologyThreshold = 3;
 constexpr std::size_t kLeaderIndex = 0;
 constexpr std::size_t kFirstFollowerIndex = 1;
+constexpr std::size_t kFollowerStopAfterInitialEchoStep = 4;
+constexpr std::size_t kFollowerStopAfterAcceptedEchoStep = 8;
 // The current DPOR API exposes a depth budget but no execution-count budget.
 // Keep this just high enough for the 3-node topology to cover the prepare
 // boundary and the timer-versus-delivery races without masking state-space
 // growth.
 constexpr std::size_t kNominationVerifyMaxDepth = 16;
+constexpr std::size_t kFourNodeNominationVerifyMaxDepth = 128;
 constexpr std::size_t kRound3NominationVerifyMaxDepth = 32;
 
 struct SmallTopologyVerifyFixture
@@ -91,6 +96,48 @@ struct SmallTopologyVerifyFixture
     }
 };
 
+struct FourNodeThresholdThreeVerifyFixture
+{
+    std::vector<SecretKey> mValidators;
+    std::vector<NodeID> mNodeIDs;
+    SCPQuorumSet mQSet;
+    std::vector<Hash> mQSetHashes;
+    Value mPreviousValue;
+    Value mV1Value;
+    Value mV2Value;
+    Value mV3Value;
+    Value mV4Value;
+    DporNominationDporAdapter mAdapter;
+
+    FourNodeThresholdThreeVerifyFixture()
+        : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
+              "dpor-nomination-verify-4node-",
+              kFourNodeTopologyValidatorCount))
+        , mNodeIDs(DporNominationSanityCheckHarness::getNodeIDs(mValidators))
+        , mQSet(DporNominationSanityCheckHarness::makeQuorumSet(
+              mNodeIDs, kFourNodeTopologyThreshold))
+        , mQSetHashes([&]() {
+            std::vector<Hash> hashes;
+            hashes.reserve(mValidators.size());
+            auto const qSetHash = getNormalizedQSetHash(mQSet);
+            for (std::size_t i = 0; i < mValidators.size(); ++i)
+            {
+                hashes.push_back(qSetHash);
+            }
+            return hashes;
+        }())
+        , mPreviousValue(makeValue("previous-verify-4node"))
+        , mV1Value(makeValue("v1-verify"))
+        , mV2Value(makeValue("v2-verify"))
+        , mV3Value(makeValue("v3-verify"))
+        , mV4Value(makeValue("v4-verify"))
+        , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
+                   std::vector<Value>{mV1Value, mV2Value, mV3Value, mV4Value},
+                   makeTopLeaderConfiguration(mNodeIDs, kLeaderIndex))
+    {
+    }
+};
+
 struct ThreadExecutionSummary
 {
     DporNominationDporAdapter::ThreadTrace mTrace;
@@ -110,9 +157,10 @@ struct VerifyExplorationSummary
     std::vector<ExecutionSummary> mExecutions;
 };
 
+template <typename Fixture>
 ExecutionSummary
 summarizeExecution(
-    SmallTopologyVerifyFixture const& fixture,
+    Fixture const& fixture,
     dpor::model::ExplorationGraphT<DporNominationValue> const& graph)
 {
     ExecutionSummary summary;
@@ -142,9 +190,9 @@ summarizeExecution(
     return summary;
 }
 
+template <typename Fixture>
 VerifyExplorationSummary
-exploreExecutions(SmallTopologyVerifyFixture const& fixture,
-                  bool blockingReceivesOnly = false,
+exploreExecutions(Fixture const& fixture, bool blockingReceivesOnly = false,
                   std::size_t maxDepth = kNominationVerifyMaxDepth)
 {
     VerifyExplorationSummary summary;
@@ -180,6 +228,75 @@ exploreExecutions(SmallTopologyVerifyFixture const& fixture,
             });
     }
     config.max_depth = maxDepth;
+    config.on_execution = [&summary, &fixture](auto const& graph) {
+        summary.mExecutions.push_back(summarizeExecution(fixture, graph));
+    };
+
+    summary.mVerifyResult = dpor::algo::verify(config);
+    LOG_INFO(DEFAULT_LOG, "DPOR executions explored: {}",
+             summary.mVerifyResult.executions_explored);
+    return summary;
+}
+
+VerifyExplorationSummary
+exploreFourNodeLeaderConvergenceExecutions(
+    FourNodeThresholdThreeVerifyFixture const& fixture)
+{
+    VerifyExplorationSummary summary;
+
+    VerifyConfig config;
+    config.program = fixture.mAdapter.makeProgram();
+    config.program.threads.for_each_assigned(
+        [&](auto tid, auto const& threadFn) {
+            config.program.threads[tid] =
+                [threadFn, tid](auto const& trace,
+                                std::size_t step) -> std::optional<
+                        DporNominationDporAdapter::EventLabel> {
+                auto const leaderThread =
+                    DporNominationDporAdapter::toThreadID(kLeaderIndex);
+                auto const firstAcceptedFollower =
+                    DporNominationDporAdapter::toThreadID(kFirstFollowerIndex);
+                auto const secondAcceptedFollower =
+                    DporNominationDporAdapter::toThreadID(kFirstFollowerIndex + 1);
+
+                // For the 4-node, threshold-3 topology the leader only needs
+                // two followers to progress from their initial vote echo to a
+                // single accepted update. The last follower can stop after its
+                // vote-only fanout and still serve as a witness for the other
+                // two. This preserves the distinct-value topology while
+                // avoiding the full 3-follower accepted-update mesh.
+                if (tid != leaderThread)
+                {
+                    auto const stopStep =
+                        (tid == firstAcceptedFollower ||
+                         tid == secondAcceptedFollower)
+                            ? kFollowerStopAfterAcceptedEchoStep
+                            : kFollowerStopAfterInitialEchoStep;
+                    if (step >= stopStep)
+                    {
+                        return std::nullopt;
+                    }
+                }
+
+                auto next = threadFn(trace, step);
+                if (!next)
+                {
+                    return std::nullopt;
+                }
+
+                auto const* receive =
+                    std::get_if<DporNominationDporAdapter::ReceiveLabel>(&*next);
+                if (receive == nullptr || receive->is_blocking())
+                {
+                    return next;
+                }
+
+                return DporNominationDporAdapter::EventLabel{
+                    dpor::model::make_receive_label<DporNominationValue>(
+                        receive->matches)};
+            };
+        });
+    config.max_depth = kFourNodeNominationVerifyMaxDepth;
     config.on_execution = [&summary, &fixture](auto const& graph) {
         summary.mExecutions.push_back(summarizeExecution(fixture, graph));
     };
@@ -447,6 +564,43 @@ TEST_CASE("dpor nomination verify explores the 3-validator milestone-3 "
     }
 
     REQUIRE(sawPrepareBoundary);
+}
+
+TEST_CASE("dpor nomination verify can reach a 4-validator threshold-3 "
+          "prepare boundary", "[scp][dpor][nomination]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+    FourNodeThresholdThreeVerifyFixture fixture;
+    auto const exploration = exploreFourNodeLeaderConvergenceExecutions(fixture);
+
+    REQUIRE(exploration.mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE_FALSE(exploration.mExecutions.empty());
+
+    bool sawLeaderPrepareBoundary = false;
+
+    for (auto const& execution : exploration.mExecutions)
+    {
+        auto const& leaderSummary = execution.mThreads[kLeaderIndex];
+        if (!leaderSummary.mReachedBoundary)
+        {
+            continue;
+        }
+
+        // This reduced 4-node program stops followers after the minimum
+        // accepted-update work needed to keep the search tractable. Some
+        // executions therefore terminate before the leader receives enough
+        // follow-up confirmations to prepare. The useful invariant here is
+        // that any leader boundary reached in this topology is PREPARE(1, v1).
+        sawLeaderPrepareBoundary = true;
+        REQUIRE(leaderSummary.mBoundaryEnvelope.has_value());
+        requirePrepareEnvelope(*leaderSummary.mBoundaryEnvelope,
+                               fixture.mNodeIDs[kLeaderIndex],
+                               fixture.mQSetHashes[kLeaderIndex], kSlotIndex,
+                               SCPBallot{1, fixture.mV1Value});
+    }
+
+    REQUIRE(sawLeaderPrepareBoundary);
 }
 
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
