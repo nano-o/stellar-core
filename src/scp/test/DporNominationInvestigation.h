@@ -116,6 +116,7 @@ struct ThresholdFixture
 
     explicit ThresholdFixture(
         std::size_t validatorCount = kDefaultValidatorCount,
+        bool fixedTopLeader = true,
         uint32_t nominationRoundBoundary =
             DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY)
         : mValidatorCount(validatorCount)
@@ -155,9 +156,18 @@ struct ThresholdFixture
         }())
         , mNominationRoundBoundary(nominationRoundBoundary)
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
-                   mInitialValues,
-                   makeTopLeaderConfiguration(
-                       mNodeIDs, kLeaderIndex, nominationRoundBoundary))
+                   mInitialValues, [&]() {
+                       if (fixedTopLeader)
+                       {
+                           return makeTopLeaderConfiguration(
+                               mNodeIDs, kLeaderIndex,
+                               nominationRoundBoundary);
+                       }
+                       DporNominationNode::Configuration config;
+                       config.mNominationRoundBoundary =
+                           nominationRoundBoundary;
+                       return config;
+                   }())
     {
         if (mValidatorCount < 2)
         {
@@ -429,6 +439,7 @@ runRuntimeGrowthInvestigation(
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
     ThresholdFixture fixture(
         validatorCount,
+        !allowTimeouts,
         boundaryOverride.value_or(
             DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY));
 
