@@ -36,6 +36,7 @@ class DporNominationNode : public SCPDriver
 
     // Default replay/test cutoff for nomination-only exploration.
     static constexpr uint32_t DEFAULT_NOMINATION_ROUND_BOUNDARY = 2;
+    static constexpr uint32_t DEFAULT_BALLOTING_BOUNDARY = 1;
     static constexpr BoundaryMode DEFAULT_BOUNDARY_MODE =
         BoundaryMode::Prepare;
 
@@ -43,6 +44,7 @@ class DporNominationNode : public SCPDriver
     {
         Configuration()
             : mNominationRoundBoundary(DEFAULT_NOMINATION_ROUND_BOUNDARY)
+            , mBallotingBoundary(DEFAULT_BALLOTING_BOUNDARY)
             , mBoundaryMode(DEFAULT_BOUNDARY_MODE)
         {
         }
@@ -52,6 +54,7 @@ class DporNominationNode : public SCPDriver
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
         uint32_t mNominationRoundBoundary;
+        uint32_t mBallotingBoundary;
         BoundaryMode mBoundaryMode;
     };
 
@@ -151,6 +154,7 @@ class DporNominationNode : public SCPDriver
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
     uint32_t mNominationRoundBoundary{DEFAULT_NOMINATION_ROUND_BOUNDARY};
+    uint32_t mBallotingBoundary{DEFAULT_BALLOTING_BOUNDARY};
     BoundaryMode mBoundaryMode{DEFAULT_BOUNDARY_MODE};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};

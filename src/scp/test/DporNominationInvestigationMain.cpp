@@ -22,7 +22,7 @@ struct CommandLineOptions
     std::size_t mNumNodes = kDefaultValidatorCount;
     TimeoutSettings mTimeoutSettings;
     std::optional<std::size_t> mDepthOverride;
-    std::optional<uint32_t> mBoundaryOverride;
+    BoundarySettings mBoundarySettings;
     std::optional<InvestigationScenario::Id> mScenario;
 };
 
@@ -30,15 +30,17 @@ void
 printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [--workers N] [--num-nodes N] [--depth N] [--boundary N]"
+              << " [--workers N] [--num-nodes N] [--depth N]"
+                 " [--prepare-boundary N]"
                  " [--scenario ID] [--nomination-timeouts]"
                  " [--balloting-timeouts]\n"
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
-                 "3|largest, 4|unrestricted-followers, 5|commit-boundary\n";
+                 "3|all-followers-second-peer-receive, "
+                 "4|unrestricted-followers\n";
 }
 
 uint32_t
-parseBoundaryValue(std::string_view arg, std::string_view value)
+parseUint32Value(std::string_view arg, std::string_view value)
 {
     auto const parsed = std::stoull(std::string(value));
     if (parsed > std::numeric_limits<uint32_t>::max())
@@ -60,17 +62,14 @@ parseScenarioValue(std::string_view value)
     {
         return InvestigationScenario::Id::AllFollowersAcceptedOnce;
     }
-    if (value == "3" || value == "largest")
+    if (value == "3" || value == "all-followers-second-peer-receive" ||
+        value == "largest")
     {
-        return InvestigationScenario::Id::Largest;
+        return InvestigationScenario::Id::AllFollowersSecondPeerReceive;
     }
     if (value == "4" || value == "unrestricted-followers")
     {
         return InvestigationScenario::Id::UnrestrictedFollowers;
-    }
-    if (value == "5" || value == "commit-boundary")
-    {
-        return InvestigationScenario::Id::CommitBoundary;
     }
     throw std::invalid_argument("unknown scenario: " + std::string(value));
 }
@@ -157,20 +156,21 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 arg, arg.substr(std::string_view("--num-nodes=").size()));
             continue;
         }
-        if (arg == "--boundary")
+        if (arg == "--prepare-boundary")
         {
             if (i + 1 >= argc)
             {
-                throw std::invalid_argument("--boundary requires a value");
+                throw std::invalid_argument("--prepare-boundary requires a value");
             }
-            options.mBoundaryOverride =
-                parseBoundaryValue(arg, std::string_view(argv[++i]));
+            options.mBoundarySettings.mPrepare =
+                parseUint32Value(arg, std::string_view(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--boundary="))
+        if (arg.starts_with("--prepare-boundary="))
         {
-            options.mBoundaryOverride = parseBoundaryValue(
-                arg, arg.substr(std::string_view("--boundary=").size()));
+            options.mBoundarySettings.mPrepare = parseUint32Value(
+                arg,
+                arg.substr(std::string_view("--prepare-boundary=").size()));
             continue;
         }
         if (arg == "--scenario")
@@ -201,15 +201,12 @@ main(int argc, char* argv[])
     try
     {
         auto const options = parseOptions(argv[0], argc, argv);
-        auto const nominationRoundBoundary =
-            options.mBoundaryOverride.value_or(
-                stellar::DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY);
         auto const results = runRuntimeGrowthInvestigation(
             options.mWorkers, options.mDepthOverride,
-            options.mBoundaryOverride, options.mScenario,
+            options.mBoundarySettings, options.mScenario,
             options.mNumNodes, options.mTimeoutSettings);
         printInvestigationResults(std::cout, results, options.mWorkers,
-                                  nominationRoundBoundary,
+                                  options.mBoundarySettings,
                                   options.mNumNodes,
                                   options.mTimeoutSettings);
 

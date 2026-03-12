@@ -156,6 +156,9 @@ DporNominationNode::applyConfiguration(Configuration const& config)
         config.mNominationRoundBoundary == 0
             ? DEFAULT_NOMINATION_ROUND_BOUNDARY
             : config.mNominationRoundBoundary;
+    mBallotingBoundary = config.mBallotingBoundary == 0
+                             ? DEFAULT_BALLOTING_BOUNDARY
+                             : config.mBallotingBoundary;
     mBoundaryMode = config.mBoundaryMode;
 
     if (config.mPriorityLookup)
@@ -236,7 +239,9 @@ DporNominationNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
     switch (mBoundaryMode)
     {
     case BoundaryMode::Prepare:
-        return true;
+        return type == SCP_ST_PREPARE &&
+               envelope.statement.pledges.prepare().ballot.counter >=
+                   mBallotingBoundary;
     case BoundaryMode::Commit:
         return type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE;
     }
@@ -325,7 +330,8 @@ DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 
     // Two boundary triggers matter here:
     // 1. the first envelope that matches the configured replay boundary mode
-    //    (PREPARE-side handoff by default, COMMIT-side handoff in ballot mode)
+    //    (PREPARE at the configured ballot boundary by default, COMMIT-side
+    //    handoff in ballot mode)
     // 2. the first nomination envelope emitted once the boundary round has
     //    been armed
     // The round boundary can also be reached earlier in setupTimer() before
@@ -410,6 +416,12 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
                                std::chrono::milliseconds timeout,
                                std::function<void()> cb)
 {
+    if (!cb)
+    {
+        mTimers.erase({slotIndex, timerID});
+        return;
+    }
+
     if (timerID == Slot::NOMINATION_TIMER)
     {
         auto const roundNumber = inferNominationRound(timeout);
