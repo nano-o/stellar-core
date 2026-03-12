@@ -192,7 +192,13 @@ class Logging
     static void rotate();
     static std::string normalizePartition(std::string const& partition);
 
-    // TODO: revert vv
+    // Replace the cached logger for a partition with a no-op null logger
+    // whose level is set to off. After this call, all CLOG macros for the
+    // partition short-circuit at should_log() with no mutex acquisition.
+    // Call restoreLoggerForPartition() to undo.
+    static void installNullLoggerForPartition(std::string const& partition);
+    static void restoreLoggerForPartition(std::string const& partition);
+
     static std::array<std::string const, 16> const kPartitionNames;
 
 #if defined(USE_SPDLOG)

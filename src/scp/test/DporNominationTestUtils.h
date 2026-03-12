@@ -34,6 +34,10 @@ class ScopedPartitionLogLevel
         , mPreviousLevel(Logging::getLogLevel(mPartition))
     {
         Logging::setLogLevel(level, mPartition.c_str());
+        // Install a null logger so that the cached LogPtr itself returns
+        // false from should_log(), avoiding any mutex acquisition in the
+        // CLOG macros' fast path during concurrent DPOR replay.
+        Logging::installNullLoggerForPartition(mPartition);
     }
 
     ScopedPartitionLogLevel(ScopedPartitionLogLevel const&) = delete;
@@ -42,6 +46,7 @@ class ScopedPartitionLogLevel
 
     ~ScopedPartitionLogLevel()
     {
+        Logging::restoreLoggerForPartition(mPartition);
         Logging::setLogLevel(mPreviousLevel, mPartition.c_str());
     }
 

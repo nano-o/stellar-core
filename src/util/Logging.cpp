@@ -11,6 +11,7 @@
 #include <fmt/chrono.h>
 #include <fstream>
 #include <spdlog/sinks/basic_file_sink.h>
+#include <spdlog/sinks/null_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/stdout_sinks.h>
 #include <spdlog/spdlog.h>
@@ -30,9 +31,9 @@ std::array<std::string const, 16> const Logging::kPartitionNames = {
 
 LogLevel Logging::mGlobalLogLevel = LogLevel::LVL_INFO;
 std::map<std::string, LogLevel> Logging::mPartitionLogLevels;
+bool Logging::mInitialized = false;
 
 #if defined(USE_SPDLOG)
-bool Logging::mInitialized = false;
 bool Logging::mColor = false;
 std::string Logging::mLastPattern;
 std::string Logging::mLastFilenamePattern;
@@ -385,6 +386,18 @@ Logging::logTrace(std::string const& partition)
 bool
 Logging::isLogLevelAtLeast(std::string const& partition, LogLevel level)
 {
+    // Fast read-only path: safe when log levels are stable after
+    // Logging::init() and concurrent setLogLevel calls are not in flight.
+    // Avoids mutex contention on hot logging checks (e.g. DPOR workers).
+    if (mInitialized)
+    {
+        auto it = mPartitionLogLevels.find(partition);
+        if (it != mPartitionLogLevels.end())
+        {
+            return it->second >= level;
+        }
+        return mGlobalLogLevel >= level;
+    }
     std::lock_guard<std::recursive_mutex> guard(mLogMutex);
     auto it = mPartitionLogLevels.find(partition);
     if (it != mPartitionLogLevels.end())
@@ -423,6 +436,9 @@ std::recursive_mutex Logging::mLogMutex;
     LogPtr Logging::name##LogPtr = nullptr; \
     LogPtr Logging::get##name##LogPtr() \
     { \
+        auto p = name##LogPtr; \
+        if (p) \
+            return p; \
         std::lock_guard<std::recursive_mutex> guard(mLogMutex); \
         if (!name##LogPtr) \
         { \
@@ -433,6 +449,53 @@ std::recursive_mutex Logging::mLogMutex;
 #include "util/LogPartitions.def"
 #undef LOG_PARTITION
 #endif
+
+void
+Logging::installNullLoggerForPartition(std::string const& partition)
+{
+#if defined(USE_SPDLOG)
+    std::lock_guard<std::recursive_mutex> guard(mLogMutex);
+    auto normalized = normalizePartition(partition);
+    spdlog::drop(normalized);
+    auto nullLogger = spdlog::null_logger_mt(normalized);
+    // Directly update the cached pointer so subsequent lock-free reads
+    // return the null logger immediately.
+#define LOG_PARTITION(name) \
+    if (normalized == #name) \
+    { \
+        name##LogPtr = nullLogger; \
+        return; \
+    }
+#include "util/LogPartitions.def"
+#undef LOG_PARTITION
+#endif
+}
+
+void
+Logging::restoreLoggerForPartition(std::string const& partition)
+{
+#if defined(USE_SPDLOG)
+    std::lock_guard<std::recursive_mutex> guard(mLogMutex);
+    auto normalized = normalizePartition(partition);
+    spdlog::drop(normalized);
+    // Re-create the logger with the same sinks as the default logger and
+    // update the cached pointer so the partition resumes normal logging.
+    auto defaultLogger = spdlog::default_logger();
+    auto newLogger = std::make_shared<spdlog::logger>(
+        normalized, defaultLogger->sinks().begin(),
+        defaultLogger->sinks().end());
+    newLogger->set_level(convert_loglevel(mGlobalLogLevel));
+    spdlog::register_logger(newLogger);
+#define LOG_PARTITION(name) \
+    if (normalized == #name) \
+    { \
+        name##LogPtr = newLogger; \
+        return; \
+    }
+#include "util/LogPartitions.def"
+#undef LOG_PARTITION
+#endif
+}
 
 void
 Logging::logAtPartitionAndLevel(std::string const& partition, LogLevel level,
