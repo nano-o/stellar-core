@@ -28,17 +28,21 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
-    // Stop nomination-only exploration once a node reaches round 3. This is
-    // the first point where the 3-node timer tests can diverge meaningfully
-    // without forcing every execution to continue all the way to PREPARE.
-    static constexpr uint32_t NOMINATION_ROUND_BOUNDARY = 3;
+    // Default replay/test cutoff for nomination-only exploration.
+    static constexpr uint32_t DEFAULT_NOMINATION_ROUND_BOUNDARY = 2;
 
     struct Configuration
     {
+        Configuration()
+            : mNominationRoundBoundary(DEFAULT_NOMINATION_ROUND_BOUNDARY)
+        {
+        }
+
         std::function<uint64(NodeID const&)> mPriorityLookup;
         std::function<uint64(Value const&)> mValueHash;
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
+        uint32_t mNominationRoundBoundary;
     };
 
     struct TimerState
@@ -50,8 +54,11 @@ class DporNominationNode : public SCPDriver
     };
 
     explicit DporNominationNode(SecretKey const& secretKey,
+                                SCPQuorumSet const& localQSet);
+
+    explicit DporNominationNode(SecretKey const& secretKey,
                                 SCPQuorumSet const& localQSet,
-                                Configuration const& config = {});
+                                Configuration const& config);
 
     NodeID const&
     getNodeID() const;
@@ -132,6 +139,7 @@ class DporNominationNode : public SCPDriver
     std::function<uint64(Value const&)> mValueHash;
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
+    uint32_t mNominationRoundBoundary{DEFAULT_NOMINATION_ROUND_BOUNDARY};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};

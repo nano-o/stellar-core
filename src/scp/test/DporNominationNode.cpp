@@ -39,6 +39,12 @@ defaultValueHash(Value const& value)
 }
 
 DporNominationNode::DporNominationNode(SecretKey const& secretKey,
+                                       SCPQuorumSet const& localQSet)
+    : DporNominationNode(secretKey, localQSet, Configuration{})
+{
+}
+
+DporNominationNode::DporNominationNode(SecretKey const& secretKey,
                                        SCPQuorumSet const& localQSet,
                                        Configuration const& config)
     : mSecretKey(secretKey)
@@ -146,6 +152,11 @@ DporNominationNode::setCombineCandidates(
 void
 DporNominationNode::applyConfiguration(Configuration const& config)
 {
+    mNominationRoundBoundary =
+        config.mNominationRoundBoundary == 0
+            ? DEFAULT_NOMINATION_ROUND_BOUNDARY
+            : config.mNominationRoundBoundary;
+
     if (config.mPriorityLookup)
     {
         setPriorityLookup(config.mPriorityLookup);
@@ -209,7 +220,7 @@ DporNominationNode::isRoundBoundaryNominationEnvelope(
 
     auto const it = mNominationRoundBySlot.find(envelope.statement.slotIndex);
     return it != mNominationRoundBySlot.end() &&
-           it->second >= NOMINATION_ROUND_BOUNDARY;
+           it->second >= mNominationRoundBoundary;
 }
 
 bool
@@ -295,8 +306,9 @@ DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 
     // Two boundary triggers matter here:
     // 1. the first non-nomination envelope, which is the PREPARE-side handoff
-    // 2. the first nomination envelope emitted once round 3 has been armed
-    // The round-3 boundary can also be reached earlier in setupTimer() before
+    // 2. the first nomination envelope emitted once the boundary round has
+    //    been armed
+    // The round boundary can also be reached earlier in setupTimer() before
     // any envelope is emitted, so we keep a separate boolean boundary flag and
     // still capture the first round-boundary nomination envelope later when it
     // appears for diagnostics.
@@ -384,7 +396,7 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
     {
         auto const roundNumber = inferNominationRound(timeout);
         mNominationRoundBySlot[slotIndex] = roundNumber;
-        if (roundNumber >= NOMINATION_ROUND_BOUNDARY)
+        if (roundNumber >= mNominationRoundBoundary)
         {
             mHasCrossedNominationBoundary = true;
         }

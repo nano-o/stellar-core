@@ -23,24 +23,39 @@ struct ReplayFixture
     std::vector<NodeID> mNodeIDs;
     SCPQuorumSet mQSet;
     Hash mQSetHash;
+    uint32_t mNominationRoundBoundary;
     Value mPreviousValue;
     Value mXValue;
     Value mYValue;
     DporNominationDporAdapter mAdapter;
 
-    ReplayFixture()
+    explicit ReplayFixture(
+        bool fixedTopLeader = true,
+        uint32_t nominationRoundBoundary =
+            DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY)
         : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
               "dpor-replay-", 3))
         , mNodeIDs(DporNominationSanityCheckHarness::getNodeIDs(mValidators))
         , mQSet(
               DporNominationSanityCheckHarness::makeQuorumSet(mNodeIDs, 2))
-        , mQSetHash(getNormalizedQSetHash(mValidators[0], mQSet))
+        , mQSetHash(getNormalizedQSetHash(mQSet))
+        , mNominationRoundBoundary(nominationRoundBoundary)
         , mPreviousValue(makeValue("previous"))
         , mXValue(makeValue("x"))
         , mYValue(makeValue("y"))
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    std::vector<Value>{mXValue, mYValue, mYValue},
-                   makeTopLeaderConfiguration(mNodeIDs, 0))
+                   [&]() {
+                       if (fixedTopLeader)
+                       {
+                           return makeTopLeaderConfiguration(
+                               mNodeIDs, 0, nominationRoundBoundary);
+                       }
+                       DporNominationNode::Configuration config;
+                       config.mNominationRoundBoundary =
+                           nominationRoundBoundary;
+                       return config;
+                   }())
     {
         // These Milestone 2 replay checks stay below candidate combination, so
         // the node driver's default combineCandidates implementation is enough.
@@ -92,6 +107,7 @@ deliverAndRecordTraceForThread(
 TEST_CASE("dpor nomination replay captures stepwise send fanout and replay",
           "[scp][dpor][nomination][replay]")
 {
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
     ReplayFixture fixture;
     auto program = fixture.mAdapter.makeProgram();
 
@@ -141,6 +157,7 @@ TEST_CASE("dpor nomination replay detects a prepare boundary on the leader "
           "path",
           "[scp][dpor][nomination][replay]")
 {
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
     auto validators = DporNominationSanityCheckHarness::makeValidatorSecretKeys(
         "dpor-replay-boundary-", 4);
     auto nodeIDs = DporNominationSanityCheckHarness::getNodeIDs(validators);
@@ -198,14 +215,16 @@ TEST_CASE("dpor nomination replay detects a prepare boundary on the leader "
 TEST_CASE("dpor nomination replay detects the timer-driven round boundary",
           "[scp][dpor][nomination][replay]")
 {
-    ReplayFixture fixture;
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+    // Timeout replay needs the default round-varying leader selection.
+    ReplayFixture fixture(false);
     constexpr std::size_t kLeaderNodeIndex = 0;
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    // Round 1 starts from the initial nominate() call, so round 3 is reached
-    // after two timer bottoms.
-    constexpr std::size_t kTimeoutBottomsToReachRoundBoundary =
-        DporNominationNode::NOMINATION_ROUND_BOUNDARY - 1;
+    // Round 1 starts from the initial nominate() call, so the configured
+    // round-N boundary is reached after N-1 timer bottoms.
+    auto const kTimeoutBottomsToReachRoundBoundary =
+        fixture.mNominationRoundBoundary - 1;
     for (std::size_t i = 0; i < kTimeoutBottomsToReachRoundBoundary; ++i)
     {
         leaderTrace.emplace_back(dpor::model::BottomValue{});

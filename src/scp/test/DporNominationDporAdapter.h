@@ -31,6 +31,9 @@ struct DporNominationValue
     uint64_t mSlotIndex{};
     SCPEnvelope mEnvelope;
 
+    auto
+    operator<=>(DporNominationValue const& other) const = default;
+
     bool
     operator==(DporNominationValue const& other) const = default;
 };

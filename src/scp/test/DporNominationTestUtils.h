@@ -5,9 +5,10 @@
 #pragma once
 
 #include "crypto/SHA.h"
+#include "scp/QuorumSetUtils.h"
 #include "scp/test/DporNominationDporAdapter.h"
-#include "scp/LocalNode.h"
 #include "test/Catch2.h"
+#include "util/Logging.h"
 #include "xdrpp/marshal.h"
 
 #include <algorithm>
@@ -25,6 +26,30 @@ namespace dpor_nomination_test
 constexpr uint64_t kSlotIndex = 0;
 constexpr uint64_t kTopLeaderPriority = std::numeric_limits<uint64_t>::max();
 
+class ScopedPartitionLogLevel
+{
+  public:
+    ScopedPartitionLogLevel(char const* partition, LogLevel level)
+        : mPartition(Logging::normalizePartition(partition))
+        , mPreviousLevel(Logging::getLogLevel(mPartition))
+    {
+        Logging::setLogLevel(level, mPartition.c_str());
+    }
+
+    ScopedPartitionLogLevel(ScopedPartitionLogLevel const&) = delete;
+    ScopedPartitionLogLevel&
+    operator=(ScopedPartitionLogLevel const&) = delete;
+
+    ~ScopedPartitionLogLevel()
+    {
+        Logging::setLogLevel(mPreviousLevel, mPartition.c_str());
+    }
+
+  private:
+    std::string mPartition;
+    LogLevel mPreviousLevel;
+};
+
 inline Value
 makeValue(std::string const& label)
 {
@@ -32,19 +57,23 @@ makeValue(std::string const& label)
 }
 
 inline Hash
-getNormalizedQSetHash(SecretKey const& secretKey, SCPQuorumSet const& qSet)
+getNormalizedQSetHash(SCPQuorumSet qSet)
 {
     // SCP statements hash the LocalNode-normalized quorum set, which may
     // differ from a plain hash of the caller-provided XDR shape.
-    DporNominationNode node(secretKey, qSet);
-    return node.getSCP().getLocalNode()->getQuorumSetHash();
+    normalizeQSet(qSet);
+    return sha256(xdr::xdr_to_opaque(qSet));
 }
 
 inline DporNominationNode::Configuration
 makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
-                           std::size_t leaderIndex)
+                           std::size_t leaderIndex,
+                           uint32_t nominationRoundBoundary =
+                               DporNominationNode::
+                                   DEFAULT_NOMINATION_ROUND_BOUNDARY)
 {
     DporNominationNode::Configuration config;
+    config.mNominationRoundBoundary = nominationRoundBoundary;
     auto sharedNodeIDs = std::make_shared<std::vector<NodeID> const>(nodeIDs);
     config.mPriorityLookup = [sharedNodeIDs, leaderIndex](NodeID const& nodeID) {
         return nodeID == sharedNodeIDs->at(leaderIndex) ? kTopLeaderPriority
