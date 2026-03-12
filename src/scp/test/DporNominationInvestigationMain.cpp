@@ -20,7 +20,7 @@ struct CommandLineOptions
 {
     std::size_t mWorkers = 8;
     std::size_t mNumNodes = kDefaultValidatorCount;
-    bool mAllowTimeouts = false;
+    TimeoutSettings mTimeoutSettings;
     std::optional<std::size_t> mDepthOverride;
     std::optional<uint32_t> mBoundaryOverride;
     std::optional<InvestigationScenario::Id> mScenario;
@@ -31,7 +31,8 @@ printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
               << " [--workers N] [--num-nodes N] [--depth N] [--boundary N]"
-                 " [--scenario ID] [--timeouts]\n"
+                 " [--scenario ID] [--nomination-timeouts]"
+                 " [--balloting-timeouts]\n"
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
                  "3|largest, 4|unrestricted-followers, 5|commit-boundary\n";
 }
@@ -98,9 +99,14 @@ parseOptions(char const* argv0, int argc, char* argv[])
             printUsage(argv0);
             std::exit(0);
         }
-        if (arg == "--timeouts")
+        if (arg == "--nomination-timeouts")
         {
-            options.mAllowTimeouts = true;
+            options.mTimeoutSettings.mNomination = true;
+            continue;
+        }
+        if (arg == "--balloting-timeouts")
+        {
+            options.mTimeoutSettings.mBalloting = true;
             continue;
         }
         if (arg == "--workers")
@@ -201,11 +207,11 @@ main(int argc, char* argv[])
         auto const results = runRuntimeGrowthInvestigation(
             options.mWorkers, options.mDepthOverride,
             options.mBoundaryOverride, options.mScenario,
-            options.mNumNodes, options.mAllowTimeouts);
+            options.mNumNodes, options.mTimeoutSettings);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   nominationRoundBoundary,
                                   options.mNumNodes,
-                                  options.mAllowTimeouts);
+                                  options.mTimeoutSettings);
 
         for (auto const& result : results)
         {

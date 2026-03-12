@@ -44,6 +44,12 @@ constexpr std::size_t kFollowerStopAfterSecondPeerReceiveStep = 12;
 constexpr std::size_t kMaxDepth = 128;
 using ProgressSteps = std::vector<std::size_t>;
 
+struct TimeoutSettings
+{
+    bool mNomination{false};
+    bool mBalloting{false};
+};
+
 class ScopedPartitionLogLevel
 {
   public:
@@ -185,7 +191,7 @@ struct ThresholdFixture
 
 inline DporNominationDporAdapter::Program
 makeBoundedProgram(ThresholdFixture const& fixture,
-                   ProgressSteps const& stopSteps, bool allowTimeouts = false)
+                   ProgressSteps const& stopSteps)
 {
     if (stopSteps.size() != fixture.mValidatorCount)
     {
@@ -198,7 +204,7 @@ makeBoundedProgram(ThresholdFixture const& fixture,
         [&](auto tid, auto const& threadFn) {
             auto const nodeIndex = static_cast<std::size_t>(tid);
             program.threads[tid] =
-                [threadFn, stopSteps, nodeIndex, allowTimeouts](
+                [threadFn, stopSteps, nodeIndex](
                     auto const& trace,
                     std::size_t step) -> std::optional<
                         DporNominationDporAdapter::EventLabel> {
@@ -212,23 +218,7 @@ makeBoundedProgram(ThresholdFixture const& fixture,
                 {
                     return std::nullopt;
                 }
-
-                auto const* receive =
-                    std::get_if<DporNominationDporAdapter::ReceiveLabel>(
-                        &*next);
-                if (receive == nullptr || receive->is_blocking())
-                {
-                    return next;
-                }
-
-                if (allowTimeouts)
-                {
-                    return next;
-                }
-
-                return DporNominationDporAdapter::EventLabel{
-                    dpor::model::make_receive_label<DporNominationValue>(
-                        receive->matches)};
+                return next;
             };
         });
     return program;
@@ -488,7 +478,7 @@ runRuntimeGrowthInvestigation(
     std::optional<InvestigationScenario::Id> scenarioFilter =
         std::nullopt,
     std::size_t validatorCount = kDefaultValidatorCount,
-    bool allowTimeouts = false)
+    TimeoutSettings timeoutSettings = {})
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -507,9 +497,12 @@ runRuntimeGrowthInvestigation(
         }
 
         ThresholdFixture fixture(
-            validatorCount, !allowTimeouts, scenario.mBoundaryMode,
+            validatorCount, !timeoutSettings.mNomination,
+            scenario.mBoundaryMode,
             boundaryOverride.value_or(
                 DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY));
+        fixture.mAdapter.setTimeoutModes(timeoutSettings.mNomination,
+                                         timeoutSettings.mBalloting);
 
         auto replayMetrics =
             std::make_shared<DporNominationDporAdapter::ReplayMetrics>();
@@ -517,8 +510,7 @@ runRuntimeGrowthInvestigation(
         fixture.mAdapter.setReplayMetrics(replayMetrics);
 
         dpor::algo::DporConfigT<DporNominationValue> config;
-        config.program =
-            makeBoundedProgram(fixture, scenario.mStopSteps, allowTimeouts);
+        config.program = makeBoundedProgram(fixture, scenario.mStopSteps);
         config.max_depth = scenario.mMaxDepth;
         config.on_receive_branches =
             [receiveBranchMetrics](dpor::model::ThreadId,
@@ -568,7 +560,7 @@ runFourNodeRuntimeGrowthInvestigation(
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          boundaryOverride, scenarioFilter,
-                                         kDefaultValidatorCount, false);
+                                         kDefaultValidatorCount, {});
 }
 
 inline std::string
@@ -594,7 +586,7 @@ printInvestigationResults(std::ostream& out,
                           std::size_t workers,
                           uint32_t nominationRoundBoundary,
                           std::size_t validatorCount,
-                          bool allowTimeouts)
+                          TimeoutSettings timeoutSettings)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -603,7 +595,10 @@ printInvestigationResults(std::ostream& out,
             << "' scenario=" << scenarioName(result.mScenario.mId)
             << " num_nodes=" << validatorCount
             << " threshold=" << threshold
-            << " timeouts=" << (allowTimeouts ? "on" : "off")
+            << " nomination_timeouts="
+            << (timeoutSettings.mNomination ? "on" : "off")
+            << " balloting_timeouts="
+            << (timeoutSettings.mBalloting ? "on" : "off")
             << " boundary_mode="
             << boundaryModeName(result.mScenario.mBoundaryMode)
             << " workers=" << workers

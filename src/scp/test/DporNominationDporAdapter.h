@@ -93,6 +93,10 @@ class DporNominationDporAdapter
     void
     setReplayMetrics(std::shared_ptr<ReplayMetrics> metrics);
 
+    void
+    setTimeoutModes(bool enableNominationTimeouts,
+                    bool enableBallotingTimeouts);
+
     std::optional<EventLabel>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,
                      std::size_t step) const;
@@ -137,6 +141,9 @@ class DporNominationDporAdapter
                                           std::size_t nodeIndex,
                                           ThreadTrace const& trace) const;
 
+    std::optional<int>
+    selectEnabledTimerID(DporNominationNode const& node) const;
+
     void recordReplayObservationCount(std::size_t replayedObservationCount) const;
 
     std::vector<SecretKey> mValidators;
@@ -145,6 +152,8 @@ class DporNominationDporAdapter
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
     DporNominationNode::Configuration mConfig;
+    bool mEnableNominationTimeouts{true};
+    bool mEnableBallotingTimeouts{false};
     std::shared_ptr<ReplayMetrics> mReplayMetrics;
 };
 

@@ -132,6 +132,50 @@ DporNominationDporAdapter::setReplayMetrics(
 }
 
 void
+DporNominationDporAdapter::setTimeoutModes(bool enableNominationTimeouts,
+                                           bool enableBallotingTimeouts)
+{
+    mEnableNominationTimeouts = enableNominationTimeouts;
+    mEnableBallotingTimeouts = enableBallotingTimeouts;
+}
+
+std::optional<int>
+DporNominationDporAdapter::selectEnabledTimerID(
+    DporNominationNode const& node) const
+{
+    auto hasFirableTimer = [&](int timerID) {
+        auto timer = node.getTimer(mSlotIndex, timerID);
+        return timer && static_cast<bool>(timer->mCallback);
+    };
+
+    auto const nominationTimerEnabled =
+        mEnableNominationTimeouts &&
+        hasFirableTimer(Slot::NOMINATION_TIMER);
+    auto const ballotingTimerEnabled =
+        mEnableBallotingTimeouts &&
+        hasFirableTimer(Slot::BALLOT_PROTOCOL_TIMER);
+
+    if (nominationTimerEnabled && ballotingTimerEnabled)
+    {
+        // A DPOR bottom observation carries no timer identity, so replay can
+        // only expose one enabled timer kind at a time.
+        throw std::logic_error(
+            "DPOR replay does not support simultaneous nomination and "
+            "balloting timer bottoms");
+    }
+
+    if (nominationTimerEnabled)
+    {
+        return Slot::NOMINATION_TIMER;
+    }
+    if (ballotingTimerEnabled)
+    {
+        return Slot::BALLOT_PROTOCOL_TIMER;
+    }
+    return std::nullopt;
+}
+
+void
 DporNominationDporAdapter::initializeNode(ReplayState& state,
                                           std::size_t nodeIndex) const
 {
@@ -148,10 +192,17 @@ DporNominationDporAdapter::replayObservation(DporNominationNode& node,
     auto const localThread = toThreadID(nodeIndex);
     if (observed.is_bottom())
     {
-        if (!node.fireTimer(mSlotIndex, Slot::NOMINATION_TIMER))
+        auto const timerID = selectEnabledTimerID(node);
+        if (!timerID)
         {
             throw std::logic_error(
-                "trace requested a timer firing without an active nomination "
+                "trace requested a timer firing without an active enabled "
+                "timer");
+        }
+        if (!node.fireTimer(mSlotIndex, *timerID))
+        {
+            throw std::logic_error(
+                "trace requested a timer firing without an active enabled "
                 "timer");
         }
         return;
@@ -264,12 +315,10 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             return finish(std::nullopt);
         }
 
-        // Replay intentionally ignores ballot timers and only exposes
-        // nomination timer bottoms to DPOR.
-        auto const hasNominationTimer =
-            state.mNode.hasActiveTimer(mSlotIndex, Slot::NOMINATION_TIMER);
+        auto const enabledTimerID = selectEnabledTimerID(state.mNode);
         auto nextReceive =
-            EventLabel{makeReceiveLabel(localThread, hasNominationTimer)};
+            EventLabel{makeReceiveLabel(localThread,
+                                        static_cast<bool>(enabledTimerID))};
         if (eventCount == step)
         {
             return finish(nextReceive);
