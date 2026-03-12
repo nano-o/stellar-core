@@ -44,6 +44,9 @@ RUN set -eux; \
         gcc-14 \
         gdb \
         git \
+        google-perftools \
+        heaptrack \
+        hyperfine \
         iwyu \
         jq \
         less \
@@ -56,6 +59,8 @@ RUN set -eux; \
         libunwind-20-dev \
         lldb \
         locales \
+        linux-tools-common \
+        linux-tools-generic \
         lsof \
         lsb-release \
         ncurses-term \
@@ -73,8 +78,10 @@ RUN set -eux; \
         rsync \
         sed \
         sqlite3 \
+        strace \
         sudo \
         tmux \
+        valgrind \
         vim \
         wget \
         llvm-20; \
@@ -162,7 +169,8 @@ RUN install -d -o "${UID}" -g "${GID}" \
 
 COPY --chown=${UID}:${GID} dev-container/tmux.conf /home/${USER}/.tmux.conf
 COPY --chown=${UID}:${GID} dev-container/osc52-tmux /home/${USER}/.local/bin/osc52-tmux
-RUN chmod 0755 /home/${USER}/.local/bin/osc52-tmux
+COPY --chown=${UID}:${GID} dev-container/perf-wrapper.sh /home/${USER}/.local/bin/perf
+RUN chmod 0755 /home/${USER}/.local/bin/osc52-tmux /home/${USER}/.local/bin/perf
 COPY dev-container/project-title.sh /etc/profile.d/project-title.sh
 RUN grep -qxF 'source /etc/profile.d/project-title.sh' /etc/bash.bashrc \
     || echo 'source /etc/profile.d/project-title.sh' >> /etc/bash.bashrc

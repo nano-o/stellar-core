@@ -53,13 +53,15 @@ git submodule update --init --recursive external/dpor
 | Build system | `autoconf`, `automake`, `libtool`, `pkg-config`, `cmake`, `ninja-build`, `make` |
 | Static analysis | `ccache`, `bear`, `cppcheck`, `iwyu` |
 | Databases / tests | `postgresql`, `libpq-dev`, `sqlite3` |
+| Profiling / tracing | `perf`, `valgrind` (`callgrind`, `massif`), `heaptrack`, `google-pprof`, `strace`, `hyperfine` |
 | Rust | repo-pinned root toolchain via `install-rust.sh`, `rustfmt`, `clippy`, `rust-src`, `wasm32-unknown-unknown`, `wasm32v1-none`, `cargo-cache`, `cargo-sweep` |
 | AI agents | Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`) |
 | Shell / editor | `bash`, `tmux`, `vim`, `fzf`, `ripgrep`, `fd`, `bat`, `jq`, `rsync` |
 | Networking | `curl`, `wget`, `openssh-client` |
 
-The image runs as a non-root `dev` user (UID/GID matched to the host) with
-passwordless `sudo`.
+The image runs as a non-root `dev` user (UID/GID matched to the host). The
+default launcher keeps `no-new-privileges` enabled, so privileged commands such
+as `sudo` only work in relaxed modes like `--profile` or `--debug-full`.
 
 By default the environment uses `clang-20`:
 
@@ -95,6 +97,16 @@ claude login
 
 ## Debug modes
 
+For CPU sampling with `perf` and similar profiling tools that need
+`perf_event_open` and relaxed seccomp rules:
+
+```bash
+dev-container/run-container.sh --profile
+```
+
+This adds `CAP_PERFMON`, `CAP_SYS_PTRACE`, and disables seccomp/apparmor
+filtering without going fully privileged.
+
 For GDB, LLDB, `strace`, or sanitizer workflows that need ptrace support:
 
 ```bash
@@ -107,7 +119,41 @@ For fully privileged debugging (ASLR disabled, unrestricted ptrace):
 dev-container/run-container.sh --debug-full
 ```
 
-The default mode keeps the hardened baseline enabled.
+The default mode keeps the hardened baseline enabled. If `perf` still reports
+permission errors in `--profile`, the host kernel's `perf_event_paranoid`
+setting is stricter than the container caps allow; use `--debug-full` or adjust
+the host sysctl.
+
+## Profiling workflows
+
+These are the most useful tools for DPOR exploration and state-space profiling
+against `stellar-core`:
+
+```bash
+# Replace <command> with the DPOR driver or focused stellar-core test you want to study.
+
+# End-to-end CPU sampling with call stacks
+perf record --call-graph dwarf -- <command>
+perf report
+
+# Repeatable wall-clock benchmarking for regression checks
+hyperfine --warmup 1 '<command>'
+
+# Allocation hot spots from graph cloning / execution snapshot churn
+heaptrack <command>
+heaptrack_print heaptrack.*.gz | less
+
+# Deterministic callgraph and heap-growth views
+valgrind --tool=callgrind <command>
+callgrind_annotate callgrind.out.* | less
+valgrind --tool=massif <command>
+ms_print massif.out.* | less
+```
+
+`stellar-core` also has existing Tracy instrumentation and helper scripts under
+`scripts/README.md`. For instrumented traces, configure with
+`--enable-tracy --enable-tracy-capture --enable-tracy-csvexport`, then use the
+built `tracy-capture` / `tracy-csvexport` tools from the build tree.
 
 ## Hardening
 
@@ -121,7 +167,8 @@ isolation:
 | PID limit | `--pids-limit=1024` | Prevents runaway process trees |
 | Memory limit | `--memory=32g` | Caps memory usage during builds/tests |
 
-`--debug` and `--debug-full` selectively relax these restrictions.
+`--profile`, `--debug`, and `--debug-full` selectively relax these
+restrictions.
 
 ## Options
 
@@ -133,6 +180,7 @@ dev-container/run-container.sh [tag] [options] [-- command...]
 |---|---|
 | `tag` | Docker image tag (default: `stellar-core-dev`) |
 | `--name NAME` | Custom container name (default: `dev-<project>`) |
+| `--profile` | Enable `perf`-friendly profiling mode with `CAP_PERFMON` and relaxed seccomp/apparmor |
 | `--debug` | Add `SYS_PTRACE` and disable seccomp/apparmor |
 | `--debug-full` | Privileged mode with ASLR and ptrace scope disabled |
 | `--persist` | Keep the stopped container instead of removing it |
@@ -164,6 +212,7 @@ APT_MIRROR=mirror://mirrors.ubuntu.com/mirrors.txt dev-container/build-image.sh
 | `Dockerfile` | Image definition |
 | `build-image.sh` | Build the image with host UID/GID |
 | `run-container.sh` | Launch the container with the repo + agent state mounted |
+| `perf-wrapper.sh` | Resolves the real installed `perf` binary inside Ubuntu containers |
 | `tmux.conf` | tmux defaults (vim keys, OSC52 clipboard, 256-color) |
 | `osc52-tmux` | Clipboard helper for tmux over SSH/containers |
 | `project-title.sh` | Sets the terminal title to the project name |

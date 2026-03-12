@@ -4,6 +4,7 @@ set -euo pipefail
 tag="stellar-core-dev"
 container_name=""
 debug_mode=""
+profile_mode=""
 persist=""
 mount_claude=""
 
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --debug)
       debug_mode="debug"
+      shift
+      ;;
+    --profile)
+      profile_mode=1
       shift
       ;;
     --debug-full|--privileged)
@@ -66,10 +71,13 @@ docker_args=(
   -v "${PWD}:/home/dev/stellar-core"
   -v "${codex_state_dir}:/home/dev/.codex"
   --cap-drop=ALL
-  --security-opt=no-new-privileges
   --pids-limit=1024
   --memory=32g
 )
+
+if [[ "${debug_mode}" != "full" && -z "${profile_mode}" ]]; then
+  docker_args+=(--security-opt=no-new-privileges)
+fi
 
 if [[ -z "${persist}" ]]; then
   docker_args+=(--rm)
@@ -94,7 +102,16 @@ fi
 
 git_init='if [[ -n "${HOST_GIT_USER_NAME:-}" ]]; then git config --global user.name "${HOST_GIT_USER_NAME}"; fi; if [[ -n "${HOST_GIT_USER_EMAIL:-}" ]]; then git config --global user.email "${HOST_GIT_USER_EMAIL}"; fi;'
 
-if [[ "${debug_mode}" == "debug" ]]; then
+if [[ -n "${profile_mode}" ]]; then
+  docker_args+=(
+    --cap-add=PERFMON
+    --cap-add=SYS_PTRACE
+    --security-opt=seccomp=unconfined
+    --security-opt=apparmor=unconfined
+  )
+fi
+
+if [[ "${debug_mode}" == "debug" && -z "${profile_mode}" ]]; then
   docker_args+=(
     --cap-add=SYS_PTRACE
     --security-opt=seccomp=unconfined
