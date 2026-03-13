@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "crypto/Hex.h"
 #include "crypto/SHA.h"
 #include "scp/QuorumSetUtils.h"
 #include "scp/test/DporNominationDporAdapter.h"
@@ -340,7 +341,7 @@ struct ReceiveBranchMetricsSnapshot
     std::uint64_t mNonblockingReceiveEvents{0};
 };
 
-struct DeadlockCheckState
+struct TerminalCheckState
 {
     std::atomic<std::size_t> mTerminalExecutions{0};
     std::atomic<bool> mFound{false};
@@ -348,10 +349,10 @@ struct DeadlockCheckState
     std::string mMessage;
 };
 
-class TerminalDeadlockError : public std::runtime_error
+class TerminalCheckError : public std::runtime_error
 {
   public:
-    explicit TerminalDeadlockError(std::string const& message)
+    explicit TerminalCheckError(std::string const& message)
         : std::runtime_error(message)
     {
     }
@@ -462,6 +463,13 @@ formatStepCounts(std::vector<std::size_t> const& stepCounts)
     return out.str();
 }
 
+inline std::string
+formatValueAbbrev(Value const& value)
+{
+    auto const bytes = xdr::xdr_to_opaque(value);
+    return hexAbbrev(ByteSlice(bytes.data(), bytes.size()));
+}
+
 template <typename GraphT>
 inline bool
 isErrorExecution(GraphT const& graph, std::size_t validatorCount)
@@ -517,6 +525,101 @@ findTerminalDeadlock(GraphT const& graph, ProgressSteps const& stopSteps)
             out << " before limit " << stopStep;
         }
         out << " thread_steps=" << formatStepCounts(stepCounts);
+        return out.str();
+    }
+
+    return std::nullopt;
+}
+
+template <typename GraphT>
+inline std::optional<std::string>
+findExternalizeDivergence(GraphT const& graph, std::size_t validatorCount)
+{
+    if (isErrorExecution(graph, validatorCount))
+    {
+        return std::nullopt;
+    }
+
+    std::map<dpor::model::ThreadId, Value> externalizedByThread;
+    for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
+    {
+        auto const* send = dpor::model::as_send(graph.event(eventID));
+        if (send == nullptr)
+        {
+            continue;
+        }
+
+        auto const& envelope = send->value.mEnvelope;
+        if (envelope.statement.pledges.type() != SCP_ST_EXTERNALIZE)
+        {
+            continue;
+        }
+
+        auto const thread = graph.event(eventID).thread;
+        auto const& value = envelope.statement.pledges.externalize().commit.value;
+        auto [it, inserted] = externalizedByThread.try_emplace(thread, value);
+        if (!inserted && it->second != value)
+        {
+            std::ostringstream out;
+            out << "externalize divergence: thread " << thread
+                << " externalized both " << formatValueAbbrev(it->second)
+                << " and " << formatValueAbbrev(value);
+            return out.str();
+        }
+    }
+
+    if (externalizedByThread.size() < 2)
+    {
+        return std::nullopt;
+    }
+
+    auto const first = externalizedByThread.begin();
+    for (auto it = std::next(first); it != externalizedByThread.end(); ++it)
+    {
+        if (it->second == first->second)
+        {
+            continue;
+        }
+
+        std::ostringstream out;
+        out << "externalize divergence: thread " << first->first
+            << " externalized " << formatValueAbbrev(first->second)
+            << " while thread " << it->first << " externalized "
+            << formatValueAbbrev(it->second);
+        return out.str();
+    }
+
+    return std::nullopt;
+}
+
+template <typename GraphT>
+inline std::optional<std::string>
+findExternalize(GraphT const& graph, std::size_t validatorCount)
+{
+    if (isErrorExecution(graph, validatorCount))
+    {
+        return std::nullopt;
+    }
+
+    for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
+    {
+        auto const* send = dpor::model::as_send(graph.event(eventID));
+        if (send == nullptr)
+        {
+            continue;
+        }
+
+        auto const& envelope = send->value.mEnvelope;
+        if (envelope.statement.pledges.type() != SCP_ST_EXTERNALIZE)
+        {
+            continue;
+        }
+
+        std::ostringstream out;
+        out << "externalize: thread " << graph.event(eventID).thread
+            << " externalized "
+            << formatValueAbbrev(
+                   envelope.statement.pledges.externalize().commit.value);
         return out.str();
     }
 
@@ -630,7 +733,9 @@ runRuntimeGrowthInvestigation(
     std::size_t validatorCount = kDefaultValidatorCount,
     TimeoutSettings timeoutSettings = {},
     TimerSetLimitSettings timerSetLimitSettings = {},
-    bool checkDeadlock = false)
+    bool checkDeadlock = false,
+    bool checkExternalize = false,
+    bool checkExternalizeDivergence = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -662,7 +767,7 @@ runRuntimeGrowthInvestigation(
         auto replayMetrics =
             std::make_shared<DporNominationDporAdapter::ReplayMetrics>();
         auto receiveBranchMetrics = std::make_shared<ReceiveBranchMetrics>();
-        auto deadlockCheckState = std::make_shared<DeadlockCheckState>();
+        auto terminalCheckState = std::make_shared<TerminalCheckState>();
         fixture.mAdapter.setReplayMetrics(replayMetrics);
 
         dpor::algo::DporConfigT<DporNominationValue> config;
@@ -686,37 +791,53 @@ runRuntimeGrowthInvestigation(
                     receiveBranchMetrics->mNonblockingReceiveEvents++;
                 }
             };
-        if (checkDeadlock)
+        if (checkDeadlock || checkExternalize || checkExternalizeDivergence)
         {
-            config.on_terminal_execution = [deadlockCheckState]() {
-                deadlockCheckState->mTerminalExecutions.fetch_add(
+            config.on_terminal_execution = [terminalCheckState]() {
+                terminalCheckState->mTerminalExecutions.fetch_add(
                     1, std::memory_order_relaxed);
             };
             config.on_execution =
-                [deadlockCheckState, stopSteps = scenario.mStopSteps](
+                [terminalCheckState, stopSteps = scenario.mStopSteps,
+                 validatorCount, checkDeadlock, checkExternalize,
+                 checkExternalizeDivergence](
                     auto const& graph) {
-                    if (deadlockCheckState->mFound.load(
+                    if (terminalCheckState->mFound.load(
                             std::memory_order_relaxed))
                     {
                         return;
                     }
 
-                    auto deadlock = findTerminalDeadlock(graph, stopSteps);
-                    if (!deadlock)
+                    std::optional<std::string> error;
+                    if (checkExternalize)
+                    {
+                        error = findExternalize(graph, validatorCount);
+                    }
+                    if (checkExternalizeDivergence)
+                    {
+                        error = error ? std::move(error)
+                                      :
+                            findExternalizeDivergence(graph, validatorCount);
+                    }
+                    if (!error && checkDeadlock)
+                    {
+                        error = findTerminalDeadlock(graph, stopSteps);
+                    }
+                    if (!error)
                     {
                         return;
                     }
 
-                    std::lock_guard<std::mutex> lock(deadlockCheckState->mMutex);
-                    if (deadlockCheckState->mFound.load(
+                    std::lock_guard<std::mutex> lock(terminalCheckState->mMutex);
+                    if (terminalCheckState->mFound.load(
                             std::memory_order_relaxed))
                     {
                         return;
                     }
-                    deadlockCheckState->mMessage = std::move(*deadlock);
-                    deadlockCheckState->mFound.store(true,
+                    terminalCheckState->mMessage = std::move(*error);
+                    terminalCheckState->mFound.store(true,
                                                      std::memory_order_relaxed);
-                    throw TerminalDeadlockError(deadlockCheckState->mMessage);
+                    throw TerminalCheckError(terminalCheckState->mMessage);
                 };
         }
 
@@ -726,12 +847,12 @@ runRuntimeGrowthInvestigation(
         {
             verifyResult = dpor::algo::verify_parallel(config, options);
         }
-        catch (TerminalDeadlockError const& e)
+        catch (TerminalCheckError const& e)
         {
             verifyResult.kind = dpor::algo::VerifyResultKind::ErrorFound;
             verifyResult.message = e.what();
             verifyResult.executions_explored =
-                deadlockCheckState->mTerminalExecutions.load(
+                terminalCheckState->mTerminalExecutions.load(
                     std::memory_order_relaxed);
         }
         auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -760,14 +881,18 @@ runFourNodeRuntimeGrowthInvestigation(
     bool nominationOnly = false,
     TimeoutSettings timeoutSettings = {},
     TimerSetLimitSettings timerSetLimitSettings = {},
-    bool checkDeadlock = false)
+    bool checkDeadlock = false,
+    bool checkExternalize = false,
+    bool checkExternalizeDivergence = false)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
                                          kDefaultValidatorCount,
                                          timeoutSettings,
                                          timerSetLimitSettings,
-                                         checkDeadlock);
+                                         checkDeadlock,
+                                         checkExternalize,
+                                         checkExternalizeDivergence);
 }
 
 inline std::string
@@ -795,7 +920,9 @@ printInvestigationResults(std::ostream& out,
                           bool nominationOnly,
                           TimeoutSettings timeoutSettings,
                           TimerSetLimitSettings timerSetLimitSettings = {},
-                          bool checkDeadlock = false)
+                          bool checkDeadlock = false,
+                          bool checkExternalize = false,
+                          bool checkExternalizeDivergence = false)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -811,6 +938,9 @@ printInvestigationResults(std::ostream& out,
             << " balloting_timeouts="
             << (timeoutSettings.mBalloting ? "on" : "off")
             << " deadlock=" << (checkDeadlock ? "on" : "off")
+            << " externalize=" << (checkExternalize ? "on" : "off")
+            << " externalize_divergence="
+            << (checkExternalizeDivergence ? "on" : "off")
             << " prepare_boundary="
             << (nominationOnly ? "1" : "off")
             << " nomination_timer_limit=";

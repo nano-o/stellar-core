@@ -22,6 +22,8 @@ struct CommandLineOptions
     std::size_t mNumNodes = kDefaultValidatorCount;
     bool mNominationOnly = false;
     bool mCheckDeadlock = false;
+    bool mCheckExternalize = false;
+    bool mCheckExternalizeDivergence = false;
     TimeoutSettings mTimeoutSettings;
     TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
@@ -35,6 +37,8 @@ printUsage(char const* argv0)
               << " [--workers N] [--num-nodes N] [--depth N]"
                  " [--nomination-only]"
                  " [--deadlock]"
+                 " [--externalize]"
+                 " [--externalize-divergence]"
                  " [--nomination-timer-limit N]"
                  " [--balloting-timer-limit N]"
                  " [--scenario ID] [--nomination-timeouts]"
@@ -46,6 +50,10 @@ printUsage(char const* argv0)
               << "--depth limits each thread to N steps (0 = unbounded)\n"
               << "--deadlock fails if a terminal execution leaves any thread "
                  "short of its step limit (unbounded counts as unreached)\n"
+              << "--externalize fails if a terminal execution contains any "
+                 "EXTERNALIZE message\n"
+              << "--externalize-divergence fails if a terminal execution has "
+                 "two nodes externalize different values\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
@@ -138,6 +146,16 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--deadlock")
         {
             options.mCheckDeadlock = true;
+            continue;
+        }
+        if (arg == "--externalize")
+        {
+            options.mCheckExternalize = true;
+            continue;
+        }
+        if (arg == "--externalize-divergence")
+        {
+            options.mCheckExternalizeDivergence = true;
             continue;
         }
         if (arg == "--balloting-timeouts")
@@ -263,13 +281,17 @@ main(int argc, char* argv[])
             options.mWorkers, options.mDepthOverride,
             options.mScenario, options.mNominationOnly,
             options.mNumNodes, options.mTimeoutSettings,
-            options.mTimerSetLimitSettings, options.mCheckDeadlock);
+            options.mTimerSetLimitSettings, options.mCheckDeadlock,
+            options.mCheckExternalize,
+            options.mCheckExternalizeDivergence);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
                                   options.mTimeoutSettings,
                                   options.mTimerSetLimitSettings,
-                                  options.mCheckDeadlock);
+                                  options.mCheckDeadlock,
+                                  options.mCheckExternalize,
+                                  options.mCheckExternalizeDivergence);
 
         for (auto const& result : results)
         {

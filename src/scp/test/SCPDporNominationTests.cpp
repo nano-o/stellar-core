@@ -212,6 +212,22 @@ traceStartsWithDelivery(DporNominationDporAdapter::ThreadTrace const& trace)
     return !trace.empty() && !trace.front().is_bottom();
 }
 
+SCPEnvelope
+makeTestExternalizeEnvelope(NodeID const& nodeID, Hash const& qSetHash,
+                            uint64 slotIndex, SCPBallot const& ballot,
+                            uint32 nH)
+{
+    SCPEnvelope envelope;
+    envelope.statement.nodeID = nodeID;
+    envelope.statement.slotIndex = slotIndex;
+    envelope.statement.pledges.type(SCP_ST_EXTERNALIZE);
+    auto& ext = envelope.statement.pledges.externalize();
+    ext.commit = ballot;
+    ext.nH = nH;
+    ext.commitQuorumSetHash = qSetHash;
+    return envelope;
+}
+
 std::string
 formatEnvelopeSummary(SCPEnvelope const& envelope)
 {
@@ -697,6 +713,84 @@ TEST_CASE("dpor nomination investigation can start directly in balloting with "
                                fixture.mQSetHashes.at(nodeIndex), kSlotIndex,
                                SCPBallot(1, expectedValue));
     }
+}
+
+TEST_CASE("dpor nomination investigation can detect divergent externalize "
+          "values from the terminal graph", "[scp][dpor][investigation]")
+{
+    SmallTopologyVerifyFixture fixture;
+    dpor::model::ExplorationGraphT<DporNominationValue> graph;
+
+    auto const destination = DporNominationDporAdapter::toThreadID(2);
+    auto const thread0 = DporNominationDporAdapter::toThreadID(0);
+    auto const thread1 = DporNominationDporAdapter::toThreadID(1);
+
+    static_cast<void>(graph.add_event(
+        thread0,
+        DporNominationDporAdapter::EventLabel{
+            DporNominationDporAdapter::SendLabel{
+                .destination = destination,
+                .value = DporNominationValue{
+                    .mSenderThread = thread0,
+                    .mDestinationThread = destination,
+                    .mSlotIndex = kSlotIndex,
+                    .mEnvelope = makeTestExternalizeEnvelope(
+                        fixture.mNodeIDs.at(0), fixture.mQSetHashes.at(0),
+                        kSlotIndex, SCPBallot(1, fixture.mXValue), 1),
+                },
+            }}));
+    static_cast<void>(graph.add_event(
+        thread1,
+        DporNominationDporAdapter::EventLabel{
+            DporNominationDporAdapter::SendLabel{
+                .destination = destination,
+                .value = DporNominationValue{
+                    .mSenderThread = thread1,
+                    .mDestinationThread = destination,
+                    .mSlotIndex = kSlotIndex,
+                    .mEnvelope = makeTestExternalizeEnvelope(
+                        fixture.mNodeIDs.at(1), fixture.mQSetHashes.at(1),
+                        kSlotIndex, SCPBallot(1, fixture.mYValue), 1),
+                },
+            }}));
+
+    auto const divergence =
+        dpor_nomination_investigation::findExternalizeDivergence(
+            graph, kSmallTopologyValidatorCount);
+    REQUIRE(divergence.has_value());
+    REQUIRE(divergence->find("externalize divergence: thread 0") !=
+            std::string::npos);
+    REQUIRE(divergence->find("thread 1") != std::string::npos);
+}
+
+TEST_CASE("dpor nomination investigation can detect an externalize send from "
+          "the terminal graph", "[scp][dpor][investigation]")
+{
+    SmallTopologyVerifyFixture fixture;
+    dpor::model::ExplorationGraphT<DporNominationValue> graph;
+
+    auto const destination = DporNominationDporAdapter::toThreadID(2);
+    auto const thread0 = DporNominationDporAdapter::toThreadID(0);
+
+    static_cast<void>(graph.add_event(
+        thread0,
+        DporNominationDporAdapter::EventLabel{
+            DporNominationDporAdapter::SendLabel{
+                .destination = destination,
+                .value = DporNominationValue{
+                    .mSenderThread = thread0,
+                    .mDestinationThread = destination,
+                    .mSlotIndex = kSlotIndex,
+                    .mEnvelope = makeTestExternalizeEnvelope(
+                        fixture.mNodeIDs.at(0), fixture.mQSetHashes.at(0),
+                        kSlotIndex, SCPBallot(1, fixture.mXValue), 1),
+                },
+            }}));
+
+    auto const externalize = dpor_nomination_investigation::findExternalize(
+        graph, kSmallTopologyValidatorCount);
+    REQUIRE(externalize.has_value());
+    REQUIRE(externalize->find("externalize: thread 0") != std::string::npos);
 }
 
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
