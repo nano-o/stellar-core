@@ -249,6 +249,54 @@ makeBoundedProgram(ThresholdFixture const& fixture,
     return program;
 }
 
+inline std::size_t
+mergeStepLimit(std::size_t lhs, std::size_t rhs)
+{
+    if (lhs == kUnlimitedProgressStep)
+    {
+        return rhs;
+    }
+    if (rhs == kUnlimitedProgressStep)
+    {
+        return lhs;
+    }
+    return std::min(lhs, rhs);
+}
+
+inline ProgressSteps
+applyPerThreadDepthLimit(ProgressSteps stopSteps,
+                         std::size_t perThreadDepthLimit)
+{
+    for (auto& stopStep : stopSteps)
+    {
+        stopStep = mergeStepLimit(stopStep, perThreadDepthLimit);
+    }
+    return stopSteps;
+}
+
+inline std::size_t
+computeExecutionDepthCap(ProgressSteps const& stopSteps)
+{
+    std::size_t total = 0;
+    for (auto const stopStep : stopSteps)
+    {
+        if (stopStep == kUnlimitedProgressStep)
+        {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        if (total > std::numeric_limits<std::size_t>::max() - stopStep)
+        {
+            return std::numeric_limits<std::size_t>::max();
+        }
+        total += stopStep;
+    }
+    if (total == std::numeric_limits<std::size_t>::max())
+    {
+        return total;
+    }
+    return total + 1;
+}
+
 struct InvestigationScenario
 {
     enum class Id
@@ -487,12 +535,16 @@ runRuntimeGrowthInvestigation(
     for (auto scenario :
          selectedRuntimeGrowthScenarios(validatorCount, scenarioFilter))
     {
+        auto perThreadDepthLimit = scenario.mMaxDepth;
         if (depthOverride)
         {
-            scenario.mMaxDepth = *depthOverride == 0
-                                     ? std::numeric_limits<std::size_t>::max()
-                                     : *depthOverride;
+            perThreadDepthLimit = *depthOverride == 0
+                                      ? kUnlimitedProgressStep
+                                      : *depthOverride;
         }
+        scenario.mMaxDepth = perThreadDepthLimit;
+        scenario.mStopSteps =
+            applyPerThreadDepthLimit(scenario.mStopSteps, perThreadDepthLimit);
 
         ThresholdFixture fixture(
             validatorCount, !timeoutSettings.mNomination, nominationOnly,
@@ -507,7 +559,7 @@ runRuntimeGrowthInvestigation(
 
         dpor::algo::DporConfigT<DporNominationValue> config;
         config.program = makeBoundedProgram(fixture, scenario.mStopSteps);
-        config.max_depth = scenario.mMaxDepth;
+        config.max_depth = computeExecutionDepthCap(scenario.mStopSteps);
         config.on_receive_branches =
             [receiveBranchMetrics](dpor::model::ThreadId,
                                    std::size_t compatibleUnreadSends,
@@ -624,7 +676,7 @@ printInvestigationResults(std::ostream& out,
         }
         out
             << " workers=" << workers
-            << " depth=";
+            << " depth_per_thread=";
         if (result.mScenario.mMaxDepth ==
             std::numeric_limits<std::size_t>::max())
         {

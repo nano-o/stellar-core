@@ -40,6 +40,7 @@ printUsage(char const* argv0)
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
                  "3|all-followers-second-peer-receive, "
                  "4|unrestricted-followers\n"
+              << "--depth limits each thread to N steps (0 = unbounded)\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
