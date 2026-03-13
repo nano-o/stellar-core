@@ -35,7 +35,6 @@ namespace dpor_nomination_investigation
 {
 
 constexpr uint64_t kSlotIndex = 0;
-constexpr uint64_t kTopLeaderPriority = std::numeric_limits<uint64_t>::max();
 constexpr std::size_t kDefaultValidatorCount = 4;
 constexpr std::size_t kLeaderIndex = 0;
 constexpr std::size_t kUnlimitedProgressStep =
@@ -56,6 +55,12 @@ struct TimerSetLimitSettings
 {
     std::optional<uint32_t> mNomination;
     std::optional<uint32_t> mBalloting;
+};
+
+enum class InitialValuePattern : std::uint8_t
+{
+    UniquePerNode,
+    ThresholdSplitXY
 };
 
 constexpr uint32_t kDisabledNominationRoundBoundary =
@@ -107,23 +112,15 @@ computeTwoThirdsThreshold(std::size_t validatorCount)
     return (2 * validatorCount + 2) / 3;
 }
 
-inline DporNominationNode::Configuration
-makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
-                           std::size_t leaderIndex,
-                           bool nominationOnly = false)
+inline std::map<NodeID, std::size_t>
+makeNodeIndexMap(std::vector<NodeID> const& nodeIDs)
 {
-    DporNominationNode::Configuration config;
-    auto sharedNodeIDs = std::make_shared<std::vector<NodeID> const>(nodeIDs);
-    config.mPriorityLookup = [sharedNodeIDs, leaderIndex](NodeID const& nodeID) {
-        return nodeID == sharedNodeIDs->at(leaderIndex) ? kTopLeaderPriority
-                                                        : 1;
-    };
-    config.mBoundaryMode = DporNominationNode::BoundaryMode::Prepare;
-    config.mBallotingBoundary = nominationOnly
-                                    ? DporNominationNode::DEFAULT_BALLOTING_BOUNDARY
-                                    : kDisabledBallotingBoundary;
-    config.mNominationRoundBoundary = kDisabledNominationRoundBoundary;
-    return config;
+    std::map<NodeID, std::size_t> indexMap;
+    for (std::size_t i = 0; i < nodeIDs.size(); ++i)
+    {
+        indexMap[nodeIDs[i]] = i + 1;
+    }
+    return indexMap;
 }
 
 struct ThresholdFixture
@@ -135,16 +132,23 @@ struct ThresholdFixture
     SCPQuorumSet mQSet;
     std::vector<Hash> mQSetHashes;
     Value mPreviousValue;
+    Value mThresholdXValue;
+    Value mThresholdYValue;
     std::vector<Value> mInitialValues;
+    InitialValuePattern mInitialValuePattern;
+    DporNominationDporAdapter::InitialStateMode mInitialStateMode;
     bool mNominationOnly;
     TimerSetLimitSettings mTimerSetLimitSettings;
     DporNominationDporAdapter mAdapter;
 
     explicit ThresholdFixture(
         std::size_t validatorCount = kDefaultValidatorCount,
-        bool fixedTopLeader = true,
         bool nominationOnly = false,
-        TimerSetLimitSettings timerSetLimitSettings = {})
+        TimerSetLimitSettings timerSetLimitSettings = {},
+        InitialValuePattern initialValuePattern =
+            InitialValuePattern::UniquePerNode,
+        DporNominationDporAdapter::InitialStateMode initialStateMode =
+            DporNominationDporAdapter::InitialStateMode::Nomination)
         : mValidatorCount(validatorCount)
         , mThreshold(computeTwoThirdsThreshold(validatorCount))
         , mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -170,9 +174,23 @@ struct ThresholdFixture
         }())
         , mPreviousValue(makeValue("previous-verify-" +
                                    std::to_string(validatorCount) + "node"))
+        , mThresholdXValue(makeValue("x-verify-" + std::to_string(validatorCount) +
+                                     "node-threshold-split"))
+        , mThresholdYValue(makeValue("y-verify-" + std::to_string(validatorCount) +
+                                     "node-threshold-split"))
         , mInitialValues([&]() {
             std::vector<Value> values;
             values.reserve(validatorCount);
+            if (initialValuePattern == InitialValuePattern::ThresholdSplitXY)
+            {
+                for (std::size_t i = 0; i < validatorCount; ++i)
+                {
+                    values.push_back(i < mThreshold ? mThresholdXValue
+                                                    : mThresholdYValue);
+                }
+                return values;
+            }
+
             for (std::size_t i = 0; i < validatorCount; ++i)
             {
                 values.push_back(
@@ -180,23 +198,14 @@ struct ThresholdFixture
             }
             return values;
         }())
+        , mInitialValuePattern(initialValuePattern)
+        , mInitialStateMode(initialStateMode)
         , mNominationOnly(nominationOnly)
         , mTimerSetLimitSettings(timerSetLimitSettings)
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    mInitialValues, [&]() {
-                       if (fixedTopLeader)
-                       {
-                           auto config =
-                               makeTopLeaderConfiguration(mNodeIDs,
-                                                          kLeaderIndex,
-                                                          nominationOnly);
-                           config.mNominationTimerSetLimit =
-                               timerSetLimitSettings.mNomination;
-                           config.mBallotingTimerSetLimit =
-                               timerSetLimitSettings.mBalloting;
-                           return config;
-                       }
                        DporNominationNode::Configuration config;
+                       config.mNodeIndexMap = makeNodeIndexMap(mNodeIDs);
                        config.mNominationRoundBoundary =
                            kDisabledNominationRoundBoundary;
                        config.mBallotingBoundary = nominationOnly
@@ -210,7 +219,8 @@ struct ThresholdFixture
                        config.mBallotingTimerSetLimit =
                            timerSetLimitSettings.mBalloting;
                        return config;
-                   }())
+                   }(),
+                   initialStateMode)
     {
         if (mValidatorCount < 2)
         {
@@ -287,7 +297,8 @@ struct InvestigationScenario
         TwoFollowersAccepted,
         AllFollowersAcceptedOnce,
         AllFollowersSecondPeerReceive,
-        UnrestrictedFollowers
+        UnrestrictedFollowers,
+        ThresholdSplitBalloting
     };
 
     Id mId;
@@ -295,6 +306,10 @@ struct InvestigationScenario
     ProgressSteps mStopSteps;
     std::size_t mMaxDepth;
     bool mIncludeInDefaultRuns{true};
+    DporNominationDporAdapter::InitialStateMode mInitialStateMode{
+        DporNominationDporAdapter::InitialStateMode::Nomination};
+    InitialValuePattern mInitialValuePattern{
+        InitialValuePattern::UniquePerNode};
 };
 
 struct ReplayMetricsSnapshot
@@ -327,9 +342,19 @@ struct ReceiveBranchMetricsSnapshot
 
 struct DeadlockCheckState
 {
+    std::atomic<std::size_t> mTerminalExecutions{0};
     std::atomic<bool> mFound{false};
     mutable std::mutex mMutex;
     std::string mMessage;
+};
+
+class TerminalDeadlockError : public std::runtime_error
+{
+  public:
+    explicit TerminalDeadlockError(std::string const& message)
+        : std::runtime_error(message)
+    {
+    }
 };
 
 struct InvestigationResult
@@ -369,6 +394,8 @@ scenarioName(InvestigationScenario::Id id)
         return "all-followers-second-peer-receive";
     case InvestigationScenario::Id::UnrestrictedFollowers:
         return "unrestricted-followers";
+    case InvestigationScenario::Id::ThresholdSplitBalloting:
+        return "threshold-split-balloting";
     }
     return "unknown";
 }
@@ -472,19 +499,25 @@ findTerminalDeadlock(GraphT const& graph, ProgressSteps const& stopSteps)
     for (std::size_t nodeIndex = 0; nodeIndex < stopSteps.size(); ++nodeIndex)
     {
         auto const stopStep = stopSteps.at(nodeIndex);
-        if (stopStep == kUnlimitedProgressStep)
+        auto const stepCount = stepCounts.at(nodeIndex);
+        if (stopStep != kUnlimitedProgressStep && stepCount >= stopStep)
         {
             continue;
         }
-        auto const stepCount = stepCounts.at(nodeIndex);
-        if (stepCount < stopStep)
+
+        std::ostringstream out;
+        out << "deadlock: thread " << nodeIndex << " stopped at step "
+            << stepCount;
+        if (stopStep == kUnlimitedProgressStep)
         {
-            std::ostringstream out;
-            out << "deadlock: thread " << nodeIndex << " stopped at step "
-                << stepCount << " before limit " << stopStep
-                << " thread_steps=" << formatStepCounts(stepCounts);
-            return out.str();
+            out << " without reaching an unbounded step limit";
         }
+        else
+        {
+            out << " before limit " << stopStep;
+        }
+        out << " thread_steps=" << formatStepCounts(stepCounts);
+        return out.str();
     }
 
     return std::nullopt;
@@ -530,7 +563,17 @@ runtimeGrowthScenarios(std::size_t validatorCount)
          "followers unrestricted like the leader",
          ProgressSteps(validatorCount, kUnlimitedProgressStep),
          kMaxDepth / 8,
-         false},
+         false,
+         DporNominationDporAdapter::InitialStateMode::Nomination,
+         InitialValuePattern::UniquePerNode},
+        {InvestigationScenario::Id::ThresholdSplitBalloting,
+         "start directly in balloting with threshold nodes on x and the "
+         "rest on y",
+         ProgressSteps(validatorCount, kUnlimitedProgressStep),
+         kMaxDepth / 8,
+         false,
+         DporNominationDporAdapter::InitialStateMode::Balloting,
+         InitialValuePattern::ThresholdSplitXY},
     };
 }
 
@@ -610,8 +653,9 @@ runRuntimeGrowthInvestigation(
             applyPerThreadDepthLimit(scenario.mStopSteps, perThreadDepthLimit);
 
         ThresholdFixture fixture(
-            validatorCount, !timeoutSettings.mNomination, nominationOnly,
-            timerSetLimitSettings);
+            validatorCount, nominationOnly,
+            timerSetLimitSettings, scenario.mInitialValuePattern,
+            scenario.mInitialStateMode);
         fixture.mAdapter.setTimeoutModes(timeoutSettings.mNomination,
                                          timeoutSettings.mBalloting);
 
@@ -644,6 +688,10 @@ runRuntimeGrowthInvestigation(
             };
         if (checkDeadlock)
         {
+            config.on_terminal_execution = [deadlockCheckState]() {
+                deadlockCheckState->mTerminalExecutions.fetch_add(
+                    1, std::memory_order_relaxed);
+            };
             config.on_execution =
                 [deadlockCheckState, stopSteps = scenario.mStopSteps](
                     auto const& graph) {
@@ -668,24 +716,28 @@ runRuntimeGrowthInvestigation(
                     deadlockCheckState->mMessage = std::move(*deadlock);
                     deadlockCheckState->mFound.store(true,
                                                      std::memory_order_relaxed);
+                    throw TerminalDeadlockError(deadlockCheckState->mMessage);
                 };
         }
 
         auto const start = std::chrono::steady_clock::now();
-        auto verifyResult = dpor::algo::verify_parallel(config, options);
+        dpor::algo::VerifyResult verifyResult;
+        try
+        {
+            verifyResult = dpor::algo::verify_parallel(config, options);
+        }
+        catch (TerminalDeadlockError const& e)
+        {
+            verifyResult.kind = dpor::algo::VerifyResultKind::ErrorFound;
+            verifyResult.message = e.what();
+            verifyResult.executions_explored =
+                deadlockCheckState->mTerminalExecutions.load(
+                    std::memory_order_relaxed);
+        }
         auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start);
 
         fixture.mAdapter.setReplayMetrics(nullptr);
-
-        if (checkDeadlock &&
-            deadlockCheckState->mFound.load(std::memory_order_relaxed) &&
-            verifyResult.kind != dpor::algo::VerifyResultKind::ErrorFound)
-        {
-            verifyResult.kind = dpor::algo::VerifyResultKind::ErrorFound;
-            std::lock_guard<std::mutex> lock(deadlockCheckState->mMutex);
-            verifyResult.message = deadlockCheckState->mMessage;
-        }
 
         results.push_back(InvestigationResult{
             .mScenario = scenario,

@@ -96,13 +96,15 @@ DporNominationDporAdapter::DporNominationDporAdapter(
     std::vector<SecretKey> const& validators, SCPQuorumSet const& qSet,
     uint64_t slotIndex, Value const& previousValue,
     std::vector<Value> const& initialValues,
-    DporNominationNode::Configuration const& config)
+    DporNominationNode::Configuration const& config,
+    InitialStateMode initialStateMode)
     : mValidators(validators)
     , mQSet(qSet)
     , mSlotIndex(slotIndex)
     , mPreviousValue(previousValue)
     , mInitialValues(initialValues)
     , mConfig(config)
+    , mInitialStateMode(initialStateMode)
 {
     if (mValidators.empty())
     {
@@ -198,8 +200,16 @@ void
 DporNominationDporAdapter::initializeNode(ReplayState& state,
                                           std::size_t nodeIndex) const
 {
-    state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
-                         mPreviousValue);
+    auto const& initialValue = mInitialValues.at(nodeIndex);
+    switch (mInitialStateMode)
+    {
+    case InitialStateMode::Nomination:
+        state.mNode.nominate(mSlotIndex, initialValue, mPreviousValue);
+        break;
+    case InitialStateMode::Balloting:
+        state.mNode.startBalloting(mSlotIndex, initialValue);
+        break;
+    }
     queuePendingEnvelopeSends(state, nodeIndex);
 }
 

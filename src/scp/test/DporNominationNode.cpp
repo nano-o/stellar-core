@@ -90,6 +90,13 @@ DporNominationNode::nominate(uint64 slotIndex, Value const& value,
     return mSCP.nominate(slotIndex, wrapValue(value), previousValue);
 }
 
+bool
+DporNominationNode::startBalloting(uint64 slotIndex, Value const& value)
+{
+    auto slot = mSCP.getSlot(slotIndex, true);
+    return slot->bumpState(value, true);
+}
+
 SCP::EnvelopeState
 DporNominationNode::receiveEnvelope(SCPEnvelope const& envelope)
 {

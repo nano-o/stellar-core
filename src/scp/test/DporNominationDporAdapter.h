@@ -47,6 +47,7 @@ struct DporNominationValue
 class DporNominationDporAdapter
 {
   public:
+    using InitialStateMode = DporNominationNode::InitialStateMode;
     using EventLabel = dpor::model::EventLabelT<DporNominationValue>;
     using SendLabel = dpor::model::SendLabelT<DporNominationValue>;
     using ReceiveLabel = dpor::model::ReceiveLabelT<DporNominationValue>;
@@ -74,7 +75,9 @@ class DporNominationDporAdapter
                               Value const& previousValue,
                               std::vector<Value> const& initialValues,
                               DporNominationNode::Configuration const& config =
-                                  {});
+                                  {},
+                              InitialStateMode initialStateMode =
+                                  InitialStateMode::Nomination);
 
     std::size_t
     size() const;
@@ -159,6 +162,7 @@ class DporNominationDporAdapter
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
     DporNominationNode::Configuration mConfig;
+    InitialStateMode mInitialStateMode{InitialStateMode::Nomination};
     bool mEnableNominationTimeouts{true};
     bool mEnableBallotingTimeouts{false};
     std::shared_ptr<ReplayMetrics> mReplayMetrics;

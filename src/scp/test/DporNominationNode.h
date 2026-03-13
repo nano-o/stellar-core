@@ -29,6 +29,12 @@ namespace stellar
 class DporNominationNode : public SCPDriver
 {
   public:
+    enum class InitialStateMode : std::uint8_t
+    {
+        Nomination,
+        Balloting
+    };
+
     enum class BoundaryMode : std::uint8_t
     {
         Prepare,
@@ -172,6 +178,8 @@ class DporNominationNode : public SCPDriver
 
     bool nominate(uint64 slotIndex, Value const& value,
                   Value const& previousValue);
+
+    bool startBalloting(uint64 slotIndex, Value const& value);
 
     SCP::EnvelopeState receiveEnvelope(SCPEnvelope const& envelope);
 

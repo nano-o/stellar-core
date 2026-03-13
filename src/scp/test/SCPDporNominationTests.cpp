@@ -610,6 +610,7 @@ TEST_CASE("dpor nomination investigation can detect terminal deadlocks",
     REQUIRE(results.size() == 1);
     REQUIRE(results.front().mVerifyResult.kind ==
             VerifyResultKind::ErrorFound);
+    REQUIRE(results.front().mVerifyResult.executions_explored == 1);
     REQUIRE(results.front().mVerifyResult.message.find("deadlock: thread ") !=
             std::string::npos);
 }
@@ -632,6 +633,70 @@ TEST_CASE("dpor nomination investigation deadlock check accepts full step "
     REQUIRE(results.front().mVerifyResult.kind ==
             VerifyResultKind::AllExecutionsExplored);
     REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+}
+
+TEST_CASE("dpor nomination investigation deadlock check treats unbounded step "
+          "limits as unreached", "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{0},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, true);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::ErrorFound);
+    REQUIRE(results.front().mVerifyResult.executions_explored == 1);
+    REQUIRE(results.front().mVerifyResult.message.find(
+                "without reaching an unbounded step limit") !=
+            std::string::npos);
+}
+
+TEST_CASE("dpor nomination investigation can start directly in balloting with "
+          "a threshold split", "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const scenarios =
+        dpor_nomination_investigation::selectedRuntimeGrowthScenarios(
+            kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                ThresholdSplitBalloting);
+    REQUIRE(scenarios.size() == 1);
+
+    auto const& scenario = scenarios.front();
+    REQUIRE(scenario.mInitialStateMode ==
+            DporNominationDporAdapter::InitialStateMode::Balloting);
+    REQUIRE(scenario.mInitialValuePattern ==
+            dpor_nomination_investigation::InitialValuePattern::
+                ThresholdSplitXY);
+
+    dpor_nomination_investigation::ThresholdFixture fixture(
+        kSmallTopologyValidatorCount, false,
+        dpor_nomination_investigation::TimerSetLimitSettings{},
+        scenario.mInitialValuePattern, scenario.mInitialStateMode);
+
+    for (std::size_t nodeIndex = 0; nodeIndex < fixture.mValidatorCount;
+         ++nodeIndex)
+    {
+        auto next = fixture.mAdapter.captureNextEvent(nodeIndex, {}, 0);
+        REQUIRE(next.has_value());
+
+        auto const& send = requireSend(*next);
+        auto const& expectedValue =
+            nodeIndex < fixture.mThreshold ? fixture.mThresholdXValue
+                                           : fixture.mThresholdYValue;
+        requirePrepareEnvelope(send.value.mEnvelope,
+                               fixture.mNodeIDs.at(nodeIndex),
+                               fixture.mQSetHashes.at(nodeIndex), kSlotIndex,
+                               SCPBallot(1, expectedValue));
+    }
 }
 
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",

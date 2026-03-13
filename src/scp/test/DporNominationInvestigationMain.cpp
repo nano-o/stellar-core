@@ -41,10 +41,11 @@ printUsage(char const* argv0)
                  " [--balloting-timeouts]\n"
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
                  "3|all-followers-second-peer-receive, "
-                 "4|unrestricted-followers\n"
+                 "4|unrestricted-followers, "
+                 "5|threshold-split-balloting\n"
               << "--depth limits each thread to N steps (0 = unbounded)\n"
-              << "--deadlock fails if a terminal execution leaves any finite "
-                 "step limit unreached\n"
+              << "--deadlock fails if a terminal execution leaves any thread "
+                 "short of its step limit (unbounded counts as unreached)\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
@@ -92,6 +93,10 @@ parseScenarioValue(std::string_view value)
     if (value == "4" || value == "unrestricted-followers")
     {
         return InvestigationScenario::Id::UnrestrictedFollowers;
+    }
+    if (value == "5" || value == "threshold-split-balloting")
+    {
+        return InvestigationScenario::Id::ThresholdSplitBalloting;
     }
     throw std::invalid_argument("unknown scenario: " + std::string(value));
 }
