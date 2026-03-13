@@ -21,6 +21,7 @@ struct CommandLineOptions
     std::size_t mWorkers = 8;
     std::size_t mNumNodes = kDefaultValidatorCount;
     bool mNominationOnly = false;
+    bool mCheckDeadlock = false;
     TimeoutSettings mTimeoutSettings;
     TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
@@ -33,6 +34,7 @@ printUsage(char const* argv0)
     std::cerr << "Usage: " << argv0
               << " [--workers N] [--num-nodes N] [--depth N]"
                  " [--nomination-only]"
+                 " [--deadlock]"
                  " [--nomination-timer-limit N]"
                  " [--balloting-timer-limit N]"
                  " [--scenario ID] [--nomination-timeouts]"
@@ -41,6 +43,8 @@ printUsage(char const* argv0)
                  "3|all-followers-second-peer-receive, "
                  "4|unrestricted-followers\n"
               << "--depth limits each thread to N steps (0 = unbounded)\n"
+              << "--deadlock fails if a terminal execution leaves any finite "
+                 "step limit unreached\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
@@ -124,6 +128,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--nomination-only")
         {
             options.mNominationOnly = true;
+            continue;
+        }
+        if (arg == "--deadlock")
+        {
+            options.mCheckDeadlock = true;
             continue;
         }
         if (arg == "--balloting-timeouts")
@@ -249,12 +258,13 @@ main(int argc, char* argv[])
             options.mWorkers, options.mDepthOverride,
             options.mScenario, options.mNominationOnly,
             options.mNumNodes, options.mTimeoutSettings,
-            options.mTimerSetLimitSettings);
+            options.mTimerSetLimitSettings, options.mCheckDeadlock);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
                                   options.mTimeoutSettings,
-                                  options.mTimerSetLimitSettings);
+                                  options.mTimerSetLimitSettings,
+                                  options.mCheckDeadlock);
 
         for (auto const& result : results)
         {

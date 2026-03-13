@@ -14,8 +14,10 @@
 #include <dpor/algo/dpor.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <iomanip>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -319,6 +321,13 @@ struct ReceiveBranchMetricsSnapshot
     std::uint64_t mNonblockingReceiveEvents{0};
 };
 
+struct DeadlockCheckState
+{
+    std::atomic<bool> mFound{false};
+    mutable std::mutex mMutex;
+    std::string mMessage;
+};
+
 struct InvestigationResult
 {
     InvestigationScenario mScenario;
@@ -403,6 +412,78 @@ formatAverage(std::uint64_t numerator, std::uint64_t denominator)
                                static_cast<double>(denominator);
     out << average;
     return out.str();
+}
+
+inline std::string
+formatStepCounts(std::vector<std::size_t> const& stepCounts)
+{
+    std::ostringstream out;
+    out << '[';
+    for (std::size_t i = 0; i < stepCounts.size(); ++i)
+    {
+        if (i != 0)
+        {
+            out << ',';
+        }
+        out << stepCounts[i];
+    }
+    out << ']';
+    return out.str();
+}
+
+template <typename GraphT>
+inline bool
+isErrorExecution(GraphT const& graph, std::size_t validatorCount)
+{
+    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+    {
+        auto const tid = DporNominationDporAdapter::toThreadID(nodeIndex);
+        auto const lastEventID = graph.last_event_id(tid);
+        if (lastEventID != GraphT::kNoSource &&
+            dpor::model::is_error(graph.event(lastEventID)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+template <typename GraphT>
+inline std::optional<std::string>
+findTerminalDeadlock(GraphT const& graph, ProgressSteps const& stopSteps)
+{
+    if (isErrorExecution(graph, stopSteps.size()))
+    {
+        return std::nullopt;
+    }
+
+    std::vector<std::size_t> stepCounts;
+    stepCounts.reserve(stopSteps.size());
+    for (std::size_t nodeIndex = 0; nodeIndex < stopSteps.size(); ++nodeIndex)
+    {
+        auto const tid = DporNominationDporAdapter::toThreadID(nodeIndex);
+        stepCounts.push_back(graph.thread_event_count(tid));
+    }
+
+    for (std::size_t nodeIndex = 0; nodeIndex < stopSteps.size(); ++nodeIndex)
+    {
+        auto const stopStep = stopSteps.at(nodeIndex);
+        if (stopStep == kUnlimitedProgressStep)
+        {
+            continue;
+        }
+        auto const stepCount = stepCounts.at(nodeIndex);
+        if (stepCount < stopStep)
+        {
+            std::ostringstream out;
+            out << "deadlock: thread " << nodeIndex << " stopped at step "
+                << stepCount << " before limit " << stopStep
+                << " thread_steps=" << formatStepCounts(stepCounts);
+            return out.str();
+        }
+    }
+
+    return std::nullopt;
 }
 
 inline std::vector<InvestigationScenario>
@@ -501,7 +582,8 @@ runRuntimeGrowthInvestigation(
     bool nominationOnly = false,
     std::size_t validatorCount = kDefaultValidatorCount,
     TimeoutSettings timeoutSettings = {},
-    TimerSetLimitSettings timerSetLimitSettings = {})
+    TimerSetLimitSettings timerSetLimitSettings = {},
+    bool checkDeadlock = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -532,6 +614,7 @@ runRuntimeGrowthInvestigation(
         auto replayMetrics =
             std::make_shared<DporNominationDporAdapter::ReplayMetrics>();
         auto receiveBranchMetrics = std::make_shared<ReceiveBranchMetrics>();
+        auto deadlockCheckState = std::make_shared<DeadlockCheckState>();
         fixture.mAdapter.setReplayMetrics(replayMetrics);
 
         dpor::algo::DporConfigT<DporNominationValue> config;
@@ -555,13 +638,50 @@ runRuntimeGrowthInvestigation(
                     receiveBranchMetrics->mNonblockingReceiveEvents++;
                 }
             };
+        if (checkDeadlock)
+        {
+            config.on_execution =
+                [deadlockCheckState, stopSteps = scenario.mStopSteps](
+                    auto const& graph) {
+                    if (deadlockCheckState->mFound.load(
+                            std::memory_order_relaxed))
+                    {
+                        return;
+                    }
+
+                    auto deadlock = findTerminalDeadlock(graph, stopSteps);
+                    if (!deadlock)
+                    {
+                        return;
+                    }
+
+                    std::lock_guard<std::mutex> lock(deadlockCheckState->mMutex);
+                    if (deadlockCheckState->mFound.load(
+                            std::memory_order_relaxed))
+                    {
+                        return;
+                    }
+                    deadlockCheckState->mMessage = std::move(*deadlock);
+                    deadlockCheckState->mFound.store(true,
+                                                     std::memory_order_relaxed);
+                };
+        }
 
         auto const start = std::chrono::steady_clock::now();
-        auto const verifyResult = dpor::algo::verify_parallel(config, options);
+        auto verifyResult = dpor::algo::verify_parallel(config, options);
         auto const elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start);
 
         fixture.mAdapter.setReplayMetrics(nullptr);
+
+        if (checkDeadlock &&
+            deadlockCheckState->mFound.load(std::memory_order_relaxed) &&
+            verifyResult.kind != dpor::algo::VerifyResultKind::ErrorFound)
+        {
+            verifyResult.kind = dpor::algo::VerifyResultKind::ErrorFound;
+            std::lock_guard<std::mutex> lock(deadlockCheckState->mMutex);
+            verifyResult.message = deadlockCheckState->mMessage;
+        }
 
         results.push_back(InvestigationResult{
             .mScenario = scenario,
@@ -583,13 +703,15 @@ runFourNodeRuntimeGrowthInvestigation(
         std::nullopt,
     bool nominationOnly = false,
     TimeoutSettings timeoutSettings = {},
-    TimerSetLimitSettings timerSetLimitSettings = {})
+    TimerSetLimitSettings timerSetLimitSettings = {},
+    bool checkDeadlock = false)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
                                          kDefaultValidatorCount,
                                          timeoutSettings,
-                                         timerSetLimitSettings);
+                                         timerSetLimitSettings,
+                                         checkDeadlock);
 }
 
 inline std::string
@@ -616,7 +738,8 @@ printInvestigationResults(std::ostream& out,
                           std::size_t validatorCount,
                           bool nominationOnly,
                           TimeoutSettings timeoutSettings,
-                          TimerSetLimitSettings timerSetLimitSettings = {})
+                          TimerSetLimitSettings timerSetLimitSettings = {},
+                          bool checkDeadlock = false)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -631,6 +754,7 @@ printInvestigationResults(std::ostream& out,
             << (timeoutSettings.mNomination ? "on" : "off")
             << " balloting_timeouts="
             << (timeoutSettings.mBalloting ? "on" : "off")
+            << " deadlock=" << (checkDeadlock ? "on" : "off")
             << " prepare_boundary="
             << (nominationOnly ? "1" : "off")
             << " nomination_timer_limit=";
@@ -691,8 +815,12 @@ printInvestigationResults(std::ostream& out,
             << " max_compatible_unread_sends="
             << result.mReceiveBranchMetrics.mMaxCompatibleUnreadSends
             << " total_receive_branches="
-            << result.mReceiveBranchMetrics.mReceiveBranchTotal
-            << '\n';
+            << result.mReceiveBranchMetrics.mReceiveBranchTotal;
+        if (!result.mVerifyResult.message.empty())
+        {
+            out << " message=" << std::quoted(result.mVerifyResult.message);
+        }
+        out << '\n';
     }
 }
 

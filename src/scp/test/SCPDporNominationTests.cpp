@@ -603,6 +603,47 @@ TEST_CASE("dpor nomination investigation does not use a global dpor depth cap",
     REQUIRE(results.front().mVerifyResult.executions_explored > 0);
 }
 
+TEST_CASE("dpor nomination investigation can detect terminal deadlocks",
+          "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{10},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, true);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::ErrorFound);
+    REQUIRE(results.front().mVerifyResult.message.find("deadlock: thread ") !=
+            std::string::npos);
+}
+
+TEST_CASE("dpor nomination investigation deadlock check accepts full step "
+          "cutoffs", "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{1},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, true);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+}
+
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
           "[scp][dpor][nomination]")
 {
