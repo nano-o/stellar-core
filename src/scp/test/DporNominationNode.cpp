@@ -167,6 +167,20 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     }
 }
 
+void
+DporNominationNode::clearReplayState()
+{
+    mSCP.purgeSlots(std::numeric_limits<uint64>::max(),
+                    std::numeric_limits<uint64>::max());
+    mEmittedEnvelopes.clear();
+    mPendingEnvelopes.clear();
+    mTimers.clear();
+    mTimerSetCountByKey.clear();
+    mNominationRoundBySlot.clear();
+    mHasCrossedNominationBoundary = false;
+    mNominationBoundaryEnvelope.reset();
+}
+
 uint32_t
 DporNominationNode::inferNominationRound(
     std::chrono::milliseconds timeout) const
@@ -273,6 +287,332 @@ DporNominationNode::fireTimer(uint64 slotIndex, int timerID)
         cb();
     }
     return true;
+}
+
+DporNominationNode::ReplayBaseline
+DporNominationNode::snapshotReplayBaseline(uint64 slotIndex) const
+{
+    ReplayBaseline baseline;
+
+    auto slot = const_cast<SCP&>(mSCP).getSlot(slotIndex, false);
+    if (slot)
+    {
+        SlotStateSnapshot slotSnapshot;
+        slotSnapshot.mSlotIndex = slot->mSlotIndex;
+        slotSnapshot.mFullyValidated = slot->mFullyValidated;
+        slotSnapshot.mGotVBlocking = slot->mGotVBlocking;
+
+        slotSnapshot.mStatementsHistory.reserve(slot->mStatementsHistory.size());
+        for (auto const& historicalStatement : slot->mStatementsHistory)
+        {
+            slotSnapshot.mStatementsHistory.push_back(
+                HistoricalStatementSnapshot{
+                    .mWhen = historicalStatement.mWhen,
+                    .mStatement = historicalStatement.mStatement,
+                    .mValidated = historicalStatement.mValidated,
+                });
+        }
+
+        auto const snapshotValueSet = [](ValueWrapperPtrSet const& values) {
+            std::vector<Value> snapshot;
+            snapshot.reserve(values.size());
+            for (auto const& value : values)
+            {
+                snapshot.push_back(value->getValue());
+            }
+            return snapshot;
+        };
+
+        auto const snapshotEnvelopeMap = [](auto const& envelopes) {
+            std::vector<SCPEnvelope> snapshot;
+            snapshot.reserve(envelopes.size());
+            for (auto const& [nodeID, envelope] : envelopes)
+            {
+                static_cast<void>(nodeID);
+                snapshot.push_back(envelope->getEnvelope());
+            }
+            return snapshot;
+        };
+
+        auto const& nomination = slot->mNominationProtocol;
+        slotSnapshot.mNominationState.mRoundNumber = nomination.mRoundNumber;
+        slotSnapshot.mNominationState.mVotes =
+            snapshotValueSet(nomination.mVotes);
+        slotSnapshot.mNominationState.mAccepted =
+            snapshotValueSet(nomination.mAccepted);
+        slotSnapshot.mNominationState.mCandidates =
+            snapshotValueSet(nomination.mCandidates);
+        slotSnapshot.mNominationState.mLatestNominations =
+            snapshotEnvelopeMap(nomination.mLatestNominations);
+        if (nomination.mLastEnvelope)
+        {
+            slotSnapshot.mNominationState.mLastEnvelope =
+                nomination.mLastEnvelope->getEnvelope();
+        }
+        slotSnapshot.mNominationState.mRoundLeaders.assign(
+            nomination.mRoundLeaders.begin(), nomination.mRoundLeaders.end());
+        slotSnapshot.mNominationState.mNominationStarted =
+            nomination.mNominationStarted;
+        if (nomination.mLatestCompositeCandidate)
+        {
+            slotSnapshot.mNominationState.mLatestCompositeCandidate =
+                nomination.mLatestCompositeCandidate->getValue();
+        }
+        slotSnapshot.mNominationState.mPreviousValue = nomination.mPreviousValue;
+        slotSnapshot.mNominationState.mTimerExpCount =
+            nomination.mTimerExpCount;
+
+        auto const snapshotBallot =
+            [](BallotProtocol::SCPBallotWrapperUPtr const& ballot)
+            -> std::optional<SCPBallot> {
+            if (!ballot)
+            {
+                return std::nullopt;
+            }
+            return ballot->getBallot();
+        };
+
+        auto const& ballot = slot->mBallotProtocol;
+        slotSnapshot.mBallotState.mHeardFromQuorum = ballot.mHeardFromQuorum;
+        slotSnapshot.mBallotState.mCurrentBallot =
+            snapshotBallot(ballot.mCurrentBallot);
+        slotSnapshot.mBallotState.mPrepared =
+            snapshotBallot(ballot.mPrepared);
+        slotSnapshot.mBallotState.mPreparedPrime =
+            snapshotBallot(ballot.mPreparedPrime);
+        slotSnapshot.mBallotState.mHighBallot =
+            snapshotBallot(ballot.mHighBallot);
+        slotSnapshot.mBallotState.mCommit = snapshotBallot(ballot.mCommit);
+        slotSnapshot.mBallotState.mLatestEnvelopes =
+            snapshotEnvelopeMap(ballot.mLatestEnvelopes);
+        slotSnapshot.mBallotState.mPhase =
+            static_cast<std::uint8_t>(ballot.mPhase);
+        if (ballot.mValueOverride)
+        {
+            slotSnapshot.mBallotState.mValueOverride =
+                ballot.mValueOverride->getValue();
+        }
+        slotSnapshot.mBallotState.mCurrentMessageLevel =
+            ballot.mCurrentMessageLevel;
+        slotSnapshot.mBallotState.mTimerExpCount = ballot.mTimerExpCount;
+        if (ballot.mLastEnvelope)
+        {
+            slotSnapshot.mBallotState.mLastEnvelope =
+                ballot.mLastEnvelope->getEnvelope();
+        }
+        if (ballot.mLastEnvelopeEmit)
+        {
+            slotSnapshot.mBallotState.mLastEnvelopeEmit =
+                ballot.mLastEnvelopeEmit->getEnvelope();
+        }
+
+        baseline.mSlotState = std::move(slotSnapshot);
+    }
+
+    baseline.mEmittedEnvelopes = mEmittedEnvelopes;
+    baseline.mTimers.reserve(mTimers.size());
+    for (auto const& [key, timer] : mTimers)
+    {
+        static_cast<void>(key);
+        baseline.mTimers.push_back(
+            ReplayTimerSnapshot{.mSlotIndex = timer.mSlotIndex,
+                                .mTimerID = timer.mTimerID,
+                                .mTimeout = timer.mTimeout});
+    }
+    baseline.mTimerSetCounts.reserve(mTimerSetCountByKey.size());
+    for (auto const& [key, count] : mTimerSetCountByKey)
+    {
+        baseline.mTimerSetCounts.push_back(
+            ReplayTimerSetCountSnapshot{.mSlotIndex = key.first,
+                                        .mTimerID = key.second,
+                                        .mCount = count});
+    }
+    baseline.mNominationRounds.reserve(mNominationRoundBySlot.size());
+    for (auto const& [snapshotSlotIndex, round] : mNominationRoundBySlot)
+    {
+        baseline.mNominationRounds.push_back(
+            ReplayNominationRoundSnapshot{.mSlotIndex = snapshotSlotIndex,
+                                          .mRound = round});
+    }
+    baseline.mHasCrossedNominationBoundary = mHasCrossedNominationBoundary;
+    baseline.mNominationBoundaryEnvelope = mNominationBoundaryEnvelope;
+    return baseline;
+}
+
+void
+DporNominationNode::restoreReplayBaseline(ReplayBaseline const& baseline)
+{
+    clearReplayState();
+
+    if (baseline.mSlotState)
+    {
+        auto const& slotSnapshot = *baseline.mSlotState;
+        auto slot = mSCP.getSlot(slotSnapshot.mSlotIndex, true);
+
+        slot->mFullyValidated = slotSnapshot.mFullyValidated;
+        slot->mGotVBlocking = slotSnapshot.mGotVBlocking;
+        slot->mStatementsHistory.clear();
+        slot->mStatementsHistory.reserve(slotSnapshot.mStatementsHistory.size());
+        for (auto const& historicalStatement :
+             slotSnapshot.mStatementsHistory)
+        {
+            slot->mStatementsHistory.push_back(Slot::HistoricalStatement{
+                .mWhen = historicalStatement.mWhen,
+                .mStatement = historicalStatement.mStatement,
+                .mValidated = historicalStatement.mValidated,
+            });
+        }
+
+        auto const restoreValueSet = [this](std::vector<Value> const& values) {
+            ValueWrapperPtrSet restored;
+            for (auto const& value : values)
+            {
+                restored.emplace(wrapValue(value));
+            }
+            return restored;
+        };
+
+        auto const restoreEnvelopeMap =
+            [this](std::vector<SCPEnvelope> const& envelopes) {
+                std::map<NodeID, SCPEnvelopeWrapperPtr> restored;
+                for (auto const& envelope : envelopes)
+                {
+                    restored[envelope.statement.nodeID] =
+                        wrapEnvelope(envelope);
+                }
+                return restored;
+            };
+
+        auto& nomination = slot->mNominationProtocol;
+        nomination.mRoundNumber = slotSnapshot.mNominationState.mRoundNumber;
+        nomination.mVotes =
+            restoreValueSet(slotSnapshot.mNominationState.mVotes);
+        nomination.mAccepted =
+            restoreValueSet(slotSnapshot.mNominationState.mAccepted);
+        nomination.mCandidates =
+            restoreValueSet(slotSnapshot.mNominationState.mCandidates);
+        nomination.mLatestNominations = restoreEnvelopeMap(
+            slotSnapshot.mNominationState.mLatestNominations);
+        nomination.mLastEnvelope.reset();
+        if (slotSnapshot.mNominationState.mLastEnvelope)
+        {
+            nomination.mLastEnvelope =
+                wrapEnvelope(*slotSnapshot.mNominationState.mLastEnvelope);
+        }
+        nomination.mRoundLeaders = std::set<NodeID>(
+            slotSnapshot.mNominationState.mRoundLeaders.begin(),
+            slotSnapshot.mNominationState.mRoundLeaders.end());
+        nomination.mNominationStarted =
+            slotSnapshot.mNominationState.mNominationStarted;
+        nomination.mLatestCompositeCandidate.reset();
+        if (slotSnapshot.mNominationState.mLatestCompositeCandidate)
+        {
+            auto const& latestCompositeCandidate =
+                *slotSnapshot.mNominationState.mLatestCompositeCandidate;
+            for (auto const& candidate : nomination.mCandidates)
+            {
+                if (candidate->getValue() == latestCompositeCandidate)
+                {
+                    nomination.mLatestCompositeCandidate = candidate;
+                    break;
+                }
+            }
+            if (!nomination.mLatestCompositeCandidate)
+            {
+                nomination.mLatestCompositeCandidate =
+                    wrapValue(latestCompositeCandidate);
+            }
+        }
+        nomination.mPreviousValue = slotSnapshot.mNominationState.mPreviousValue;
+        nomination.mTimerExpCount =
+            slotSnapshot.mNominationState.mTimerExpCount;
+
+        auto const restoreBallot =
+            [&slot](std::optional<SCPBallot> const& ballot)
+            -> BallotProtocol::SCPBallotWrapperUPtr {
+            if (!ballot)
+            {
+                return nullptr;
+            }
+            return slot->mBallotProtocol.makeBallot(*ballot);
+        };
+
+        auto& ballot = slot->mBallotProtocol;
+        ballot.mHeardFromQuorum = slotSnapshot.mBallotState.mHeardFromQuorum;
+        ballot.mCurrentBallot =
+            restoreBallot(slotSnapshot.mBallotState.mCurrentBallot);
+        ballot.mPrepared = restoreBallot(slotSnapshot.mBallotState.mPrepared);
+        ballot.mPreparedPrime =
+            restoreBallot(slotSnapshot.mBallotState.mPreparedPrime);
+        ballot.mHighBallot =
+            restoreBallot(slotSnapshot.mBallotState.mHighBallot);
+        ballot.mCommit = restoreBallot(slotSnapshot.mBallotState.mCommit);
+        ballot.mLatestEnvelopes =
+            restoreEnvelopeMap(slotSnapshot.mBallotState.mLatestEnvelopes);
+        ballot.mPhase = static_cast<BallotProtocol::SCPPhase>(
+            slotSnapshot.mBallotState.mPhase);
+        ballot.mValueOverride.reset();
+        if (slotSnapshot.mBallotState.mValueOverride)
+        {
+            ballot.mValueOverride =
+                wrapValue(*slotSnapshot.mBallotState.mValueOverride);
+        }
+        ballot.mCurrentMessageLevel =
+            slotSnapshot.mBallotState.mCurrentMessageLevel;
+        ballot.mTimerExpCount = slotSnapshot.mBallotState.mTimerExpCount;
+        ballot.mLastEnvelope.reset();
+        if (slotSnapshot.mBallotState.mLastEnvelope)
+        {
+            ballot.mLastEnvelope =
+                wrapEnvelope(*slotSnapshot.mBallotState.mLastEnvelope);
+        }
+        ballot.mLastEnvelopeEmit.reset();
+        if (slotSnapshot.mBallotState.mLastEnvelopeEmit)
+        {
+            ballot.mLastEnvelopeEmit =
+                wrapEnvelope(*slotSnapshot.mBallotState.mLastEnvelopeEmit);
+        }
+    }
+
+    mEmittedEnvelopes = baseline.mEmittedEnvelopes;
+    for (auto const& timerSetCount : baseline.mTimerSetCounts)
+    {
+        mTimerSetCountByKey[{timerSetCount.mSlotIndex, timerSetCount.mTimerID}] =
+            timerSetCount.mCount;
+    }
+    for (auto const& nominationRound : baseline.mNominationRounds)
+    {
+        mNominationRoundBySlot[nominationRound.mSlotIndex] =
+            nominationRound.mRound;
+    }
+    mHasCrossedNominationBoundary = baseline.mHasCrossedNominationBoundary;
+    mNominationBoundaryEnvelope = baseline.mNominationBoundaryEnvelope;
+}
+
+void
+DporNominationNode::installNominationReplayTimer(
+    uint64 slotIndex, std::chrono::milliseconds timeout, Value const& value,
+    Value const& previousValue)
+{
+    auto slot = mSCP.getSlot(slotIndex, true);
+    auto wrappedValue = wrapValue(value);
+    mTimers[{slotIndex, Slot::NOMINATION_TIMER}] =
+        TimerState{slotIndex, Slot::NOMINATION_TIMER, timeout,
+                   [slot, wrappedValue, previousValue]() {
+                       slot->nominate(wrappedValue, previousValue, true);
+                   }};
+}
+
+void
+DporNominationNode::installBallotingReplayTimer(
+    uint64 slotIndex, std::chrono::milliseconds timeout)
+{
+    auto slot = mSCP.getSlot(slotIndex, true);
+    mTimers[{slotIndex, Slot::BALLOT_PROTOCOL_TIMER}] =
+        TimerState{slotIndex, Slot::BALLOT_PROTOCOL_TIMER, timeout,
+                   [slot]() {
+                       slot->getBallotProtocol().ballotProtocolTimerExpired();
+                   }};
 }
 
 bool

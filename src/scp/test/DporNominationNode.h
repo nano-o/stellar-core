@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstddef>
+#include <ctime>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -71,6 +72,86 @@ class DporNominationNode : public SCPDriver
         std::function<void()> mCallback;
     };
 
+    struct HistoricalStatementSnapshot
+    {
+        std::time_t mWhen{};
+        SCPStatement mStatement;
+        bool mValidated{};
+    };
+
+    struct NominationStateSnapshot
+    {
+        int32_t mRoundNumber{};
+        std::vector<Value> mVotes;
+        std::vector<Value> mAccepted;
+        std::vector<Value> mCandidates;
+        std::vector<SCPEnvelope> mLatestNominations;
+        std::optional<SCPEnvelope> mLastEnvelope;
+        std::vector<NodeID> mRoundLeaders;
+        bool mNominationStarted{};
+        std::optional<Value> mLatestCompositeCandidate;
+        Value mPreviousValue;
+        uint32_t mTimerExpCount{};
+    };
+
+    struct BallotStateSnapshot
+    {
+        bool mHeardFromQuorum{};
+        std::optional<SCPBallot> mCurrentBallot;
+        std::optional<SCPBallot> mPrepared;
+        std::optional<SCPBallot> mPreparedPrime;
+        std::optional<SCPBallot> mHighBallot;
+        std::optional<SCPBallot> mCommit;
+        std::vector<SCPEnvelope> mLatestEnvelopes;
+        std::uint8_t mPhase{};
+        std::optional<Value> mValueOverride;
+        int mCurrentMessageLevel{};
+        uint32_t mTimerExpCount{};
+        std::optional<SCPEnvelope> mLastEnvelope;
+        std::optional<SCPEnvelope> mLastEnvelopeEmit;
+    };
+
+    struct SlotStateSnapshot
+    {
+        uint64 mSlotIndex{};
+        bool mFullyValidated{};
+        bool mGotVBlocking{};
+        std::vector<HistoricalStatementSnapshot> mStatementsHistory;
+        NominationStateSnapshot mNominationState;
+        BallotStateSnapshot mBallotState;
+    };
+
+    struct ReplayTimerSnapshot
+    {
+        uint64 mSlotIndex{};
+        int mTimerID{};
+        std::chrono::milliseconds mTimeout{};
+    };
+
+    struct ReplayTimerSetCountSnapshot
+    {
+        uint64 mSlotIndex{};
+        int mTimerID{};
+        uint32_t mCount{};
+    };
+
+    struct ReplayNominationRoundSnapshot
+    {
+        uint64 mSlotIndex{};
+        uint32_t mRound{};
+    };
+
+    struct ReplayBaseline
+    {
+        std::optional<SlotStateSnapshot> mSlotState;
+        std::vector<SCPEnvelope> mEmittedEnvelopes;
+        std::vector<ReplayTimerSnapshot> mTimers;
+        std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
+        std::vector<ReplayNominationRoundSnapshot> mNominationRounds;
+        bool mHasCrossedNominationBoundary{};
+        std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
+    };
+
     explicit DporNominationNode(SecretKey const& secretKey,
                                 SCPQuorumSet const& localQSet);
 
@@ -117,6 +198,22 @@ class DporNominationNode : public SCPDriver
 
     bool fireTimer(uint64 slotIndex, int timerID);
 
+    ReplayBaseline
+    snapshotReplayBaseline(uint64 slotIndex) const;
+
+    void
+    restoreReplayBaseline(ReplayBaseline const& baseline);
+
+    void
+    installNominationReplayTimer(uint64 slotIndex,
+                                 std::chrono::milliseconds timeout,
+                                 Value const& value,
+                                 Value const& previousValue);
+
+    void
+    installBallotingReplayTimer(uint64 slotIndex,
+                                std::chrono::milliseconds timeout);
+
     bool hasCrossedNominationBoundary() const;
 
     SCPEnvelope const* getNominationBoundaryEnvelope() const;
@@ -149,6 +246,7 @@ class DporNominationNode : public SCPDriver
     using TimerKey = std::pair<uint64, int>;
 
     void applyConfiguration(Configuration const& config);
+    void clearReplayState();
     uint32_t
     inferNominationRound(std::chrono::milliseconds timeout) const;
     bool isRoundBoundaryNominationEnvelope(SCPEnvelope const& envelope) const;

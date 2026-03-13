@@ -17,6 +17,7 @@ namespace stellar
 {
 class Node;
 class Slot;
+class DporNominationNode;
 
 // used to filter statements
 typedef std::function<bool(SCPStatement const& st)> StatementPredicate;
@@ -328,5 +329,7 @@ class BallotProtocol
     SCPBallotWrapperUPtr makeBallot(uint32 c, Value const& v) const;
 
     std::string ballotToStr(SCPBallotWrapperUPtr const& ballot) const;
+
+    friend class DporNominationNode;
 };
 }

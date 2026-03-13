@@ -18,6 +18,7 @@
 namespace stellar
 {
 class Node;
+class DporNominationNode;
 
 /**
  * The Slot object is in charge of maintaining the state of the SCP protocol
@@ -216,5 +217,6 @@ class Slot : public std::enable_shared_from_this<Slot>
     std::vector<SCPEnvelope> getEntireCurrentState();
     void maybeSetGotVBlocking();
     friend class TestSCP;
+    friend class DporNominationNode;
 };
 }

@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <stdexcept>
+#include <unordered_map>
 #include <utility>
 
 namespace stellar
@@ -56,6 +57,30 @@ updateMax(std::atomic<std::uint64_t>& target, std::uint64_t value)
     }
 }
 
+struct ReplayStateCacheKey
+{
+    DporNominationDporAdapter const* mAdapter{};
+    std::size_t mNodeIndex{};
+    std::size_t mGeneration{};
+
+    bool
+    operator==(ReplayStateCacheKey const& other) const = default;
+};
+
+struct ReplayStateCacheKeyHasher
+{
+    std::size_t
+    operator()(ReplayStateCacheKey const& key) const noexcept
+    {
+        auto value = std::hash<void const*>{}(key.mAdapter);
+        value ^= std::hash<std::size_t>{}(key.mNodeIndex) + 0x9e3779b9 +
+                 (value << 6) + (value >> 2);
+        value ^= std::hash<std::size_t>{}(key.mGeneration) + 0x9e3779b9 +
+                 (value << 6) + (value >> 2);
+        return value;
+    }
+};
+
 }
 
 DporNominationDporAdapter::ReplayState::ReplayState(SecretKey const& secretKey,
@@ -88,6 +113,8 @@ DporNominationDporAdapter::DporNominationDporAdapter(
         throw std::invalid_argument(
             "initialValues must match validator count");
     }
+
+    rebuildReplayBaselines();
 }
 
 std::size_t
@@ -103,17 +130,11 @@ DporNominationDporAdapter::toThreadID(std::size_t nodeIndex)
 }
 
 void
-DporNominationDporAdapter::setPriorityLookup(
-    std::function<uint64(NodeID const&)> const& fn)
-{
-    mConfig.mPriorityLookup = fn;
-}
-
-void
 DporNominationDporAdapter::setValueHash(
     std::function<uint64(Value const&)> const& fn)
 {
     mConfig.mValueHash = fn;
+    rebuildReplayBaselines();
 }
 
 void
@@ -122,6 +143,7 @@ DporNominationDporAdapter::setCombineCandidates(
         fn)
 {
     mConfig.mCombineCandidates = fn;
+    rebuildReplayBaselines();
 }
 
 void
@@ -179,6 +201,77 @@ DporNominationDporAdapter::initializeNode(ReplayState& state,
     state.mNode.nominate(mSlotIndex, mInitialValues.at(nodeIndex),
                          mPreviousValue);
     queuePendingEnvelopeSends(state, nodeIndex);
+}
+
+void
+DporNominationDporAdapter::restoreBaseline(ReplayState& state,
+                                           std::size_t nodeIndex) const
+{
+    auto const& baseline = mReplayBaselines.at(nodeIndex);
+    state.mNode.restoreReplayBaseline(baseline.mNodeState);
+    state.mPendingSends = baseline.mPendingSends;
+
+    for (auto const& timer : baseline.mNodeState.mTimers)
+    {
+        switch (timer.mTimerID)
+        {
+        case Slot::NOMINATION_TIMER:
+            state.mNode.installNominationReplayTimer(
+                timer.mSlotIndex, timer.mTimeout, mInitialValues.at(nodeIndex),
+                mPreviousValue);
+            break;
+        case Slot::BALLOT_PROTOCOL_TIMER:
+            state.mNode.installBallotingReplayTimer(timer.mSlotIndex,
+                                                    timer.mTimeout);
+            break;
+        default:
+            throw std::logic_error("unknown replay timer id");
+        }
+    }
+}
+
+DporNominationDporAdapter::ReplayState&
+DporNominationDporAdapter::acquireReplayState(std::size_t nodeIndex) const
+{
+    static thread_local std::unordered_map<
+        ReplayStateCacheKey, std::unique_ptr<ReplayState>,
+        ReplayStateCacheKeyHasher>
+        cache;
+
+    ReplayStateCacheKey const key{this, nodeIndex, mReplayCacheGeneration};
+    auto it = cache.find(key);
+    if (it == cache.end())
+    {
+        it = cache
+                 .emplace(key, std::make_unique<ReplayState>(
+                                   mValidators.at(nodeIndex), mQSet, mConfig))
+                 .first;
+    }
+    return *it->second;
+}
+
+void
+DporNominationDporAdapter::rebuildReplayBaselines()
+{
+    auto savedReplayMetrics = std::move(mReplayMetrics);
+    mReplayMetrics.reset();
+
+    std::vector<ReplayBaseline> replayBaselines;
+    replayBaselines.reserve(mValidators.size());
+    for (std::size_t nodeIndex = 0; nodeIndex < mValidators.size();
+         ++nodeIndex)
+    {
+        ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
+        initializeNode(state, nodeIndex);
+        replayBaselines.push_back(ReplayBaseline{
+            .mNodeState = state.mNode.snapshotReplayBaseline(mSlotIndex),
+            .mPendingSends = state.mPendingSends,
+        });
+    }
+
+    mReplayBaselines = std::move(replayBaselines);
+    ++mReplayCacheGeneration;
+    mReplayMetrics = std::move(savedReplayMetrics);
 }
 
 void
@@ -281,8 +374,8 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             1, std::memory_order_relaxed);
     }
 
-    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
-    initializeNode(state, nodeIndex);
+    auto& state = acquireReplayState(nodeIndex);
+    restoreBaseline(state, nodeIndex);
 
     std::size_t eventCount = 0;
     std::size_t observedCount = 0;
@@ -372,8 +465,8 @@ void
 DporNominationDporAdapter::replayTraceForBoundaryInspection(
     ReplayState& state, std::size_t nodeIndex, ThreadTrace const& trace) const
 {
-    initializeNode(state, nodeIndex);
-    discardPendingEnvelopes(state.mNode);
+    restoreBaseline(state, nodeIndex);
+    state.mPendingSends.clear();
 
     for (std::size_t observedIndex = 0; observedIndex < trace.size();
          ++observedIndex)
@@ -397,7 +490,7 @@ DporNominationDporAdapter::inspectNominationBoundary(
         throw std::out_of_range("node index out of range");
     }
 
-    ReplayState state(mValidators.at(nodeIndex), mQSet, mConfig);
+    auto& state = acquireReplayState(nodeIndex);
     replayTraceForBoundaryInspection(state, nodeIndex, trace);
 
     BoundaryInspection inspection;

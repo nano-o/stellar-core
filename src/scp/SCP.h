@@ -18,6 +18,7 @@ namespace stellar
 class Node;
 class Slot;
 class LocalNode;
+class DporNominationNode;
 typedef std::shared_ptr<SCPQuorumSet> SCPQuorumSetPtr;
 
 class SCP
@@ -180,5 +181,6 @@ class SCP
     std::shared_ptr<Slot> getSlot(uint64 slotIndex, bool create);
 
     friend class TestSCP;
+    friend class DporNominationNode;
 };
 }

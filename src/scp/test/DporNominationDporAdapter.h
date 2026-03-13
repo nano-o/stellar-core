@@ -82,8 +82,6 @@ class DporNominationDporAdapter
     static dpor::model::ThreadId
     toThreadID(std::size_t nodeIndex);
 
-    void setPriorityLookup(std::function<uint64(NodeID const&)> const& fn);
-
     void setValueHash(std::function<uint64(Value const&)> const& fn);
 
     void setCombineCandidates(
@@ -127,7 +125,16 @@ class DporNominationDporAdapter
         std::deque<SendLabel> mPendingSends;
     };
 
+    struct ReplayBaseline
+    {
+        DporNominationNode::ReplayBaseline mNodeState;
+        std::deque<SendLabel> mPendingSends;
+    };
+
     void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
+    void restoreBaseline(ReplayState& state, std::size_t nodeIndex) const;
+    ReplayState& acquireReplayState(std::size_t nodeIndex) const;
+    void rebuildReplayBaselines();
 
     void replayObservation(DporNominationNode& node, std::size_t nodeIndex,
                            ObservedValue const& observed) const;
@@ -155,6 +162,8 @@ class DporNominationDporAdapter
     bool mEnableNominationTimeouts{true};
     bool mEnableBallotingTimeouts{false};
     std::shared_ptr<ReplayMetrics> mReplayMetrics;
+    std::vector<ReplayBaseline> mReplayBaselines;
+    std::size_t mReplayCacheGeneration{0};
 };
 
 }
