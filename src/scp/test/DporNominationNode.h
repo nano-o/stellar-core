@@ -49,7 +49,10 @@ class DporNominationNode : public SCPDriver
         {
         }
 
-        std::function<uint64(NodeID const&)> mPriorityLookup;
+        // Node-to-index map for deterministic modulo-based leader rotation.
+        // When set, exactly one 1-based node index wins each round with max
+        // priority: ((roundNumber - 1) % numNodes) + 1.
+        std::map<NodeID, std::size_t> mNodeIndexMap;
         std::function<uint64(Value const&)> mValueHash;
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
@@ -102,8 +105,6 @@ class DporNominationNode : public SCPDriver
 
     std::set<NodeID> getNominationLeaders(uint64 slotIndex);
 
-    void setPriorityLookup(std::function<uint64(NodeID const&)> const& fn);
-
     void setValueHash(std::function<uint64(Value const&)> const& fn);
 
     void setCombineCandidates(
@@ -127,6 +128,9 @@ class DporNominationNode : public SCPDriver
     ValidationLevel validateValue(uint64 slotIndex, Value const& value,
                                   bool nomination) override;
     Hash getHashOf(std::vector<xdr::opaque_vec<>> const& vals) const override;
+    uint64 computeHashNode(uint64 slotIndex, Value const& prev,
+                           bool isPriority, int32_t roundNumber,
+                           NodeID const& nodeID) override;
     uint64 computeValueHash(uint64 slotIndex, Value const& prev,
                             int32_t roundNumber, Value const& value) override;
     ValueWrapperPtr combineCandidates(
@@ -152,6 +156,7 @@ class DporNominationNode : public SCPDriver
 
     SecretKey mSecretKey;
     SCP mSCP;
+    std::map<NodeID, std::size_t> mNodeIndexMap;
     std::function<uint64(Value const&)> mValueHash;
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;

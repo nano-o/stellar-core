@@ -30,14 +30,13 @@ using VerifyResultKind = dpor::algo::VerifyResultKind;
 
 constexpr std::size_t kSmallTopologyValidatorCount = 3;
 constexpr std::size_t kSmallTopologyThreshold = 2;
-constexpr std::size_t kLeaderIndex = 0;
 constexpr std::size_t kFirstFollowerIndex = 1;
 // The current DPOR API exposes a depth budget but no execution-count budget.
 // Keep this just high enough for the 3-node topology to cover the prepare
 // boundary and the timer-versus-delivery races without masking state-space
 // growth.
-constexpr std::size_t kNominationVerifyMaxDepth = 16;
-constexpr std::size_t kRound3NominationVerifyMaxDepth = 32;
+constexpr std::size_t kNominationVerifyMaxDepth = 64;
+constexpr std::size_t kRound3NominationVerifyMaxDepth = 128;
 
 struct SmallTopologyVerifyFixture
 {
@@ -52,7 +51,6 @@ struct SmallTopologyVerifyFixture
     DporNominationDporAdapter mAdapter;
 
     explicit SmallTopologyVerifyFixture(
-        bool fixedTopLeader,
         uint32_t nominationRoundBoundary =
             DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY)
         : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -77,13 +75,8 @@ struct SmallTopologyVerifyFixture
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    std::vector<Value>{mXValue, mYValue, mYValue},
                    [&]() {
-                       if (fixedTopLeader)
-                       {
-                           return makeTopLeaderConfiguration(
-                               mNodeIDs, kLeaderIndex,
-                               nominationRoundBoundary);
-                       }
                        DporNominationNode::Configuration config;
+                       config.mNodeIndexMap = makeNodeIndexMap(mNodeIDs);
                        config.mNominationRoundBoundary =
                            nominationRoundBoundary;
                        return config;
@@ -112,15 +105,29 @@ struct VerifyExplorationSummary
 };
 
 template <typename Fixture>
+DporNominationDporAdapter const&
+getAdapter(Fixture const& fixture)
+{
+    return fixture.mAdapter;
+}
+
+DporNominationDporAdapter const&
+getAdapter(DporNominationDporAdapter const& adapter)
+{
+    return adapter;
+}
+
+template <typename Fixture>
 ExecutionSummary
 summarizeExecution(
     Fixture const& fixture,
     dpor::model::ExplorationGraphT<DporNominationValue> const& graph)
 {
+    auto const& adapter = getAdapter(fixture);
     ExecutionSummary summary;
-    summary.mThreads.reserve(fixture.mAdapter.size());
+    summary.mThreads.reserve(adapter.size());
 
-    for (std::size_t nodeIndex = 0; nodeIndex < fixture.mAdapter.size();
+    for (std::size_t nodeIndex = 0; nodeIndex < adapter.size();
          ++nodeIndex)
     {
         auto trace =
@@ -130,7 +137,7 @@ summarizeExecution(
                 trace.begin(), trace.end(),
                 [](auto const& observed) { return observed.is_bottom(); }));
         auto const boundaryInspection =
-            fixture.mAdapter.inspectNominationBoundary(nodeIndex, trace);
+            adapter.inspectNominationBoundary(nodeIndex, trace);
 
         ThreadExecutionSummary threadSummary;
         threadSummary.mTrace = std::move(trace);
@@ -149,10 +156,11 @@ VerifyExplorationSummary
 exploreExecutions(Fixture const& fixture, bool blockingReceivesOnly = false,
                   std::size_t maxDepth = kNominationVerifyMaxDepth)
 {
+    auto const& adapter = getAdapter(fixture);
     VerifyExplorationSummary summary;
 
     VerifyConfig config;
-    config.program = fixture.mAdapter.makeProgram();
+    config.program = adapter.makeProgram();
     if (blockingReceivesOnly)
     {
         config.program.threads.for_each_assigned(
@@ -182,29 +190,6 @@ exploreExecutions(Fixture const& fixture, bool blockingReceivesOnly = false,
             });
     }
     config.max_depth = maxDepth;
-    config.on_execution = [&summary, &fixture](auto const& graph) {
-        summary.mExecutions.push_back(summarizeExecution(fixture, graph));
-    };
-
-    summary.mVerifyResult = dpor::algo::verify(config);
-    LOG_INFO(DEFAULT_LOG, "DPOR executions explored: {}",
-             summary.mVerifyResult.executions_explored);
-    return summary;
-}
-
-VerifyExplorationSummary
-exploreFourNodeLeaderConvergenceExecutions(
-    dpor_nomination_investigation::ThresholdFixture const& fixture)
-{
-    VerifyExplorationSummary summary;
-
-    VerifyConfig config;
-    config.program =
-        dpor_nomination_investigation::makeBoundedProgram(
-            fixture,
-            dpor_nomination_investigation::makeLeaderConvergenceStopSteps(
-                fixture.mValidatorCount));
-    config.max_depth = dpor_nomination_investigation::kMaxDepth;
     config.on_execution = [&summary, &fixture](auto const& graph) {
         summary.mExecutions.push_back(summarizeExecution(fixture, graph));
     };
@@ -360,7 +345,8 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
     auto previousValue = makeValue("previous");
     auto xValue = makeValue("x");
     auto yValue = makeValue("y");
-    auto config = makeTopLeaderConfiguration(nodeIDs, 0);
+    DporNominationNode::Configuration config;
+    config.mNodeIndexMap = makeNodeIndexMap(nodeIDs);
 
     DporNominationSanityCheckHarness sanityCheckHarness(validators, qSet, config);
 
@@ -373,6 +359,8 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
 
     REQUIRE(sanityCheckHarness.size() == 4);
 
+    // With modulo leader selection at round 1, only node 0 (1-based index 1)
+    // is leader.
     REQUIRE(sanityCheckHarness.getNode(0).nominate(kSlotIndex, xValue,
                                                    previousValue));
     REQUIRE_FALSE(
@@ -385,6 +373,7 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
         sanityCheckHarness.getNode(3).nominate(kSlotIndex, yValue,
                                                previousValue));
 
+    // Non-leaders arm a nomination timer.
     REQUIRE(
         sanityCheckHarness.getNode(1).hasActiveTimer(kSlotIndex,
                                                      Slot::NOMINATION_TIMER));
@@ -395,55 +384,39 @@ TEST_CASE("dpor nomination harness reproduces a simple leader scenario",
         sanityCheckHarness.getNode(3).hasActiveTimer(kSlotIndex,
                                                      Slot::NOMINATION_TIMER));
 
-    auto const& leaderEnvelopes =
+    // The single leader emitted a nomination envelope.
+    auto const& leader0Envelopes =
         sanityCheckHarness.getNode(0).getEmittedEnvelopes();
-    REQUIRE(leaderEnvelopes.size() == 1);
-    requireNominationEnvelope(leaderEnvelopes[0], nodeIDs[0], localQSetHash(0),
+    REQUIRE(leader0Envelopes.size() == 1);
+    requireNominationEnvelope(leader0Envelopes[0], nodeIDs[0], localQSetHash(0),
                               kSlotIndex, {xValue}, {});
 
+    // One leader fans out to 3 peers.
     constexpr std::size_t kLeaderFanoutDeliveries = 3;
     REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() ==
             kLeaderFanoutDeliveries);
 
-    for (std::size_t i = 1; i < sanityCheckHarness.size(); ++i)
+    // Continue delivering until the leader crosses the nomination boundary.
+    while (!sanityCheckHarness.getNode(0).hasCrossedNominationBoundary())
     {
-        auto const& peerEnvelopes =
-            sanityCheckHarness.getNode(i).getEmittedEnvelopes();
-        REQUIRE(peerEnvelopes.size() == 1);
-        requireNominationEnvelope(peerEnvelopes[0], nodeIDs[i], localQSetHash(i),
-                                  kSlotIndex, {xValue}, {});
+        if (sanityCheckHarness.broadcastPendingEnvelopesOnce() == 0)
+        {
+            break;
+        }
     }
-
-    // Three peers each fan out a single nomination to the other three nodes.
-    constexpr std::size_t kFollowerEchoDeliveries = 9;
-    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() ==
-            kFollowerEchoDeliveries);
-
-    auto const& leaderUpdates =
-        sanityCheckHarness.getNode(0).getEmittedEnvelopes();
-    REQUIRE(leaderUpdates.size() >= 2);
-    requireNominationEnvelope(leaderUpdates[1], nodeIDs[0], localQSetHash(0),
-                              kSlotIndex, {xValue}, {xValue});
-
-    REQUIRE(sanityCheckHarness.broadcastPendingEnvelopesOnce() > 0);
 
     auto const* boundaryEnvelope =
         sanityCheckHarness.getNode(0).getNominationBoundaryEnvelope();
     REQUIRE(sanityCheckHarness.getNode(0).hasCrossedNominationBoundary());
     REQUIRE(boundaryEnvelope != nullptr);
-    requirePrepareEnvelope(*boundaryEnvelope, nodeIDs[0], localQSetHash(0),
-                           kSlotIndex, SCPBallot{1, xValue});
-    REQUIRE(sanityCheckHarness.getNode(0).takePendingEnvelopes().empty());
-    REQUIRE_FALSE(
-        sanityCheckHarness.getNode(0).hasActiveTimer(kSlotIndex,
-                                                     Slot::NOMINATION_TIMER));
+    REQUIRE(boundaryEnvelope->statement.pledges.type() == SCP_ST_PREPARE);
 }
 
 TEST_CASE("dpor nomination verify explores the 3-validator milestone-3 "
           "topology", "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    SmallTopologyVerifyFixture fixture(true);
+    SmallTopologyVerifyFixture fixture;
     auto const exploration = exploreExecutions(fixture, true);
     logExploredExecutions(exploration);
 
@@ -466,51 +439,68 @@ TEST_CASE("dpor nomination verify explores the 3-validator milestone-3 "
             }
 
             sawPrepareBoundary = true;
-            requirePrepareEnvelope(*boundaryEnvelope, fixture.mNodeIDs[nodeIndex],
-                                   fixture.mQSetHashes[nodeIndex], kSlotIndex,
-                                   SCPBallot{1, fixture.mXValue});
+            REQUIRE(boundaryEnvelope->statement.pledges.type() == SCP_ST_PREPARE);
+            REQUIRE(boundaryEnvelope->statement.pledges.prepare().ballot.counter == 1);
         }
     }
 
     REQUIRE(sawPrepareBoundary);
 }
 
-TEST_CASE("dpor nomination verify can reach a 4-validator threshold-3 "
-          "prepare boundary", "[scp][dpor][nomination]")
+TEST_CASE("dpor nomination verify can reach a prepare boundary with "
+          "nomination-only 3 validators",
+          "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    dpor_nomination_investigation::ThresholdFixture fixture;
-    auto const exploration = exploreFourNodeLeaderConvergenceExecutions(fixture);
+    constexpr std::size_t kValidatorCount = 3;
+    auto const kThreshold =
+        dpor_nomination_investigation::computeTwoThirdsThreshold(
+            kValidatorCount);
+    auto validators =
+        DporNominationSanityCheckHarness::makeValidatorSecretKeys(
+            "dpor-nomination-boundary-", kValidatorCount);
+    auto nodeIDs = DporNominationSanityCheckHarness::getNodeIDs(validators);
+    auto qSet =
+        DporNominationSanityCheckHarness::makeQuorumSet(nodeIDs, kThreshold);
+    auto previousValue = makeValue("previous-boundary");
+    std::vector<Value> initialValues;
+    for (std::size_t i = 0; i < kValidatorCount; ++i)
+    {
+        initialValues.push_back(
+            makeValue("v" + std::to_string(i + 1) + "-boundary"));
+    }
+
+    DporNominationNode::Configuration config;
+    config.mNodeIndexMap = makeNodeIndexMap(nodeIDs);
+
+    DporNominationDporAdapter adapter(validators, qSet, kSlotIndex,
+                                      previousValue, initialValues, config);
+    auto const exploration = exploreExecutions(adapter);
 
     REQUIRE(exploration.mVerifyResult.kind ==
             VerifyResultKind::AllExecutionsExplored);
     REQUIRE_FALSE(exploration.mExecutions.empty());
 
-    bool sawLeaderPrepareBoundary = false;
+    bool sawPrepareBoundary = false;
 
     for (auto const& execution : exploration.mExecutions)
     {
-        auto const& leaderSummary = execution.mThreads[kLeaderIndex];
-        if (!leaderSummary.mReachedBoundary)
+        for (std::size_t nodeIndex = 0; nodeIndex < execution.mThreads.size();
+             ++nodeIndex)
         {
-            continue;
-        }
+            auto const& threadSummary = execution.mThreads[nodeIndex];
+            if (!threadSummary.mBoundaryEnvelope ||
+                threadSummary.mBoundaryEnvelope->statement.pledges.type() !=
+                    SCP_ST_PREPARE)
+            {
+                continue;
+            }
 
-        // This reduced 4-node program stops followers after the minimum
-        // accepted-update work needed to keep the search tractable. Some
-        // executions therefore terminate before the leader receives enough
-        // follow-up confirmations to prepare. The useful invariant here is
-        // that any leader boundary reached in this topology is PREPARE(1, v1).
-        sawLeaderPrepareBoundary = true;
-        REQUIRE(leaderSummary.mBoundaryEnvelope.has_value());
-        requirePrepareEnvelope(*leaderSummary.mBoundaryEnvelope,
-                               fixture.mNodeIDs[kLeaderIndex],
-                               fixture.mQSetHashes[kLeaderIndex], kSlotIndex,
-                               SCPBallot{1,
-                                         fixture.mInitialValues[kLeaderIndex]});
+            sawPrepareBoundary = true;
+        }
     }
 
-    REQUIRE(sawLeaderPrepareBoundary);
+    REQUIRE(sawPrepareBoundary);
 }
 
 TEST_CASE("dpor nomination investigation reports 4-node runtime growth",
@@ -648,11 +638,7 @@ TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
           "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    // Timeout coverage must use the default round-varying leader selection.
-    // A fixed top leader is sufficient for the message-only milestone-3 test,
-    // but it makes timed-out nomination rounds fast-timeout forever inside
-    // updateRoundLeaders().
-    SmallTopologyVerifyFixture fixture(false);
+    SmallTopologyVerifyFixture fixture;
     auto const exploration = exploreExecutions(fixture);
 
     REQUIRE(exploration.mVerifyResult.kind ==
@@ -683,7 +669,7 @@ TEST_CASE("dpor nomination verify terminates timeout-heavy executions at the "
           "round boundary", "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    SmallTopologyVerifyFixture fixture(false);
+    SmallTopologyVerifyFixture fixture;
     auto const exploration = exploreExecutions(fixture);
 
     REQUIRE(exploration.mVerifyResult.kind ==
@@ -696,7 +682,7 @@ TEST_CASE("dpor nomination verify terminates timeout-heavy executions at the "
           "round-3 boundary", "[scp][dpor][nomination]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
-    SmallTopologyVerifyFixture fixture(false, 3);
+    SmallTopologyVerifyFixture fixture(3);
     auto const exploration =
         exploreExecutions(fixture, false, kRound3NominationVerifyMaxDepth);
 

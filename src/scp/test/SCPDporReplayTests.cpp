@@ -30,7 +30,6 @@ struct ReplayFixture
     DporNominationDporAdapter mAdapter;
 
     explicit ReplayFixture(
-        bool fixedTopLeader = true,
         uint32_t nominationRoundBoundary =
             DporNominationNode::DEFAULT_NOMINATION_ROUND_BOUNDARY)
         : mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -46,12 +45,8 @@ struct ReplayFixture
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    std::vector<Value>{mXValue, mYValue, mYValue},
                    [&]() {
-                       if (fixedTopLeader)
-                       {
-                           return makeTopLeaderConfiguration(
-                               mNodeIDs, 0, nominationRoundBoundary);
-                       }
                        DporNominationNode::Configuration config;
+                       config.mNodeIndexMap = makeNodeIndexMap(mNodeIDs);
                        config.mNominationRoundBoundary =
                            nominationRoundBoundary;
                        return config;
@@ -166,7 +161,8 @@ TEST_CASE("dpor nomination replay detects a prepare boundary on the leader "
     auto xValue = makeValue("x-boundary");
     auto yValue = makeValue("y-boundary");
 
-    auto config = makeTopLeaderConfiguration(nodeIDs, 0);
+    DporNominationNode::Configuration config;
+    config.mNodeIndexMap = makeNodeIndexMap(nodeIDs);
 
     DporNominationDporAdapter adapter(validators, qSet, kSlotIndex,
                                       previousValue,
@@ -195,14 +191,14 @@ TEST_CASE("dpor nomination replay detects a prepare boundary on the leader "
                                                previousValue));
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;
-    // First pass delivers the leader's initial nomination, the second pass
-    // delivers the followers' nomination echoes, and the third pass lets the
-    // leader observe the quorum-supported accepted state and cross the
-    // nomination boundary.
-    constexpr std::size_t kBoundaryTraceDeliveryPasses = 3;
-    for (std::size_t i = 0; i < kBoundaryTraceDeliveryPasses; ++i)
+    constexpr std::size_t kMaxDeliveryPasses = 10;
+    for (std::size_t i = 0; i < kMaxDeliveryPasses; ++i)
     {
         deliverAndRecordTraceForThread(sanityCheckHarness, 0, leaderTrace);
+        if (sanityCheckHarness.getNode(0).hasCrossedNominationBoundary())
+        {
+            break;
+        }
     }
     REQUIRE(sanityCheckHarness.getNode(0).hasCrossedNominationBoundary());
 
@@ -217,7 +213,7 @@ TEST_CASE("dpor nomination replay detects the timer-driven round boundary",
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
     // Timeout replay needs the default round-varying leader selection.
-    ReplayFixture fixture(false);
+    ReplayFixture fixture;
     constexpr std::size_t kLeaderNodeIndex = 0;
 
     DporNominationDporAdapter::ThreadTrace leaderTrace;

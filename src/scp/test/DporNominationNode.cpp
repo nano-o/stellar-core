@@ -130,13 +130,6 @@ DporNominationNode::getNominationLeaders(uint64 slotIndex)
 }
 
 void
-DporNominationNode::setPriorityLookup(
-    std::function<uint64(NodeID const&)> const& fn)
-{
-    SCPDriver::setPriorityLookup(fn);
-}
-
-void
 DporNominationNode::setValueHash(std::function<uint64(Value const&)> const& fn)
 {
     mValueHash = fn;
@@ -163,10 +156,7 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     mNominationTimerSetLimit = config.mNominationTimerSetLimit;
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
-    if (config.mPriorityLookup)
-    {
-        setPriorityLookup(config.mPriorityLookup);
-    }
+    mNodeIndexMap = config.mNodeIndexMap;
     if (config.mValueHash)
     {
         setValueHash(config.mValueHash);
@@ -371,6 +361,35 @@ DporNominationNode::getHashOf(
         hasher.add(val);
     }
     return hasher.finish();
+}
+
+uint64
+DporNominationNode::computeHashNode(uint64 slotIndex, Value const& prev,
+                                    bool isPriority, int32_t roundNumber,
+                                    NodeID const& nodeID)
+{
+    if (!mNodeIndexMap.empty())
+    {
+        if (!isPriority)
+        {
+            // All nodes pass the weight check.
+            return 0;
+        }
+        auto it = mNodeIndexMap.find(nodeID);
+        if (it != mNodeIndexMap.end())
+        {
+            auto const numNodes = static_cast<uint64>(mNodeIndexMap.size());
+            auto const normalizedRound =
+                static_cast<uint64>(std::max(roundNumber, 1));
+            auto const selectedIndex =
+                ((normalizedRound - 1) % numNodes) + 1;
+            return it->second == selectedIndex
+                       ? std::numeric_limits<uint64>::max()
+                       : 0;
+        }
+    }
+    return SCPDriver::computeHashNode(slotIndex, prev, isPriority, roundNumber,
+                                      nodeID);
 }
 
 uint64
