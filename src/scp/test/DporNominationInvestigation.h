@@ -71,6 +71,9 @@ class ScopedPartitionLogLevel
         , mPreviousLevel(Logging::getLogLevel(mPartition))
     {
         Logging::setLogLevel(level, mPartition.c_str());
+        // Install a null logger so hot CLOG checks short-circuit without
+        // touching the real partition logger during DPOR replay.
+        Logging::installNullLoggerForPartition(mPartition);
     }
 
     ScopedPartitionLogLevel(ScopedPartitionLogLevel const&) = delete;
@@ -79,6 +82,7 @@ class ScopedPartitionLogLevel
 
     ~ScopedPartitionLogLevel()
     {
+        Logging::restoreLoggerForPartition(mPartition);
         Logging::setLogLevel(mPreviousLevel, mPartition.c_str());
     }
 
