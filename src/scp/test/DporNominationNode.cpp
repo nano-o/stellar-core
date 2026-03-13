@@ -160,6 +160,8 @@ DporNominationNode::applyConfiguration(Configuration const& config)
                              ? DEFAULT_BALLOTING_BOUNDARY
                              : config.mBallotingBoundary;
     mBoundaryMode = config.mBoundaryMode;
+    mNominationTimerSetLimit = config.mNominationTimerSetLimit;
+    mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
     if (config.mPriorityLookup)
     {
@@ -416,9 +418,11 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
                                std::chrono::milliseconds timeout,
                                std::function<void()> cb)
 {
+    auto const key = TimerKey{slotIndex, timerID};
+
     if (!cb)
     {
-        mTimers.erase({slotIndex, timerID});
+        mTimers.erase(key);
         return;
     }
 
@@ -432,7 +436,27 @@ DporNominationNode::setupTimer(uint64 slotIndex, int timerID,
         }
     }
 
-    mTimers[{slotIndex, timerID}] = TimerState{slotIndex, timerID, timeout, cb};
+    auto const setCount = ++mTimerSetCountByKey[key];
+
+    auto const timerSetLimit = [&]() -> std::optional<uint32_t> {
+        if (timerID == Slot::NOMINATION_TIMER)
+        {
+            return mNominationTimerSetLimit;
+        }
+        if (timerID == Slot::BALLOT_PROTOCOL_TIMER)
+        {
+            return mBallotingTimerSetLimit;
+        }
+        return std::nullopt;
+    }();
+
+    if (timerSetLimit && setCount >= *timerSetLimit)
+    {
+        mTimers.erase(key);
+        return;
+    }
+
+    mTimers[key] = TimerState{slotIndex, timerID, timeout, cb};
 }
 
 void

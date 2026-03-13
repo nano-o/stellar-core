@@ -519,7 +519,7 @@ TEST_CASE("dpor nomination investigation reports 4-node runtime growth",
     auto const workers = std::size_t{8};
     auto const results =
         dpor_nomination_investigation::runFourNodeRuntimeGrowthInvestigation(
-            workers);
+            workers, std::nullopt, std::nullopt, true);
 
     for (auto const& result : results)
     {
@@ -542,6 +542,29 @@ TEST_CASE("dpor nomination investigation reports 4-node runtime growth",
         REQUIRE(result.mVerifyResult.kind != VerifyResultKind::ErrorFound);
         REQUIRE(result.mVerifyResult.executions_explored > 0);
     }
+}
+
+TEST_CASE("dpor nomination investigation can bound timeout-driven unbounded "
+          "searches with timer limits", "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{0},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true,
+            kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{
+                .mNomination = true},
+            dpor_nomination_investigation::TimerSetLimitSettings{
+                .mNomination = 2});
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
 }
 
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",

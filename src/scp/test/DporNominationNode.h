@@ -56,6 +56,8 @@ class DporNominationNode : public SCPDriver
         uint32_t mNominationRoundBoundary;
         uint32_t mBallotingBoundary;
         BoundaryMode mBoundaryMode;
+        std::optional<uint32_t> mNominationTimerSetLimit;
+        std::optional<uint32_t> mBallotingTimerSetLimit;
     };
 
     struct TimerState
@@ -160,11 +162,14 @@ class DporNominationNode : public SCPDriver
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
+    std::optional<uint32_t> mNominationTimerSetLimit;
+    std::optional<uint32_t> mBallotingTimerSetLimit;
 
     std::map<Hash, SCPQuorumSetPtr> mQuorumSets;
     std::vector<SCPEnvelope> mEmittedEnvelopes;
     std::vector<SCPEnvelope> mPendingEnvelopes;
     std::map<TimerKey, TimerState> mTimers;
+    std::map<TimerKey, uint32_t> mTimerSetCountByKey;
     std::map<uint64, uint32_t> mNominationRoundBySlot;
     bool mHasCrossedNominationBoundary{false};
     std::optional<SCPEnvelope> mNominationBoundaryEnvelope;

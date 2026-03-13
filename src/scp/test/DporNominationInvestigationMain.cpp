@@ -20,9 +20,10 @@ struct CommandLineOptions
 {
     std::size_t mWorkers = 8;
     std::size_t mNumNodes = kDefaultValidatorCount;
+    bool mNominationOnly = false;
     TimeoutSettings mTimeoutSettings;
+    TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
-    BoundarySettings mBoundarySettings;
     std::optional<InvestigationScenario::Id> mScenario;
 };
 
@@ -31,12 +32,16 @@ printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
               << " [--workers N] [--num-nodes N] [--depth N]"
-                 " [--prepare-boundary N]"
+                 " [--nomination-only]"
+                 " [--nomination-timer-limit N]"
+                 " [--balloting-timer-limit N]"
                  " [--scenario ID] [--nomination-timeouts]"
                  " [--balloting-timeouts]\n"
               << "Scenarios: 1|two-followers, 2|all-followers-once, "
                  "3|all-followers-second-peer-receive, "
-                 "4|unrestricted-followers\n";
+                 "4|unrestricted-followers\n"
+              << "--nomination-only stops exploration at the first "
+                 "PREPARE(1) boundary\n";
 }
 
 uint32_t
@@ -45,10 +50,22 @@ parseUint32Value(std::string_view arg, std::string_view value)
     auto const parsed = std::stoull(std::string(value));
     if (parsed > std::numeric_limits<uint32_t>::max())
     {
-        throw std::invalid_argument("boundary out of range: " +
+        throw std::invalid_argument("value out of range: " +
                                     std::string(arg));
     }
     return static_cast<uint32_t>(parsed);
+}
+
+uint32_t
+parsePositiveUint32Value(std::string_view arg, std::string_view value)
+{
+    auto const parsed = parseUint32Value(arg, value);
+    if (parsed == 0)
+    {
+        throw std::invalid_argument(std::string(arg) +
+                                    " requires a value greater than 0");
+    }
+    return parsed;
 }
 
 InvestigationScenario::Id
@@ -101,6 +118,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--nomination-timeouts")
         {
             options.mTimeoutSettings.mNomination = true;
+            continue;
+        }
+        if (arg == "--nomination-only")
+        {
+            options.mNominationOnly = true;
             continue;
         }
         if (arg == "--balloting-timeouts")
@@ -156,21 +178,42 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 arg, arg.substr(std::string_view("--num-nodes=").size()));
             continue;
         }
-        if (arg == "--prepare-boundary")
+        if (arg == "--nomination-timer-limit")
         {
             if (i + 1 >= argc)
             {
-                throw std::invalid_argument("--prepare-boundary requires a value");
+                throw std::invalid_argument(
+                    "--nomination-timer-limit requires a value");
             }
-            options.mBoundarySettings.mPrepare =
-                parseUint32Value(arg, std::string_view(argv[++i]));
+            options.mTimerSetLimitSettings.mNomination =
+                parsePositiveUint32Value(arg, std::string_view(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--prepare-boundary="))
+        if (arg.starts_with("--nomination-timer-limit="))
         {
-            options.mBoundarySettings.mPrepare = parseUint32Value(
-                arg,
-                arg.substr(std::string_view("--prepare-boundary=").size()));
+            options.mTimerSetLimitSettings.mNomination =
+                parsePositiveUint32Value(
+                    arg, arg.substr(std::string_view(
+                                        "--nomination-timer-limit=").size()));
+            continue;
+        }
+        if (arg == "--balloting-timer-limit")
+        {
+            if (i + 1 >= argc)
+            {
+                throw std::invalid_argument(
+                    "--balloting-timer-limit requires a value");
+            }
+            options.mTimerSetLimitSettings.mBalloting =
+                parsePositiveUint32Value(arg, std::string_view(argv[++i]));
+            continue;
+        }
+        if (arg.starts_with("--balloting-timer-limit="))
+        {
+            options.mTimerSetLimitSettings.mBalloting =
+                parsePositiveUint32Value(
+                    arg, arg.substr(std::string_view(
+                                        "--balloting-timer-limit=").size()));
             continue;
         }
         if (arg == "--scenario")
@@ -203,12 +246,14 @@ main(int argc, char* argv[])
         auto const options = parseOptions(argv[0], argc, argv);
         auto const results = runRuntimeGrowthInvestigation(
             options.mWorkers, options.mDepthOverride,
-            options.mBoundarySettings, options.mScenario,
-            options.mNumNodes, options.mTimeoutSettings);
+            options.mScenario, options.mNominationOnly,
+            options.mNumNodes, options.mTimeoutSettings,
+            options.mTimerSetLimitSettings);
         printInvestigationResults(std::cout, results, options.mWorkers,
-                                  options.mBoundarySettings,
                                   options.mNumNodes,
-                                  options.mTimeoutSettings);
+                                  options.mNominationOnly,
+                                  options.mTimeoutSettings,
+                                  options.mTimerSetLimitSettings);
 
         for (auto const& result : results)
         {

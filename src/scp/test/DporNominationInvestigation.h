@@ -50,12 +50,15 @@ struct TimeoutSettings
     bool mBalloting{false};
 };
 
-struct BoundarySettings
+struct TimerSetLimitSettings
 {
-    uint32_t mPrepare{DporNominationNode::DEFAULT_BALLOTING_BOUNDARY};
+    std::optional<uint32_t> mNomination;
+    std::optional<uint32_t> mBalloting;
 };
 
 constexpr uint32_t kDisabledNominationRoundBoundary =
+    std::numeric_limits<uint32_t>::max();
+constexpr uint32_t kDisabledBallotingBoundary =
     std::numeric_limits<uint32_t>::max();
 
 class ScopedPartitionLogLevel
@@ -101,8 +104,7 @@ computeTwoThirdsThreshold(std::size_t validatorCount)
 inline DporNominationNode::Configuration
 makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
                            std::size_t leaderIndex,
-                           uint32_t prepareBoundary =
-                               DporNominationNode::DEFAULT_BALLOTING_BOUNDARY)
+                           bool nominationOnly = false)
 {
     DporNominationNode::Configuration config;
     auto sharedNodeIDs = std::make_shared<std::vector<NodeID> const>(nodeIDs);
@@ -111,7 +113,9 @@ makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
                                                         : 1;
     };
     config.mBoundaryMode = DporNominationNode::BoundaryMode::Prepare;
-    config.mBallotingBoundary = prepareBoundary;
+    config.mBallotingBoundary = nominationOnly
+                                    ? DporNominationNode::DEFAULT_BALLOTING_BOUNDARY
+                                    : kDisabledBallotingBoundary;
     config.mNominationRoundBoundary = kDisabledNominationRoundBoundary;
     return config;
 }
@@ -126,13 +130,15 @@ struct ThresholdFixture
     std::vector<Hash> mQSetHashes;
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
-    BoundarySettings mBoundarySettings;
+    bool mNominationOnly;
+    TimerSetLimitSettings mTimerSetLimitSettings;
     DporNominationDporAdapter mAdapter;
 
     explicit ThresholdFixture(
         std::size_t validatorCount = kDefaultValidatorCount,
         bool fixedTopLeader = true,
-        BoundarySettings boundarySettings = {})
+        bool nominationOnly = false,
+        TimerSetLimitSettings timerSetLimitSettings = {})
         : mValidatorCount(validatorCount)
         , mThreshold(computeTwoThirdsThreshold(validatorCount))
         , mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -168,22 +174,35 @@ struct ThresholdFixture
             }
             return values;
         }())
-        , mBoundarySettings(boundarySettings)
+        , mNominationOnly(nominationOnly)
+        , mTimerSetLimitSettings(timerSetLimitSettings)
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    mInitialValues, [&]() {
                        if (fixedTopLeader)
                        {
-                           return makeTopLeaderConfiguration(
-                               mNodeIDs, kLeaderIndex,
-                               boundarySettings.mPrepare);
+                           auto config =
+                               makeTopLeaderConfiguration(mNodeIDs,
+                                                          kLeaderIndex,
+                                                          nominationOnly);
+                           config.mNominationTimerSetLimit =
+                               timerSetLimitSettings.mNomination;
+                           config.mBallotingTimerSetLimit =
+                               timerSetLimitSettings.mBalloting;
+                           return config;
                        }
                        DporNominationNode::Configuration config;
                        config.mNominationRoundBoundary =
                            kDisabledNominationRoundBoundary;
-                       config.mBallotingBoundary =
-                           boundarySettings.mPrepare;
+                       config.mBallotingBoundary = nominationOnly
+                                                       ? DporNominationNode::
+                                                             DEFAULT_BALLOTING_BOUNDARY
+                                                       : kDisabledBallotingBoundary;
                        config.mBoundaryMode =
                            DporNominationNode::BoundaryMode::Prepare;
+                       config.mNominationTimerSetLimit =
+                           timerSetLimitSettings.mNomination;
+                       config.mBallotingTimerSetLimit =
+                           timerSetLimitSettings.mBalloting;
                        return config;
                    }())
     {
@@ -452,11 +471,12 @@ inline std::vector<InvestigationResult>
 runRuntimeGrowthInvestigation(
     std::size_t workers = 8,
     std::optional<std::size_t> depthOverride = std::nullopt,
-    BoundarySettings boundarySettings = {},
     std::optional<InvestigationScenario::Id> scenarioFilter =
         std::nullopt,
+    bool nominationOnly = false,
     std::size_t validatorCount = kDefaultValidatorCount,
-    TimeoutSettings timeoutSettings = {})
+    TimeoutSettings timeoutSettings = {},
+    TimerSetLimitSettings timerSetLimitSettings = {})
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -475,7 +495,8 @@ runRuntimeGrowthInvestigation(
         }
 
         ThresholdFixture fixture(
-            validatorCount, !timeoutSettings.mNomination, boundarySettings);
+            validatorCount, !timeoutSettings.mNomination, nominationOnly,
+            timerSetLimitSettings);
         fixture.mAdapter.setTimeoutModes(timeoutSettings.mNomination,
                                          timeoutSettings.mBalloting);
 
@@ -529,13 +550,17 @@ inline std::vector<InvestigationResult>
 runFourNodeRuntimeGrowthInvestigation(
     std::size_t workers = 8,
     std::optional<std::size_t> depthOverride = std::nullopt,
-    BoundarySettings boundarySettings = {},
     std::optional<InvestigationScenario::Id> scenarioFilter =
-        std::nullopt)
+        std::nullopt,
+    bool nominationOnly = false,
+    TimeoutSettings timeoutSettings = {},
+    TimerSetLimitSettings timerSetLimitSettings = {})
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
-                                         boundarySettings, scenarioFilter,
-                                         kDefaultValidatorCount, {});
+                                         scenarioFilter, nominationOnly,
+                                         kDefaultValidatorCount,
+                                         timeoutSettings,
+                                         timerSetLimitSettings);
 }
 
 inline std::string
@@ -559,9 +584,10 @@ inline void
 printInvestigationResults(std::ostream& out,
                           std::vector<InvestigationResult> const& results,
                           std::size_t workers,
-                          BoundarySettings boundarySettings,
                           std::size_t validatorCount,
-                          TimeoutSettings timeoutSettings)
+                          bool nominationOnly,
+                          TimeoutSettings timeoutSettings,
+                          TimerSetLimitSettings timerSetLimitSettings = {})
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -570,12 +596,34 @@ printInvestigationResults(std::ostream& out,
             << "' scenario=" << scenarioName(result.mScenario.mId)
             << " num_nodes=" << validatorCount
             << " threshold=" << threshold
+            << " nomination_only="
+            << (nominationOnly ? "on" : "off")
             << " nomination_timeouts="
             << (timeoutSettings.mNomination ? "on" : "off")
             << " balloting_timeouts="
             << (timeoutSettings.mBalloting ? "on" : "off")
+            << " prepare_boundary="
+            << (nominationOnly ? "1" : "off")
+            << " nomination_timer_limit=";
+        if (timerSetLimitSettings.mNomination)
+        {
+            out << *timerSetLimitSettings.mNomination;
+        }
+        else
+        {
+            out << "off";
+        }
+        out << " balloting_timer_limit=";
+        if (timerSetLimitSettings.mBalloting)
+        {
+            out << *timerSetLimitSettings.mBalloting;
+        }
+        else
+        {
+            out << "off";
+        }
+        out
             << " workers=" << workers
-            << " prepare_boundary=" << boundarySettings.mPrepare
             << " depth=";
         if (result.mScenario.mMaxDepth ==
             std::numeric_limits<std::size_t>::max())
