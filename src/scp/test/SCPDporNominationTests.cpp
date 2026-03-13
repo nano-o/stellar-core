@@ -585,6 +585,24 @@ TEST_CASE("dpor nomination investigation treats depth as a per-thread cutoff",
     REQUIRE(results.front().mVerifyResult.executions_explored > 0);
 }
 
+TEST_CASE("dpor nomination investigation does not use a global dpor depth cap",
+          "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{10},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            false, kSmallTopologyValidatorCount);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+}
+
 TEST_CASE("dpor nomination verify explores delivery-versus-timeout races",
           "[scp][dpor][nomination]")
 {

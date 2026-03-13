@@ -274,29 +274,6 @@ applyPerThreadDepthLimit(ProgressSteps stopSteps,
     return stopSteps;
 }
 
-inline std::size_t
-computeExecutionDepthCap(ProgressSteps const& stopSteps)
-{
-    std::size_t total = 0;
-    for (auto const stopStep : stopSteps)
-    {
-        if (stopStep == kUnlimitedProgressStep)
-        {
-            return std::numeric_limits<std::size_t>::max();
-        }
-        if (total > std::numeric_limits<std::size_t>::max() - stopStep)
-        {
-            return std::numeric_limits<std::size_t>::max();
-        }
-        total += stopStep;
-    }
-    if (total == std::numeric_limits<std::size_t>::max())
-    {
-        return total;
-    }
-    return total + 1;
-}
-
 struct InvestigationScenario
 {
     enum class Id
@@ -559,7 +536,7 @@ runRuntimeGrowthInvestigation(
 
         dpor::algo::DporConfigT<DporNominationValue> config;
         config.program = makeBoundedProgram(fixture, scenario.mStopSteps);
-        config.max_depth = computeExecutionDepthCap(scenario.mStopSteps);
+        config.max_depth = std::numeric_limits<std::size_t>::max();
         config.on_receive_branches =
             [receiveBranchMetrics](dpor::model::ThreadId,
                                    std::size_t compatibleUnreadSends,
