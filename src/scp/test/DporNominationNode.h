@@ -60,6 +60,7 @@ class DporNominationNode : public SCPDriver
         // When set, exactly one 1-based node index wins each round with max
         // priority: ((roundNumber - 1) % numNodes) + 1.
         std::map<NodeID, std::size_t> mNodeIndexMap;
+        std::function<uint64(NodeID const&)> mPriorityLookup;
         std::function<uint64(Value const&)> mValueHash;
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
@@ -194,6 +195,8 @@ class DporNominationNode : public SCPDriver
 
     std::set<NodeID> getNominationLeaders(uint64 slotIndex);
 
+    void setPriorityLookup(std::function<uint64(NodeID const&)> const& fn);
+
     void setValueHash(std::function<uint64(Value const&)> const& fn);
 
     void setCombineCandidates(
@@ -229,9 +232,14 @@ class DporNominationNode : public SCPDriver
     // SCPDriver hooks used by the embedded SCP instance.
     void signEnvelope(SCPEnvelope& envelope) override;
     SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
+    std::optional<std::chrono::milliseconds>
+    getTxSetDownloadWaitTime(Value const& value) const override;
+    std::chrono::milliseconds getTxSetDownloadTimeout() const override;
     void emitEnvelope(SCPEnvelope const& envelope) override;
     ValidationLevel validateValue(uint64 slotIndex, Value const& value,
                                   bool nomination) override;
+    Value makeSkipLedgerValueFromValue(Value const& value) const override;
+    bool isSkipLedgerValue(Value const& value) const override;
     Hash getHashOf(std::vector<xdr::opaque_vec<>> const& vals) const override;
     uint64 computeHashNode(uint64 slotIndex, Value const& prev,
                            bool isPriority, int32_t roundNumber,
@@ -263,6 +271,7 @@ class DporNominationNode : public SCPDriver
     SecretKey mSecretKey;
     SCP mSCP;
     std::map<NodeID, std::size_t> mNodeIndexMap;
+    std::function<uint64(NodeID const&)> mPriorityLookup;
     std::function<uint64(Value const&)> mValueHash;
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;

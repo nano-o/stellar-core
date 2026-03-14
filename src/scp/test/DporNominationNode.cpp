@@ -133,7 +133,19 @@ DporNominationNode::getLatestMessagesSend(uint64 slotIndex)
 std::set<NodeID>
 DporNominationNode::getNominationLeaders(uint64 slotIndex)
 {
-    return mSCP.getNominationLeaders(slotIndex);
+    auto slot = mSCP.getSlot(slotIndex, false);
+    if (!slot)
+    {
+        return {};
+    }
+    return slot->getNominationLeaders();
+}
+
+void
+DporNominationNode::setPriorityLookup(
+    std::function<uint64(NodeID const&)> const& fn)
+{
+    mPriorityLookup = fn;
 }
 
 void
@@ -164,6 +176,10 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
     mNodeIndexMap = config.mNodeIndexMap;
+    if (config.mPriorityLookup)
+    {
+        setPriorityLookup(config.mPriorityLookup);
+    }
     if (config.mValueHash)
     {
         setValueHash(config.mValueHash);
@@ -651,6 +667,18 @@ DporNominationNode::getQSet(Hash const& qSetHash)
     return it->second;
 }
 
+std::optional<std::chrono::milliseconds>
+DporNominationNode::getTxSetDownloadWaitTime(Value const&) const
+{
+    return std::nullopt;
+}
+
+std::chrono::milliseconds
+DporNominationNode::getTxSetDownloadTimeout() const
+{
+    return std::chrono::milliseconds{1000};
+}
+
 void
 DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 {
@@ -698,6 +726,27 @@ DporNominationNode::validateValue(uint64, Value const&, bool)
     return SCPDriver::kFullyValidatedValue;
 }
 
+Value
+DporNominationNode::makeSkipLedgerValueFromValue(Value const& value) const
+{
+    Value skipValue;
+    skipValue.resize(5 + value.size());
+    skipValue[0] = 'S';
+    skipValue[1] = 'K';
+    skipValue[2] = 'I';
+    skipValue[3] = 'P';
+    skipValue[4] = ':';
+    std::copy(value.begin(), value.end(), skipValue.begin() + 5);
+    return skipValue;
+}
+
+bool
+DporNominationNode::isSkipLedgerValue(Value const& value) const
+{
+    return value.size() >= 5 && value[0] == 'S' && value[1] == 'K' &&
+           value[2] == 'I' && value[3] == 'P' && value[4] == ':';
+}
+
 Hash
 DporNominationNode::getHashOf(
     std::vector<xdr::opaque_vec<>> const& vals) const
@@ -715,6 +764,10 @@ DporNominationNode::computeHashNode(uint64 slotIndex, Value const& prev,
                                     bool isPriority, int32_t roundNumber,
                                     NodeID const& nodeID)
 {
+    if (mPriorityLookup)
+    {
+        return isPriority ? mPriorityLookup(nodeID) : 0;
+    }
     if (!mNodeIndexMap.empty())
     {
         if (!isPriority)

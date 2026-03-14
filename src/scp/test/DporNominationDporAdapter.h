@@ -32,11 +32,32 @@ struct DporNominationValue
     uint64_t mSlotIndex{};
     SCPEnvelope mEnvelope;
 
-    auto
-    operator<=>(DporNominationValue const& other) const = default;
+    bool
+    operator==(DporNominationValue const& other) const
+    {
+        return mSenderThread == other.mSenderThread &&
+               mDestinationThread == other.mDestinationThread &&
+               mSlotIndex == other.mSlotIndex &&
+               mEnvelope == other.mEnvelope;
+    }
 
     bool
-    operator==(DporNominationValue const& other) const = default;
+    operator<(DporNominationValue const& other) const
+    {
+        if (mSenderThread != other.mSenderThread)
+        {
+            return mSenderThread < other.mSenderThread;
+        }
+        if (mDestinationThread != other.mDestinationThread)
+        {
+            return mDestinationThread < other.mDestinationThread;
+        }
+        if (mSlotIndex != other.mSlotIndex)
+        {
+            return mSlotIndex < other.mSlotIndex;
+        }
+        return mEnvelope < other.mEnvelope;
+    }
 };
 
 // DPOR-facing replay adapter for nomination. Each thread query

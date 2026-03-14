@@ -64,7 +64,12 @@ struct ReplayStateCacheKey
     std::size_t mGeneration{};
 
     bool
-    operator==(ReplayStateCacheKey const& other) const = default;
+    operator==(ReplayStateCacheKey const& other) const
+    {
+        return mAdapter == other.mAdapter &&
+               mNodeIndex == other.mNodeIndex &&
+               mGeneration == other.mGeneration;
+    }
 };
 
 struct ReplayStateCacheKeyHasher

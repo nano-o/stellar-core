@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -68,6 +69,17 @@ getNormalizedQSetHash(SCPQuorumSet qSet)
     // differ from a plain hash of the caller-provided XDR shape.
     normalizeQSet(qSet);
     return sha256(xdr::xdr_to_opaque(qSet));
+}
+
+inline std::map<NodeID, std::size_t>
+makeNodeIndexMap(std::vector<NodeID> const& nodeIDs)
+{
+    std::map<NodeID, std::size_t> indexMap;
+    for (std::size_t i = 0; i < nodeIDs.size(); ++i)
+    {
+        indexMap[nodeIDs[i]] = i + 1;
+    }
+    return indexMap;
 }
 
 inline DporNominationNode::Configuration

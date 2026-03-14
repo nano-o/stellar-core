@@ -121,6 +121,13 @@ parseNumNodesValue(std::string_view arg, std::string_view value)
     return static_cast<std::size_t>(parsed);
 }
 
+bool
+startsWith(std::string_view value, std::string_view prefix)
+{
+    return value.size() >= prefix.size() &&
+           value.compare(0, prefix.size(), prefix) == 0;
+}
+
 CommandLineOptions
 parseOptions(char const* argv0, int argc, char* argv[])
 {
@@ -173,7 +180,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--workers="))
+        if (startsWith(arg, "--workers="))
         {
             options.mWorkers = static_cast<std::size_t>(
                 std::stoull(std::string(arg.substr(std::string_view("--workers=").size()))));
@@ -189,7 +196,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--depth="))
+        if (startsWith(arg, "--depth="))
         {
             options.mDepthOverride = static_cast<std::size_t>(std::stoull(
                 std::string(arg.substr(std::string_view("--depth=").size()))));
@@ -205,7 +212,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 parseNumNodesValue(arg, std::string_view(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--num-nodes="))
+        if (startsWith(arg, "--num-nodes="))
         {
             options.mNumNodes = parseNumNodesValue(
                 arg, arg.substr(std::string_view("--num-nodes=").size()));
@@ -222,7 +229,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 parsePositiveUint32Value(arg, std::string_view(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--nomination-timer-limit="))
+        if (startsWith(arg, "--nomination-timer-limit="))
         {
             options.mTimerSetLimitSettings.mNomination =
                 parsePositiveUint32Value(
@@ -241,7 +248,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 parsePositiveUint32Value(arg, std::string_view(argv[++i]));
             continue;
         }
-        if (arg.starts_with("--balloting-timer-limit="))
+        if (startsWith(arg, "--balloting-timer-limit="))
         {
             options.mTimerSetLimitSettings.mBalloting =
                 parsePositiveUint32Value(
@@ -258,7 +265,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mScenario = parseScenarioValue(argv[++i]);
             continue;
         }
-        if (arg.starts_with("--scenario="))
+        if (startsWith(arg, "--scenario="))
         {
             options.mScenario = parseScenarioValue(
                 arg.substr(std::string_view("--scenario=").size()));

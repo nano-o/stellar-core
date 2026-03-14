@@ -55,11 +55,16 @@ CARGO_FEATURE_TRACY =
 endif
 
 if BUILD_TESTS
-stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES) $(SRC_TEST_CXX_FILES)
+SCP_DPOR_NOMINATION_INVESTIGATION_MAIN = \
+	scp/test/DporNominationInvestigationMain.cpp
+stellar_core_SOURCES = \
+	main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp \
+	$(SRC_CXX_FILES) \
+	$(SRC_TEST_CXX_FILES)
 check_PROGRAMS = scp-dpor-nomination-investigation
 scp_dpor_nomination_investigation_SOURCES = \
 	scp/test/DporNominationInvestigation.h \
-	scp/test/DporNominationInvestigationMain.cpp
+	$(SCP_DPOR_NOMINATION_INVESTIGATION_MAIN)
 scp_dpor_nomination_investigation_DEPENDENCIES = \
 	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
 	$(LIBRUST_STELLAR_CORE)
