@@ -142,13 +142,6 @@ DporNominationNode::getNominationLeaders(uint64 slotIndex)
 }
 
 void
-DporNominationNode::setPriorityLookup(
-    std::function<uint64(NodeID const&)> const& fn)
-{
-    mPriorityLookup = fn;
-}
-
-void
 DporNominationNode::setValueHash(std::function<uint64(Value const&)> const& fn)
 {
     mValueHash = fn;
@@ -176,10 +169,6 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
     mNodeIndexMap = config.mNodeIndexMap;
-    if (config.mPriorityLookup)
-    {
-        setPriorityLookup(config.mPriorityLookup);
-    }
     if (config.mValueHash)
     {
         setValueHash(config.mValueHash);
@@ -764,10 +753,6 @@ DporNominationNode::computeHashNode(uint64 slotIndex, Value const& prev,
                                     bool isPriority, int32_t roundNumber,
                                     NodeID const& nodeID)
 {
-    if (mPriorityLookup)
-    {
-        return isPriority ? mPriorityLookup(nodeID) : 0;
-    }
     if (!mNodeIndexMap.empty())
     {
         if (!isPriority)
