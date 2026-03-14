@@ -68,19 +68,25 @@ RUN set -eux; \
         nodejs \
         npm \
         openssh-client \
+        ocrmypdf \
         parallel \
         perl \
         pkg-config \
+        poppler-utils \
         postgresql \
         procps \
         python3 \
+        qpdf \
         ripgrep \
         rsync \
         sed \
         sqlite3 \
         strace \
         sudo \
+        tesseract-ocr \
+        tesseract-ocr-eng \
         tmux \
+        mupdf-tools \
         valgrind \
         vim \
         wget \
@@ -170,7 +176,8 @@ RUN install -d -o "${UID}" -g "${GID}" \
 COPY --chown=${UID}:${GID} dev-container/tmux.conf /home/${USER}/.tmux.conf
 COPY --chown=${UID}:${GID} dev-container/osc52-tmux /home/${USER}/.local/bin/osc52-tmux
 COPY --chown=${UID}:${GID} dev-container/perf-wrapper.sh /home/${USER}/.local/bin/perf
-RUN chmod 0755 /home/${USER}/.local/bin/osc52-tmux /home/${USER}/.local/bin/perf
+COPY --chown=${UID}:${GID} dev-container/pdf-extract.sh /home/${USER}/.local/bin/pdf-extract
+RUN chmod 0755 /home/${USER}/.local/bin/osc52-tmux /home/${USER}/.local/bin/perf /home/${USER}/.local/bin/pdf-extract
 COPY dev-container/project-title.sh /etc/profile.d/project-title.sh
 RUN grep -qxF 'source /etc/profile.d/project-title.sh' /etc/bash.bashrc \
     || echo 'source /etc/profile.d/project-title.sh' >> /etc/bash.bashrc

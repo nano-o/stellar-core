@@ -532,9 +532,9 @@ findTerminalDeadlock(GraphT const& graph, ProgressSteps const& stopSteps)
 template <typename GraphT>
 inline std::optional<std::string>
 findTerminationWithoutExternalize(GraphT const& graph,
-                                  std::size_t validatorCount)
+                                  ProgressSteps const& stopSteps)
 {
-    if (isErrorExecution(graph, validatorCount))
+    if (isErrorExecution(graph, stopSteps.size()))
     {
         return std::nullopt;
     }
@@ -555,11 +555,21 @@ findTerminationWithoutExternalize(GraphT const& graph,
     }
 
     std::vector<std::size_t> stepCounts;
-    stepCounts.reserve(validatorCount);
-    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+    stepCounts.reserve(stopSteps.size());
+    for (std::size_t nodeIndex = 0; nodeIndex < stopSteps.size(); ++nodeIndex)
     {
         auto const tid = DporNominationDporAdapter::toThreadID(nodeIndex);
         stepCounts.push_back(graph.thread_event_count(tid));
+    }
+
+    for (std::size_t nodeIndex = 0; nodeIndex < stopSteps.size(); ++nodeIndex)
+    {
+        auto const stopStep = stopSteps.at(nodeIndex);
+        if (stopStep != kUnlimitedProgressStep &&
+            stepCounts.at(nodeIndex) >= stopStep)
+        {
+            return std::nullopt;
+        }
     }
 
     std::ostringstream out;
@@ -897,7 +907,7 @@ runRuntimeGrowthInvestigation(
                     if (checkTermination)
                     {
                         error =
-                            findTerminationWithoutExternalize(graph, validatorCount);
+                            findTerminationWithoutExternalize(graph, stopSteps);
                     }
                     if (!error && checkExternalize)
                     {

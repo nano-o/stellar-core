@@ -53,6 +53,7 @@ git submodule update --init --recursive external/dpor
 | Build system | `autoconf`, `automake`, `libtool`, `pkg-config`, `cmake`, `ninja-build`, `make` |
 | Static analysis | `ccache`, `bear`, `cppcheck`, `iwyu` |
 | Databases / tests | `postgresql`, `libpq-dev`, `sqlite3` |
+| PDFs / OCR | `pdftotext`, `pdfinfo`, `pdftoppm` via `poppler-utils`, `qpdf`, `mutool`, `tesseract`, `ocrmypdf`, `pdf-extract` |
 | Profiling / tracing | `perf`, `valgrind` (`callgrind`, `massif`), `heaptrack`, `google-pprof`, `strace`, `hyperfine` |
 | Rust | repo-pinned root toolchain via `install-rust.sh`, `rustfmt`, `clippy`, `rust-src`, `wasm32-unknown-unknown`, `wasm32v1-none`, `cargo-cache`, `cargo-sweep` |
 | AI agents | Claude Code (`@anthropic-ai/claude-code`), Codex CLI (`@openai/codex`) |
@@ -158,6 +159,34 @@ ms_print massif.out.* | less
 `--enable-tracy --enable-tracy-capture --enable-tracy-csvexport`, then use the
 built `tracy-capture` / `tracy-csvexport` tools from the build tree.
 
+## PDF extraction workflows
+
+The image includes both low-level PDF tools and a single convenience wrapper
+for agents:
+
+```bash
+# Extract text to stdout, falling back to OCR if the PDF is scanned
+pdf-extract docs/software/core-data-flow.pdf | less
+
+# Write extracted text to a file
+pdf-extract paper.pdf paper.txt
+
+# Force OCR on a scanned PDF and keep a sidecar text file
+ocrmypdf --skip-text --language eng --sidecar paper.txt scan.pdf scan-ocr.pdf
+
+# Inspect metadata or page count
+pdfinfo paper.pdf
+
+# Normalize / validate a damaged or odd PDF before extraction
+qpdf --check paper.pdf
+qpdf --decrypt paper.pdf normalized.pdf
+```
+
+`pdf-extract` first tries embedded text with `pdftotext`, falls back to
+`mutool` for some PDFs that Poppler handles poorly, and then falls back to OCR.
+For image-only PDFs, `pdftoppm` and `tesseract` are also available if you want
+manual page-by-page processing.
+
 ## Hardening
 
 The default container adds a few restrictions on top of standard Docker
@@ -215,6 +244,7 @@ APT_MIRROR=mirror://mirrors.ubuntu.com/mirrors.txt dev-container/build-image.sh
 | `Dockerfile` | Image definition |
 | `build-image.sh` | Build the image with host UID/GID |
 | `run-container.sh` | Launch the container with the repo + agent state mounted |
+| `pdf-extract.sh` | Convenience wrapper for PDF text extraction with OCR fallback |
 | `perf-wrapper.sh` | Resolves the real installed `perf` binary inside Ubuntu containers |
 | `tmux.conf` | tmux defaults (vim keys, OSC52 clipboard, 256-color) |
 | `osc52-tmux` | Clipboard helper for tmux over SSH/containers |

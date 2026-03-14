@@ -616,7 +616,7 @@ TEST_CASE("dpor nomination investigation can detect terminal deadlocks",
 
     auto const results =
         dpor_nomination_investigation::runRuntimeGrowthInvestigation(
-            1, std::size_t{10},
+            1, std::size_t{1},
             dpor_nomination_investigation::InvestigationScenario::Id::
                 UnrestrictedFollowers,
             true, kSmallTopologyValidatorCount,
@@ -674,14 +674,36 @@ TEST_CASE("dpor nomination investigation deadlock check treats unbounded step "
             std::string::npos);
 }
 
-TEST_CASE("dpor nomination investigation can detect terminal executions "
-          "without externalize", "[scp][dpor][investigation]")
+TEST_CASE("dpor nomination investigation termination check ignores "
+          "step-limited executions", "[scp][dpor][investigation]")
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
     auto const results =
         dpor_nomination_investigation::runRuntimeGrowthInvestigation(
             1, std::size_t{10},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, false,
+            true);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::AllExecutionsExplored);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+}
+
+TEST_CASE("dpor nomination investigation termination check detects "
+          "unbounded terminal executions without externalize",
+          "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{0},
             dpor_nomination_investigation::InvestigationScenario::Id::
                 UnrestrictedFollowers,
             true, kSmallTopologyValidatorCount,
