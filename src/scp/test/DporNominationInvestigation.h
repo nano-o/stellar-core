@@ -60,6 +60,19 @@ struct TimerSetLimitSettings
     std::optional<uint32_t> mBalloting;
 };
 
+inline char const*
+communicationModelName(dpor::model::CommunicationModel communicationModel)
+{
+    switch (communicationModel)
+    {
+    case dpor::model::CommunicationModel::Async:
+        return "async";
+    case dpor::model::CommunicationModel::FifoP2P:
+        return "fifo_p2p";
+    }
+    throw std::logic_error("unknown communication model");
+}
+
 enum class InitialValuePattern : std::uint8_t
 {
     UniquePerNode,
@@ -822,7 +835,9 @@ runRuntimeGrowthInvestigation(
     bool checkTermination = false,
     bool checkExternalize = false,
     bool checkExternalizeDivergence = false,
-    bool printSkipExternalize = false)
+    bool printSkipExternalize = false,
+    dpor::model::CommunicationModel communicationModel =
+        dpor::model::CommunicationModel::Async)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -860,6 +875,7 @@ runRuntimeGrowthInvestigation(
         dpor::algo::DporConfigT<DporNominationValue> config;
         config.program = makeBoundedProgram(fixture, scenario.mStopSteps);
         config.max_depth = std::numeric_limits<std::size_t>::max();
+        config.communication_model = communicationModel;
         config.on_receive_branches =
             [receiveBranchMetrics](dpor::model::ThreadId,
                                    std::size_t compatibleUnreadSends,
@@ -1032,7 +1048,9 @@ runFourNodeRuntimeGrowthInvestigation(
     bool checkTermination = false,
     bool checkExternalize = false,
     bool checkExternalizeDivergence = false,
-    bool printSkipExternalize = false)
+    bool printSkipExternalize = false,
+    dpor::model::CommunicationModel communicationModel =
+        dpor::model::CommunicationModel::Async)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
@@ -1043,7 +1061,8 @@ runFourNodeRuntimeGrowthInvestigation(
                                          checkTermination,
                                          checkExternalize,
                                          checkExternalizeDivergence,
-                                         printSkipExternalize);
+                                         printSkipExternalize,
+                                         communicationModel);
 }
 
 inline std::string
@@ -1075,7 +1094,9 @@ printInvestigationResults(std::ostream& out,
                           bool checkTermination = false,
                           bool checkExternalize = false,
                           bool checkExternalizeDivergence = false,
-                          bool printSkipExternalize = false)
+                          bool printSkipExternalize = false,
+                          dpor::model::CommunicationModel communicationModel =
+                              dpor::model::CommunicationModel::Async)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -1084,6 +1105,8 @@ printInvestigationResults(std::ostream& out,
             << "' scenario=" << scenarioName(result.mScenario.mId)
             << " num_nodes=" << validatorCount
             << " threshold=" << threshold
+            << " communication_model="
+            << communicationModelName(communicationModel)
             << " nomination_only="
             << (nominationOnly ? "on" : "off")
             << " nomination_timeouts="

@@ -550,6 +550,38 @@ TEST_CASE("dpor nomination investigation reports 4-node runtime growth",
     }
 }
 
+TEST_CASE("dpor nomination investigation supports fifo p2p mode",
+          "[scp][dpor][investigation][fifo_p2p]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const communicationModel = dpor::model::CommunicationModel::FifoP2P;
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{1},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, false,
+            false, false, false, false, communicationModel);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind !=
+            VerifyResultKind::ErrorFound);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+
+    std::ostringstream out;
+    dpor_nomination_investigation::printInvestigationResults(
+        out, results, 1, kSmallTopologyValidatorCount, true,
+        dpor_nomination_investigation::TimeoutSettings{},
+        dpor_nomination_investigation::TimerSetLimitSettings{}, false, false,
+        false, false, false, communicationModel);
+
+    REQUIRE(out.str().find("communication_model=fifo_p2p") !=
+            std::string::npos);
+}
+
 TEST_CASE("dpor nomination investigation can bound timeout-driven unbounded "
           "searches with timer limits", "[scp][dpor][investigation]")
 {

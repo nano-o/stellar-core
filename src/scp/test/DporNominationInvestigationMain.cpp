@@ -20,6 +20,8 @@ struct CommandLineOptions
 {
     std::size_t mWorkers = 8;
     std::size_t mNumNodes = kDefaultValidatorCount;
+    dpor::model::CommunicationModel mCommunicationModel =
+        dpor::model::CommunicationModel::Async;
     bool mNominationOnly = false;
     bool mCheckDeadlock = false;
     bool mCheckTermination = false;
@@ -37,6 +39,7 @@ printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
               << " [--workers N] [--num-nodes N] [--depth N]"
+                 " [--fifo]"
                  " [--nomination-only]"
                  " [--deadlock]"
                  " [--termination]"
@@ -52,6 +55,8 @@ printUsage(char const* argv0)
                  "4|unrestricted-followers, "
                  "5|threshold-split-balloting\n"
               << "--depth limits each thread to N steps (0 = unbounded)\n"
+              << "--fifo uses FIFO peer-to-peer DPOR semantics "
+                 "(default: async)\n"
               << "--deadlock fails if a terminal execution leaves any thread "
                  "short of its step limit (unbounded counts as unreached)\n"
               << "--termination fails if a terminal execution contains no "
@@ -156,6 +161,12 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--nomination-only")
         {
             options.mNominationOnly = true;
+            continue;
+        }
+        if (arg == "--fifo")
+        {
+            options.mCommunicationModel =
+                dpor::model::CommunicationModel::FifoP2P;
             continue;
         }
         if (arg == "--deadlock")
@@ -310,7 +321,8 @@ main(int argc, char* argv[])
             options.mCheckTermination,
             options.mCheckExternalize,
             options.mCheckExternalizeDivergence,
-            options.mPrintSkipExternalize);
+            options.mPrintSkipExternalize,
+            options.mCommunicationModel);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
@@ -320,7 +332,8 @@ main(int argc, char* argv[])
                                   options.mCheckTermination,
                                   options.mCheckExternalize,
                                   options.mCheckExternalizeDivergence,
-                                  options.mPrintSkipExternalize);
+                                  options.mPrintSkipExternalize,
+                                  options.mCommunicationModel);
 
         for (auto const& result : results)
         {
