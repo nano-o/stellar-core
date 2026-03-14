@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cstddef>
 #include <iomanip>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -457,8 +458,14 @@ formatStepCounts(std::vector<std::size_t> const& stepCounts)
 inline std::string
 formatValueAbbrev(Value const& value)
 {
-    auto const bytes = xdr::xdr_to_opaque(value);
-    return hexAbbrev(ByteSlice(bytes.data(), bytes.size()));
+    return hexAbbrev(ByteSlice(value.data(), value.size()));
+}
+
+inline bool
+isDporSkipValue(Value const& value)
+{
+    return value.size() >= 5 && value[0] == 'S' && value[1] == 'K' &&
+           value[2] == 'I' && value[3] == 'P' && value[4] == ':';
 }
 
 template <typename GraphT>
@@ -617,6 +624,44 @@ findExternalize(GraphT const& graph, std::size_t validatorCount)
     return std::nullopt;
 }
 
+template <typename GraphT>
+inline std::optional<std::string>
+findSkipExternalize(GraphT const& graph, std::size_t validatorCount)
+{
+    if (isErrorExecution(graph, validatorCount))
+    {
+        return std::nullopt;
+    }
+
+    for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
+    {
+        auto const* send = dpor::model::as_send(graph.event(eventID));
+        if (send == nullptr)
+        {
+            continue;
+        }
+
+        auto const& envelope = send->value.mEnvelope;
+        if (envelope.statement.pledges.type() != SCP_ST_EXTERNALIZE)
+        {
+            continue;
+        }
+
+        auto const& value = envelope.statement.pledges.externalize().commit.value;
+        if (!isDporSkipValue(value))
+        {
+            continue;
+        }
+
+        std::ostringstream out;
+        out << "skip externalize: thread " << graph.event(eventID).thread
+            << " externalized " << formatValueAbbrev(value);
+        return out.str();
+    }
+
+    return std::nullopt;
+}
+
 inline std::vector<InvestigationScenario>
 runtimeGrowthScenarios(std::size_t validatorCount)
 {
@@ -726,7 +771,8 @@ runRuntimeGrowthInvestigation(
     TimerSetLimitSettings timerSetLimitSettings = {},
     bool checkDeadlock = false,
     bool checkExternalize = false,
-    bool checkExternalizeDivergence = false)
+    bool checkExternalizeDivergence = false,
+    bool printSkipExternalize = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -782,17 +828,23 @@ runRuntimeGrowthInvestigation(
                     receiveBranchMetrics->mNonblockingReceiveEvents++;
                 }
             };
-        if (checkDeadlock || checkExternalize || checkExternalizeDivergence)
+        if (checkDeadlock || checkExternalize || checkExternalizeDivergence ||
+            printSkipExternalize)
         {
-            config.on_terminal_execution = [terminalCheckState]() {
-                terminalCheckState->mTerminalExecutions.fetch_add(
-                    1, std::memory_order_relaxed);
-            };
-            config.on_execution =
+            auto const hasTerminalChecks =
+                checkDeadlock || checkExternalize || checkExternalizeDivergence;
+            if (hasTerminalChecks)
+            {
+                config.on_terminal_execution = [terminalCheckState]() {
+                    terminalCheckState->mTerminalExecutions.fetch_add(
+                        1, std::memory_order_relaxed);
+                };
+            }
+
+            auto handleTerminalChecks =
                 [terminalCheckState, stopSteps = scenario.mStopSteps,
                  validatorCount, checkDeadlock, checkExternalize,
-                 checkExternalizeDivergence](
-                    auto const& graph) {
+                 checkExternalizeDivergence](auto const& graph) {
                     if (terminalCheckState->mFound.load(
                             std::memory_order_relaxed))
                     {
@@ -830,6 +882,55 @@ runRuntimeGrowthInvestigation(
                                                      std::memory_order_relaxed);
                     throw TerminalCheckError(terminalCheckState->mMessage);
                 };
+
+            if (printSkipExternalize)
+            {
+                auto executionPrintMutex = std::make_shared<std::mutex>();
+                if (hasTerminalChecks)
+                {
+                    config.on_execution =
+                        [executionPrintMutex, scenarioID = scenario.mId,
+                         validatorCount, handleTerminalChecks](
+                            auto const& graph) {
+                            auto skipExternalizeMessage =
+                                findSkipExternalize(graph, validatorCount);
+                            if (skipExternalizeMessage)
+                            {
+                                std::lock_guard<std::mutex> lock(
+                                    *executionPrintMutex);
+                                std::cerr << "["
+                                          << scenarioName(scenarioID) << "] "
+                                          << *skipExternalizeMessage << '\n';
+                            }
+                            handleTerminalChecks(graph);
+                        };
+                }
+                else
+                {
+                    config.on_execution =
+                        [executionPrintMutex, scenarioID = scenario.mId,
+                         validatorCount](auto const& graph) {
+                            auto skipExternalizeMessage =
+                                findSkipExternalize(graph, validatorCount);
+                            if (!skipExternalizeMessage)
+                            {
+                                return;
+                            }
+                            std::lock_guard<std::mutex> lock(
+                                *executionPrintMutex);
+                            std::cerr << "[" << scenarioName(scenarioID)
+                                      << "] " << *skipExternalizeMessage
+                                      << '\n';
+                        };
+                }
+            }
+            else if (hasTerminalChecks)
+            {
+                config.on_execution =
+                    [handleTerminalChecks](auto const& graph) {
+                        handleTerminalChecks(graph);
+                    };
+            }
         }
 
         auto const start = std::chrono::steady_clock::now();
@@ -874,7 +975,8 @@ runFourNodeRuntimeGrowthInvestigation(
     TimerSetLimitSettings timerSetLimitSettings = {},
     bool checkDeadlock = false,
     bool checkExternalize = false,
-    bool checkExternalizeDivergence = false)
+    bool checkExternalizeDivergence = false,
+    bool printSkipExternalize = false)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
@@ -883,7 +985,8 @@ runFourNodeRuntimeGrowthInvestigation(
                                          timerSetLimitSettings,
                                          checkDeadlock,
                                          checkExternalize,
-                                         checkExternalizeDivergence);
+                                         checkExternalizeDivergence,
+                                         printSkipExternalize);
 }
 
 inline std::string
@@ -913,7 +1016,8 @@ printInvestigationResults(std::ostream& out,
                           TimerSetLimitSettings timerSetLimitSettings = {},
                           bool checkDeadlock = false,
                           bool checkExternalize = false,
-                          bool checkExternalizeDivergence = false)
+                          bool checkExternalizeDivergence = false,
+                          bool printSkipExternalize = false)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -932,6 +1036,8 @@ printInvestigationResults(std::ostream& out,
             << " externalize=" << (checkExternalize ? "on" : "off")
             << " externalize_divergence="
             << (checkExternalizeDivergence ? "on" : "off")
+            << " print_skip_externalize="
+            << (printSkipExternalize ? "on" : "off")
             << " prepare_boundary="
             << (nominationOnly ? "1" : "off")
             << " nomination_timer_limit=";

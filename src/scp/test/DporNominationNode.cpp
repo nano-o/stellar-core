@@ -659,7 +659,7 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 std::optional<std::chrono::milliseconds>
 DporNominationNode::getTxSetDownloadWaitTime(Value const&) const
 {
-    return std::nullopt;
+    return getTxSetDownloadTimeout();
 }
 
 std::chrono::milliseconds
@@ -710,9 +710,13 @@ DporNominationNode::emitEnvelope(SCPEnvelope const& envelope)
 }
 
 SCPDriver::ValidationLevel
-DporNominationNode::validateValue(uint64, Value const&, bool)
+DporNominationNode::validateValue(uint64, Value const& value, bool)
 {
-    return SCPDriver::kFullyValidatedValue;
+    if (isSkipLedgerValue(value))
+    {
+        return SCPDriver::kFullyValidatedValue;
+    }
+    return SCPDriver::kAwaitingDownload;
 }
 
 Value

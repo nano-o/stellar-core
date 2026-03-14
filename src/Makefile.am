@@ -72,7 +72,8 @@ scp_dpor_nomination_investigation_SOURCES = \
 	$(SCP_DPOR_NOMINATION_INVESTIGATION_MAIN)
 scp_dpor_nomination_investigation_DEPENDENCIES = \
 	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
-	$(LIBRUST_STELLAR_CORE)
+	$(LIBRUST_STELLAR_CORE) \
+	libdpor_tests.a
 scp_dpor_nomination_investigation_CXXFLAGS = $(AM_CXXFLAGS) $(CXXFLAGS) -std=c++20 -DFMT_CONSTEVAL=
 scp_dpor_nomination_investigation_LDADD = \
 	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \

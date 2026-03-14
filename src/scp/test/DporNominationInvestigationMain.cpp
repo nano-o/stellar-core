@@ -24,6 +24,7 @@ struct CommandLineOptions
     bool mCheckDeadlock = false;
     bool mCheckExternalize = false;
     bool mCheckExternalizeDivergence = false;
+    bool mPrintSkipExternalize = false;
     TimeoutSettings mTimeoutSettings;
     TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
@@ -39,6 +40,7 @@ printUsage(char const* argv0)
                  " [--deadlock]"
                  " [--externalize]"
                  " [--externalize-divergence]"
+                 " [--print-skip-externalize]"
                  " [--nomination-timer-limit N]"
                  " [--balloting-timer-limit N]"
                  " [--scenario ID] [--nomination-timeouts]"
@@ -54,6 +56,8 @@ printUsage(char const* argv0)
                  "EXTERNALIZE message\n"
               << "--externalize-divergence fails if a terminal execution has "
                  "two nodes externalize different values\n"
+              << "--print-skip-externalize prints when an explored execution "
+                 "contains a skip EXTERNALIZE message\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
@@ -163,6 +167,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--externalize-divergence")
         {
             options.mCheckExternalizeDivergence = true;
+            continue;
+        }
+        if (arg == "--print-skip-externalize")
+        {
+            options.mPrintSkipExternalize = true;
             continue;
         }
         if (arg == "--balloting-timeouts")
@@ -290,7 +299,8 @@ main(int argc, char* argv[])
             options.mNumNodes, options.mTimeoutSettings,
             options.mTimerSetLimitSettings, options.mCheckDeadlock,
             options.mCheckExternalize,
-            options.mCheckExternalizeDivergence);
+            options.mCheckExternalizeDivergence,
+            options.mPrintSkipExternalize);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
@@ -298,7 +308,8 @@ main(int argc, char* argv[])
                                   options.mTimerSetLimitSettings,
                                   options.mCheckDeadlock,
                                   options.mCheckExternalize,
-                                  options.mCheckExternalizeDivergence);
+                                  options.mCheckExternalizeDivergence,
+                                  options.mPrintSkipExternalize);
 
         for (auto const& result : results)
         {
