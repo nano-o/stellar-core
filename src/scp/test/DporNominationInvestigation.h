@@ -531,6 +531,45 @@ findTerminalDeadlock(GraphT const& graph, ProgressSteps const& stopSteps)
 
 template <typename GraphT>
 inline std::optional<std::string>
+findTerminationWithoutExternalize(GraphT const& graph,
+                                  std::size_t validatorCount)
+{
+    if (isErrorExecution(graph, validatorCount))
+    {
+        return std::nullopt;
+    }
+
+    for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
+    {
+        auto const* send = dpor::model::as_send(graph.event(eventID));
+        if (send == nullptr)
+        {
+            continue;
+        }
+
+        auto const& envelope = send->value.mEnvelope;
+        if (envelope.statement.pledges.type() == SCP_ST_EXTERNALIZE)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::vector<std::size_t> stepCounts;
+    stepCounts.reserve(validatorCount);
+    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+    {
+        auto const tid = DporNominationDporAdapter::toThreadID(nodeIndex);
+        stepCounts.push_back(graph.thread_event_count(tid));
+    }
+
+    std::ostringstream out;
+    out << "termination: reached terminal execution without externalize"
+        << " thread_steps=" << formatStepCounts(stepCounts);
+    return out.str();
+}
+
+template <typename GraphT>
+inline std::optional<std::string>
 findExternalizeDivergence(GraphT const& graph, std::size_t validatorCount)
 {
     if (isErrorExecution(graph, validatorCount))
@@ -770,6 +809,7 @@ runRuntimeGrowthInvestigation(
     TimeoutSettings timeoutSettings = {},
     TimerSetLimitSettings timerSetLimitSettings = {},
     bool checkDeadlock = false,
+    bool checkTermination = false,
     bool checkExternalize = false,
     bool checkExternalizeDivergence = false,
     bool printSkipExternalize = false)
@@ -828,11 +868,13 @@ runRuntimeGrowthInvestigation(
                     receiveBranchMetrics->mNonblockingReceiveEvents++;
                 }
             };
-        if (checkDeadlock || checkExternalize || checkExternalizeDivergence ||
+        if (checkDeadlock || checkTermination || checkExternalize ||
+            checkExternalizeDivergence ||
             printSkipExternalize)
         {
             auto const hasTerminalChecks =
-                checkDeadlock || checkExternalize || checkExternalizeDivergence;
+                checkDeadlock || checkTermination || checkExternalize ||
+                checkExternalizeDivergence;
             if (hasTerminalChecks)
             {
                 config.on_terminal_execution = [terminalCheckState]() {
@@ -843,8 +885,8 @@ runRuntimeGrowthInvestigation(
 
             auto handleTerminalChecks =
                 [terminalCheckState, stopSteps = scenario.mStopSteps,
-                 validatorCount, checkDeadlock, checkExternalize,
-                 checkExternalizeDivergence](auto const& graph) {
+                 validatorCount, checkDeadlock, checkTermination,
+                 checkExternalize, checkExternalizeDivergence](auto const& graph) {
                     if (terminalCheckState->mFound.load(
                             std::memory_order_relaxed))
                     {
@@ -852,15 +894,18 @@ runRuntimeGrowthInvestigation(
                     }
 
                     std::optional<std::string> error;
-                    if (checkExternalize)
+                    if (checkTermination)
+                    {
+                        error =
+                            findTerminationWithoutExternalize(graph, validatorCount);
+                    }
+                    if (!error && checkExternalize)
                     {
                         error = findExternalize(graph, validatorCount);
                     }
-                    if (checkExternalizeDivergence)
+                    if (!error && checkExternalizeDivergence)
                     {
-                        error = error ? std::move(error)
-                                      :
-                            findExternalizeDivergence(graph, validatorCount);
+                        error = findExternalizeDivergence(graph, validatorCount);
                     }
                     if (!error && checkDeadlock)
                     {
@@ -974,6 +1019,7 @@ runFourNodeRuntimeGrowthInvestigation(
     TimeoutSettings timeoutSettings = {},
     TimerSetLimitSettings timerSetLimitSettings = {},
     bool checkDeadlock = false,
+    bool checkTermination = false,
     bool checkExternalize = false,
     bool checkExternalizeDivergence = false,
     bool printSkipExternalize = false)
@@ -984,6 +1030,7 @@ runFourNodeRuntimeGrowthInvestigation(
                                          timeoutSettings,
                                          timerSetLimitSettings,
                                          checkDeadlock,
+                                         checkTermination,
                                          checkExternalize,
                                          checkExternalizeDivergence,
                                          printSkipExternalize);
@@ -1015,6 +1062,7 @@ printInvestigationResults(std::ostream& out,
                           TimeoutSettings timeoutSettings,
                           TimerSetLimitSettings timerSetLimitSettings = {},
                           bool checkDeadlock = false,
+                          bool checkTermination = false,
                           bool checkExternalize = false,
                           bool checkExternalizeDivergence = false,
                           bool printSkipExternalize = false)
@@ -1033,6 +1081,7 @@ printInvestigationResults(std::ostream& out,
             << " balloting_timeouts="
             << (timeoutSettings.mBalloting ? "on" : "off")
             << " deadlock=" << (checkDeadlock ? "on" : "off")
+            << " termination=" << (checkTermination ? "on" : "off")
             << " externalize=" << (checkExternalize ? "on" : "off")
             << " externalize_divergence="
             << (checkExternalizeDivergence ? "on" : "off")

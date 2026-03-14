@@ -674,6 +674,30 @@ TEST_CASE("dpor nomination investigation deadlock check treats unbounded step "
             std::string::npos);
 }
 
+TEST_CASE("dpor nomination investigation can detect terminal executions "
+          "without externalize", "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const results =
+        dpor_nomination_investigation::runRuntimeGrowthInvestigation(
+            1, std::size_t{10},
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                UnrestrictedFollowers,
+            true, kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::TimeoutSettings{},
+            dpor_nomination_investigation::TimerSetLimitSettings{}, false,
+            true);
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.kind ==
+            VerifyResultKind::ErrorFound);
+    REQUIRE(results.front().mVerifyResult.executions_explored == 1);
+    REQUIRE(results.front().mVerifyResult.message.find(
+                "termination: reached terminal execution without externalize") !=
+            std::string::npos);
+}
+
 TEST_CASE("dpor nomination investigation can start directly in balloting with "
           "a threshold split", "[scp][dpor][investigation]")
 {

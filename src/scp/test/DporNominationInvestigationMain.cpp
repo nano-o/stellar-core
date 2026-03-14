@@ -22,6 +22,7 @@ struct CommandLineOptions
     std::size_t mNumNodes = kDefaultValidatorCount;
     bool mNominationOnly = false;
     bool mCheckDeadlock = false;
+    bool mCheckTermination = false;
     bool mCheckExternalize = false;
     bool mCheckExternalizeDivergence = false;
     bool mPrintSkipExternalize = false;
@@ -38,6 +39,7 @@ printUsage(char const* argv0)
               << " [--workers N] [--num-nodes N] [--depth N]"
                  " [--nomination-only]"
                  " [--deadlock]"
+                 " [--termination]"
                  " [--externalize]"
                  " [--externalize-divergence]"
                  " [--print-skip-externalize]"
@@ -52,6 +54,8 @@ printUsage(char const* argv0)
               << "--depth limits each thread to N steps (0 = unbounded)\n"
               << "--deadlock fails if a terminal execution leaves any thread "
                  "short of its step limit (unbounded counts as unreached)\n"
+              << "--termination fails if a terminal execution contains no "
+                 "EXTERNALIZE message\n"
               << "--externalize fails if a terminal execution contains any "
                  "EXTERNALIZE message\n"
               << "--externalize-divergence fails if a terminal execution has "
@@ -157,6 +161,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--deadlock")
         {
             options.mCheckDeadlock = true;
+            continue;
+        }
+        if (arg == "--termination")
+        {
+            options.mCheckTermination = true;
             continue;
         }
         if (arg == "--externalize")
@@ -298,6 +307,7 @@ main(int argc, char* argv[])
             options.mScenario, options.mNominationOnly,
             options.mNumNodes, options.mTimeoutSettings,
             options.mTimerSetLimitSettings, options.mCheckDeadlock,
+            options.mCheckTermination,
             options.mCheckExternalize,
             options.mCheckExternalizeDivergence,
             options.mPrintSkipExternalize);
@@ -307,6 +317,7 @@ main(int argc, char* argv[])
                                   options.mTimeoutSettings,
                                   options.mTimerSetLimitSettings,
                                   options.mCheckDeadlock,
+                                  options.mCheckTermination,
                                   options.mCheckExternalize,
                                   options.mCheckExternalizeDivergence,
                                   options.mPrintSkipExternalize);
