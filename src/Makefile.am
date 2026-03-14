@@ -57,6 +57,11 @@ endif
 if BUILD_TESTS
 SCP_DPOR_NOMINATION_INVESTIGATION_MAIN = \
 	scp/test/DporNominationInvestigationMain.cpp
+# Build DPOR test files as a convenience library with C++20 (the external/dpor
+# headers use concepts and requires-clauses).
+noinst_LIBRARIES = libdpor_tests.a
+libdpor_tests_a_SOURCES = $(SRC_DPOR_CXX_FILES)
+libdpor_tests_a_CXXFLAGS = $(AM_CXXFLAGS) $(CXXFLAGS) -std=c++20 -DFMT_CONSTEVAL=
 stellar_core_SOURCES = \
 	main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp \
 	$(SRC_CXX_FILES) \
@@ -68,9 +73,11 @@ scp_dpor_nomination_investigation_SOURCES = \
 scp_dpor_nomination_investigation_DEPENDENCIES = \
 	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
 	$(LIBRUST_STELLAR_CORE)
+scp_dpor_nomination_investigation_CXXFLAGS = $(AM_CXXFLAGS) $(CXXFLAGS) -std=c++20 -DFMT_CONSTEVAL=
 scp_dpor_nomination_investigation_LDADD = \
 	$(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS)) \
-	$(stellar_core_LDADD)
+	$(stellar_core_LDADD) \
+	libdpor_tests.a
 CARGO_FEATURE_TESTUTILS = --features testutils
 else # !BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES)
@@ -92,6 +99,9 @@ stellar_core_LDADD = $(soci_LIBS) $(libmedida_LIBS)		\
 	$(top_builddir)/lib/lib3rdparty.a $(sqlite3_LIBS)	\
 	$(libpq_LIBS) $(xdrpp_LIBS) $(libsodium_LIBS) $(libunwind_LIBS) \
 	$(libtcmalloc_LIBS)
+if BUILD_TESTS
+stellar_core_DEPENDENCIES = libdpor_tests.a
+endif
 
 TESTDATA_DIR = testdata
 TEST_FILES = $(TESTDATA_DIR)/stellar-core_example.cfg $(TESTDATA_DIR)/stellar-core_standalone.cfg \
