@@ -88,16 +88,6 @@ DporNominationSanityCheckHarness::getNode(std::size_t index) const
 }
 
 void
-DporNominationSanityCheckHarness::setPriorityLookup(
-    std::function<uint64(NodeID const&)> const& fn)
-{
-    for (auto& node : mNodes)
-    {
-        node->setPriorityLookup(fn);
-    }
-}
-
-void
 DporNominationSanityCheckHarness::setValueHash(
     std::function<uint64(Value const&)> const& fn)
 {

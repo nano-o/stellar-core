@@ -25,8 +25,6 @@ namespace dpor_nomination_test
 {
 
 constexpr uint64_t kSlotIndex = 0;
-constexpr uint64_t kTopLeaderPriority = std::numeric_limits<uint64_t>::max();
-
 class ScopedPartitionLogLevel
 {
   public:
@@ -80,23 +78,6 @@ makeNodeIndexMap(std::vector<NodeID> const& nodeIDs)
         indexMap[nodeIDs[i]] = i + 1;
     }
     return indexMap;
-}
-
-inline DporNominationNode::Configuration
-makeTopLeaderConfiguration(std::vector<NodeID> const& nodeIDs,
-                           std::size_t leaderIndex,
-                           uint32_t nominationRoundBoundary =
-                               DporNominationNode::
-                                   DEFAULT_NOMINATION_ROUND_BOUNDARY)
-{
-    DporNominationNode::Configuration config;
-    config.mNominationRoundBoundary = nominationRoundBoundary;
-    auto sharedNodeIDs = std::make_shared<std::vector<NodeID> const>(nodeIDs);
-    config.mPriorityLookup = [sharedNodeIDs, leaderIndex](NodeID const& nodeID) {
-        return nodeID == sharedNodeIDs->at(leaderIndex) ? kTopLeaderPriority
-                                                        : 1;
-    };
-    return config;
 }
 
 inline DporNominationDporAdapter::SendLabel const&

@@ -9,6 +9,7 @@
 #include "scp/QuorumSetUtils.h"
 #include "scp/test/DporNominationDporAdapter.h"
 #include "scp/test/DporNominationSanityCheckHarness.h"
+#include "scp/test/DporNominationTestUtils.h"
 #include "util/Logging.h"
 #include "xdrpp/marshal.h"
 
@@ -113,17 +114,6 @@ computeTwoThirdsThreshold(std::size_t validatorCount)
     return (2 * validatorCount + 2) / 3;
 }
 
-inline std::map<NodeID, std::size_t>
-makeNodeIndexMap(std::vector<NodeID> const& nodeIDs)
-{
-    std::map<NodeID, std::size_t> indexMap;
-    for (std::size_t i = 0; i < nodeIDs.size(); ++i)
-    {
-        indexMap[nodeIDs[i]] = i + 1;
-    }
-    return indexMap;
-}
-
 struct ThresholdFixture
 {
     std::size_t mValidatorCount;
@@ -206,7 +196,8 @@ struct ThresholdFixture
         , mAdapter(mValidators, mQSet, kSlotIndex, mPreviousValue,
                    mInitialValues, [&]() {
                        DporNominationNode::Configuration config;
-                       config.mNodeIndexMap = makeNodeIndexMap(mNodeIDs);
+                       config.mNodeIndexMap =
+                           dpor_nomination_test::makeNodeIndexMap(mNodeIDs);
                        config.mNominationRoundBoundary =
                            kDisabledNominationRoundBoundary;
                        config.mBallotingBoundary = nominationOnly

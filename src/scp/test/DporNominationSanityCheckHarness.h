@@ -44,8 +44,6 @@ class DporNominationSanityCheckHarness
     DporNominationNode const&
     getNode(std::size_t index) const;
 
-    void setPriorityLookup(std::function<uint64(NodeID const&)> const& fn);
-
     void setValueHash(std::function<uint64(Value const&)> const& fn);
 
     void setCombineCandidates(
