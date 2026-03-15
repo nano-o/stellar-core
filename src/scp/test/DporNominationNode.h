@@ -44,6 +44,7 @@ class DporNominationNode : public SCPDriver
     // Default replay/test cutoff for nomination-only exploration.
     static constexpr uint32_t DEFAULT_NOMINATION_ROUND_BOUNDARY = 2;
     static constexpr uint32_t DEFAULT_BALLOTING_BOUNDARY = 1;
+    static constexpr uint32_t DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS = 1000;
     static constexpr BoundaryMode DEFAULT_BOUNDARY_MODE =
         BoundaryMode::Prepare;
 
@@ -66,6 +67,9 @@ class DporNominationNode : public SCPDriver
         uint32_t mNominationRoundBoundary;
         uint32_t mBallotingBoundary;
         BoundaryMode mBoundaryMode;
+        std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
+        std::map<NodeID, std::vector<std::chrono::milliseconds>>
+            mTxSetDownloadWaitTimesByNode;
         std::optional<uint32_t> mNominationTimerSetLimit;
         std::optional<uint32_t> mBallotingTimerSetLimit;
     };
@@ -154,6 +158,7 @@ class DporNominationNode : public SCPDriver
         std::vector<ReplayTimerSnapshot> mTimers;
         std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
         std::vector<ReplayNominationRoundSnapshot> mNominationRounds;
+        std::size_t mTxSetDownloadWaitTimeCallCount{};
         bool mHasCrossedNominationBoundary{};
         std::optional<SCPEnvelope> mNominationBoundaryEnvelope;
     };
@@ -278,6 +283,8 @@ class DporNominationNode : public SCPDriver
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
+    std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
+    mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;
 

@@ -23,6 +23,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <ostream>
@@ -153,7 +154,10 @@ struct ThresholdFixture
         InitialValuePattern initialValuePattern =
             InitialValuePattern::UniquePerNode,
         DporNominationDporAdapter::InitialStateMode initialStateMode =
-            DporNominationDporAdapter::InitialStateMode::Nomination)
+            DporNominationDporAdapter::InitialStateMode::Nomination,
+        std::vector<std::chrono::milliseconds> txSetDownloadWaitTimes = {},
+        std::vector<std::vector<std::chrono::milliseconds>>
+            perNodeTxSetDownloadWaitTimes = {})
         : mValidatorCount(validatorCount)
         , mThreshold(computeTwoThirdsThreshold(validatorCount))
         , mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -220,6 +224,24 @@ struct ThresholdFixture
                                                        : kDisabledBallotingBoundary;
                        config.mBoundaryMode =
                            DporNominationNode::BoundaryMode::Prepare;
+                       config.mTxSetDownloadWaitTimes =
+                           std::move(txSetDownloadWaitTimes);
+                       if (!perNodeTxSetDownloadWaitTimes.empty())
+                       {
+                           if (perNodeTxSetDownloadWaitTimes.size() !=
+                               mNodeIDs.size())
+                           {
+                               throw std::invalid_argument(
+                                   "perNodeTxSetDownloadWaitTimes must match "
+                                   "validator count");
+                           }
+                           for (std::size_t i = 0; i < mNodeIDs.size(); ++i)
+                           {
+                               config.mTxSetDownloadWaitTimesByNode.emplace(
+                                   mNodeIDs.at(i),
+                                   perNodeTxSetDownloadWaitTimes.at(i));
+                           }
+                       }
                        config.mNominationTimerSetLimit =
                            timerSetLimitSettings.mNomination;
                        config.mBallotingTimerSetLimit =
@@ -316,6 +338,9 @@ struct InvestigationScenario
         DporNominationDporAdapter::InitialStateMode::Nomination};
     InitialValuePattern mInitialValuePattern{
         InitialValuePattern::UniquePerNode};
+    std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
+    std::vector<std::vector<std::chrono::milliseconds>>
+        mPerNodeTxSetDownloadWaitTimes;
 };
 
 struct ReplayMetricsSnapshot
@@ -724,6 +749,71 @@ findSkipExternalize(GraphT const& graph, std::size_t validatorCount)
     return std::nullopt;
 }
 
+template <typename GraphT>
+inline std::optional<std::string>
+findFalsy1SkipPrepareAfterNonSkipSameBallot(GraphT const& graph,
+                                            std::size_t validatorCount)
+{
+    if (isErrorExecution(graph, validatorCount))
+    {
+        return std::nullopt;
+    }
+
+    struct PrepareState
+    {
+        bool mSawNonSkipPrepare{false};
+        Value mFirstNonSkipValue;
+    };
+
+    std::map<std::pair<dpor::model::ThreadId, uint32_t>, PrepareState>
+        prepareStateByThreadAndCounter;
+
+    for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
+    {
+        auto const* send = dpor::model::as_send(graph.event(eventID));
+        if (send == nullptr)
+        {
+            continue;
+        }
+
+        auto const& envelope = send->value.mEnvelope;
+        if (envelope.statement.pledges.type() != SCP_ST_PREPARE)
+        {
+            continue;
+        }
+
+        auto const thread = graph.event(eventID).thread;
+        auto const& ballot = envelope.statement.pledges.prepare().ballot;
+        auto& state =
+            prepareStateByThreadAndCounter[{thread, ballot.counter}];
+        if (!isDporSkipValue(ballot.value))
+        {
+            if (!state.mSawNonSkipPrepare)
+            {
+                state.mSawNonSkipPrepare = true;
+                state.mFirstNonSkipValue = ballot.value;
+            }
+            continue;
+        }
+
+        if (!state.mSawNonSkipPrepare)
+        {
+            continue;
+        }
+
+        std::ostringstream out;
+        out << "falsy-1: thread " << thread
+            << " sent skip PREPARE counter=" << ballot.counter << " value="
+            << formatValueAbbrev(ballot.value)
+            << " after non-skip PREPARE value="
+            << formatValueAbbrev(state.mFirstNonSkipValue)
+            << " in the same ballot counter at event " << eventID;
+        return out.str();
+    }
+
+    return std::nullopt;
+}
+
 inline std::vector<InvestigationScenario>
 runtimeGrowthScenarios(std::size_t validatorCount)
 {
@@ -774,7 +864,29 @@ runtimeGrowthScenarios(std::size_t validatorCount)
          kMaxDepth / 8,
          false,
          DporNominationDporAdapter::InitialStateMode::Balloting,
-         InitialValuePattern::ThresholdSplitXY},
+         InitialValuePattern::ThresholdSplitXY,
+         {},
+         [&]() {
+             auto const belowTimeout = std::chrono::milliseconds{
+                 DporNominationNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1};
+             auto const aboveTimeout = std::chrono::milliseconds{
+                 DporNominationNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1};
+             auto const threshold = computeTwoThirdsThreshold(validatorCount);
+             std::vector<std::vector<std::chrono::milliseconds>>
+                 waitTimesByNode(validatorCount);
+             for (std::size_t i = 0; i < validatorCount; ++i)
+             {
+                 if (i < threshold)
+                 {
+                     waitTimesByNode.at(i) = {belowTimeout, aboveTimeout};
+                 }
+                 else
+                 {
+                     waitTimesByNode.at(i) = {belowTimeout};
+                 }
+             }
+             return waitTimesByNode;
+         }()},
     };
 }
 
@@ -837,7 +949,8 @@ runRuntimeGrowthInvestigation(
     bool checkExternalizeDivergence = false,
     bool printSkipExternalize = false,
     dpor::model::CommunicationModel communicationModel =
-        dpor::model::CommunicationModel::Async)
+        dpor::model::CommunicationModel::Async,
+    bool checkFalsy1 = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -862,7 +975,9 @@ runRuntimeGrowthInvestigation(
         ThresholdFixture fixture(
             validatorCount, nominationOnly,
             timerSetLimitSettings, scenario.mInitialValuePattern,
-            scenario.mInitialStateMode);
+            scenario.mInitialStateMode,
+            scenario.mTxSetDownloadWaitTimes,
+            scenario.mPerNodeTxSetDownloadWaitTimes);
         fixture.mAdapter.setTimeoutModes(timeoutSettings.mNomination,
                                          timeoutSettings.mBalloting);
 
@@ -895,13 +1010,13 @@ runRuntimeGrowthInvestigation(
                 }
             };
         if (checkDeadlock || checkTermination || checkExternalize ||
-            checkExternalizeDivergence ||
-            printSkipExternalize)
+            checkExternalizeDivergence || printSkipExternalize ||
+            checkFalsy1)
         {
-            auto const hasTerminalChecks =
+            auto const hasExecutionChecks =
                 checkDeadlock || checkTermination || checkExternalize ||
-                checkExternalizeDivergence;
-            if (hasTerminalChecks)
+                checkExternalizeDivergence || checkFalsy1;
+            if (hasExecutionChecks)
             {
                 config.on_terminal_execution = [terminalCheckState]() {
                     terminalCheckState->mTerminalExecutions.fetch_add(
@@ -909,10 +1024,11 @@ runRuntimeGrowthInvestigation(
                 };
             }
 
-            auto handleTerminalChecks =
+            auto handleExecutionChecks =
                 [terminalCheckState, stopSteps = scenario.mStopSteps,
                  validatorCount, checkDeadlock, checkTermination,
-                 checkExternalize, checkExternalizeDivergence](auto const& graph) {
+                 checkExternalize, checkExternalizeDivergence,
+                 checkFalsy1](auto const& graph) {
                     if (terminalCheckState->mFound.load(
                             std::memory_order_relaxed))
                     {
@@ -920,7 +1036,12 @@ runRuntimeGrowthInvestigation(
                     }
 
                     std::optional<std::string> error;
-                    if (checkTermination)
+                    if (checkFalsy1)
+                    {
+                        error = findFalsy1SkipPrepareAfterNonSkipSameBallot(
+                            graph, validatorCount);
+                    }
+                    if (!error && checkTermination)
                     {
                         error =
                             findTerminationWithoutExternalize(graph, stopSteps);
@@ -957,11 +1078,11 @@ runRuntimeGrowthInvestigation(
             if (printSkipExternalize)
             {
                 auto executionPrintMutex = std::make_shared<std::mutex>();
-                if (hasTerminalChecks)
+                if (hasExecutionChecks)
                 {
                     config.on_execution =
                         [executionPrintMutex, scenarioID = scenario.mId,
-                         validatorCount, handleTerminalChecks](
+                         validatorCount, handleExecutionChecks](
                             auto const& graph) {
                             auto skipExternalizeMessage =
                                 findSkipExternalize(graph, validatorCount);
@@ -973,7 +1094,7 @@ runRuntimeGrowthInvestigation(
                                           << scenarioName(scenarioID) << "] "
                                           << *skipExternalizeMessage << '\n';
                             }
-                            handleTerminalChecks(graph);
+                            handleExecutionChecks(graph);
                         };
                 }
                 else
@@ -995,11 +1116,11 @@ runRuntimeGrowthInvestigation(
                         };
                 }
             }
-            else if (hasTerminalChecks)
+            else if (hasExecutionChecks)
             {
                 config.on_execution =
-                    [handleTerminalChecks](auto const& graph) {
-                        handleTerminalChecks(graph);
+                    [handleExecutionChecks](auto const& graph) {
+                        handleExecutionChecks(graph);
                     };
             }
         }
@@ -1050,7 +1171,8 @@ runFourNodeRuntimeGrowthInvestigation(
     bool checkExternalizeDivergence = false,
     bool printSkipExternalize = false,
     dpor::model::CommunicationModel communicationModel =
-        dpor::model::CommunicationModel::Async)
+        dpor::model::CommunicationModel::Async,
+    bool checkFalsy1 = false)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
@@ -1062,7 +1184,8 @@ runFourNodeRuntimeGrowthInvestigation(
                                          checkExternalize,
                                          checkExternalizeDivergence,
                                          printSkipExternalize,
-                                         communicationModel);
+                                         communicationModel,
+                                         checkFalsy1);
 }
 
 inline std::string
@@ -1096,7 +1219,8 @@ printInvestigationResults(std::ostream& out,
                           bool checkExternalizeDivergence = false,
                           bool printSkipExternalize = false,
                           dpor::model::CommunicationModel communicationModel =
-                              dpor::model::CommunicationModel::Async)
+                              dpor::model::CommunicationModel::Async,
+                          bool checkFalsy1 = false)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -1120,6 +1244,7 @@ printInvestigationResults(std::ostream& out,
             << (checkExternalizeDivergence ? "on" : "off")
             << " print_skip_externalize="
             << (printSkipExternalize ? "on" : "off")
+            << " falsy_1=" << (checkFalsy1 ? "on" : "off")
             << " prepare_boundary="
             << (nominationOnly ? "1" : "off")
             << " nomination_timer_limit=";

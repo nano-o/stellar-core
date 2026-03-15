@@ -28,6 +28,7 @@ struct CommandLineOptions
     bool mCheckExternalize = false;
     bool mCheckExternalizeDivergence = false;
     bool mPrintSkipExternalize = false;
+    bool mCheckFalsy1 = false;
     TimeoutSettings mTimeoutSettings;
     TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
@@ -45,6 +46,7 @@ printUsage(char const* argv0)
                  " [--termination]"
                  " [--externalize]"
                  " [--externalize-divergence]"
+                 " [--falsy-1]"
                  " [--print-skip-externalize]"
                  " [--nomination-timer-limit N]"
                  " [--balloting-timer-limit N]"
@@ -65,6 +67,9 @@ printUsage(char const* argv0)
                  "EXTERNALIZE message\n"
               << "--externalize-divergence fails if a terminal execution has "
                  "two nodes externalize different values\n"
+              << "--falsy-1 fails if a node sends PREPARE(n, skip(...)) after "
+                 "already sending PREPARE(n, non-skip) in the same ballot "
+                 "counter\n"
               << "--print-skip-externalize prints when an explored execution "
                  "contains a skip EXTERNALIZE message\n"
               << "--nomination-only stops exploration at the first "
@@ -187,6 +192,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--externalize-divergence")
         {
             options.mCheckExternalizeDivergence = true;
+            continue;
+        }
+        if (arg == "--falsy-1")
+        {
+            options.mCheckFalsy1 = true;
             continue;
         }
         if (arg == "--print-skip-externalize")
@@ -322,7 +332,8 @@ main(int argc, char* argv[])
             options.mCheckExternalize,
             options.mCheckExternalizeDivergence,
             options.mPrintSkipExternalize,
-            options.mCommunicationModel);
+            options.mCommunicationModel,
+            options.mCheckFalsy1);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
@@ -333,7 +344,8 @@ main(int argc, char* argv[])
                                   options.mCheckExternalize,
                                   options.mCheckExternalizeDivergence,
                                   options.mPrintSkipExternalize,
-                                  options.mCommunicationModel);
+                                  options.mCommunicationModel,
+                                  options.mCheckFalsy1);
 
         for (auto const& result : results)
         {

@@ -165,6 +165,16 @@ DporNominationNode::applyConfiguration(Configuration const& config)
                              ? DEFAULT_BALLOTING_BOUNDARY
                              : config.mBallotingBoundary;
     mBoundaryMode = config.mBoundaryMode;
+    auto const nodeWaitTimesIt =
+        config.mTxSetDownloadWaitTimesByNode.find(getNodeID());
+    if (nodeWaitTimesIt != config.mTxSetDownloadWaitTimesByNode.end())
+    {
+        mTxSetDownloadWaitTimes = nodeWaitTimesIt->second;
+    }
+    else
+    {
+        mTxSetDownloadWaitTimes = config.mTxSetDownloadWaitTimes;
+    }
     mNominationTimerSetLimit = config.mNominationTimerSetLimit;
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
@@ -189,6 +199,7 @@ DporNominationNode::clearReplayState()
     mTimers.clear();
     mTimerSetCountByKey.clear();
     mNominationRoundBySlot.clear();
+    mTxSetDownloadWaitTimeCallCount = 0;
     mHasCrossedNominationBoundary = false;
     mNominationBoundaryEnvelope.reset();
 }
@@ -446,6 +457,8 @@ DporNominationNode::snapshotReplayBaseline(uint64 slotIndex) const
             ReplayNominationRoundSnapshot{.mSlotIndex = snapshotSlotIndex,
                                           .mRound = round});
     }
+    baseline.mTxSetDownloadWaitTimeCallCount =
+        mTxSetDownloadWaitTimeCallCount;
     baseline.mHasCrossedNominationBoundary = mHasCrossedNominationBoundary;
     baseline.mNominationBoundaryEnvelope = mNominationBoundaryEnvelope;
     return baseline;
@@ -597,6 +610,8 @@ DporNominationNode::restoreReplayBaseline(ReplayBaseline const& baseline)
         mNominationRoundBySlot[nominationRound.mSlotIndex] =
             nominationRound.mRound;
     }
+    mTxSetDownloadWaitTimeCallCount =
+        baseline.mTxSetDownloadWaitTimeCallCount;
     mHasCrossedNominationBoundary = baseline.mHasCrossedNominationBoundary;
     mNominationBoundaryEnvelope = baseline.mNominationBoundaryEnvelope;
 }
@@ -659,13 +674,24 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 std::optional<std::chrono::milliseconds>
 DporNominationNode::getTxSetDownloadWaitTime(Value const&) const
 {
-    return getTxSetDownloadTimeout();
+    if (mTxSetDownloadWaitTimes.empty())
+    {
+        return getTxSetDownloadTimeout();
+    }
+
+    auto index = mTxSetDownloadWaitTimeCallCount;
+    if (index >= mTxSetDownloadWaitTimes.size())
+    {
+        index = mTxSetDownloadWaitTimes.size() - 1;
+    }
+    ++mTxSetDownloadWaitTimeCallCount;
+    return mTxSetDownloadWaitTimes[index];
 }
 
 std::chrono::milliseconds
 DporNominationNode::getTxSetDownloadTimeout() const
 {
-    return std::chrono::milliseconds{1000};
+    return std::chrono::milliseconds{DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS};
 }
 
 void
