@@ -499,6 +499,103 @@ formatValueAbbrev(Value const& value)
     return hexAbbrev(ByteSlice(value.data(), value.size()));
 }
 
+inline std::string
+formatEnvelopeSummary(SCPEnvelope const& envelope)
+{
+    std::ostringstream out;
+    switch (envelope.statement.pledges.type())
+    {
+    case SCP_ST_NOMINATE:
+    {
+        auto const& nomination = envelope.statement.pledges.nominate();
+        out << "nom(v=" << nomination.votes.size()
+            << ",a=" << nomination.accepted.size() << ")";
+        break;
+    }
+    case SCP_ST_PREPARE:
+    {
+        auto const& prepare = envelope.statement.pledges.prepare();
+        out << "prepare(b=" << prepare.ballot.counter;
+        if (prepare.prepared)
+        {
+            out << ",p=" << prepare.prepared->counter;
+        }
+        if (prepare.preparedPrime)
+        {
+            out << ",p'=" << prepare.preparedPrime->counter;
+        }
+        out << ")";
+        break;
+    }
+    case SCP_ST_CONFIRM:
+    {
+        auto const& confirm = envelope.statement.pledges.confirm();
+        out << "confirm(b=" << confirm.ballot.counter << ",p="
+            << confirm.nPrepared << ")";
+        break;
+    }
+    case SCP_ST_EXTERNALIZE:
+    {
+        auto const& externalize = envelope.statement.pledges.externalize();
+        out << "ext(c=" << externalize.commit.counter << ",h="
+            << externalize.nH << ")";
+        break;
+    }
+    default:
+        out << "stmt(" << static_cast<int>(envelope.statement.pledges.type())
+            << ")";
+        break;
+    }
+    return out.str();
+}
+
+inline std::string
+formatTraceSummary(DporNominationDporAdapter::ThreadTrace const& trace)
+{
+    std::ostringstream out;
+    bool first = true;
+    for (auto const& observed : trace)
+    {
+        if (!first)
+        {
+            out << ", ";
+        }
+        first = false;
+
+        if (observed.is_bottom())
+        {
+            out << "timer";
+            continue;
+        }
+
+        auto const& delivery = observed.value();
+        out << "recv<-" << delivery.mSenderThread << ":"
+            << formatEnvelopeSummary(delivery.mEnvelope);
+    }
+
+    if (first)
+    {
+        out << "start";
+    }
+    return out.str();
+}
+
+template <typename GraphT>
+inline std::string
+formatExecutionSummary(GraphT const& graph, std::size_t validatorCount)
+{
+    std::ostringstream out;
+    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+    {
+        auto const tid = DporNominationDporAdapter::toThreadID(nodeIndex);
+        auto trace = graph.thread_trace(tid);
+        out << "\n  n" << nodeIndex << " steps="
+            << graph.thread_event_count(tid) << " trace=["
+            << formatTraceSummary(trace) << "]";
+    }
+    return out.str();
+}
+
 inline bool
 isDporSkipValue(Value const& value)
 {
@@ -1060,7 +1157,8 @@ runRuntimeGrowthInvestigation(
 
             auto handleExecutionChecks =
                 [terminalCheckState, stopSteps = scenario.mStopSteps,
-                 validatorCount, checkDeadlock, checkTermination,
+                 scenarioID = scenario.mId, validatorCount, checkDeadlock,
+                 checkTermination,
                  checkExternalize, checkExternalizeDivergence,
                  checkFalsy1](auto const& graph) {
                     if (terminalCheckState->mFound.load(
@@ -1103,9 +1201,13 @@ runRuntimeGrowthInvestigation(
                     {
                         return;
                     }
-                    terminalCheckState->mMessage = std::move(*error);
+                    terminalCheckState->mMessage =
+                        *error +
+                        formatExecutionSummary(graph, validatorCount);
                     terminalCheckState->mFound.store(true,
                                                      std::memory_order_relaxed);
+                    std::cerr << "[" << scenarioName(scenarioID) << "] "
+                              << terminalCheckState->mMessage << '\n';
                     throw TerminalCheckError(terminalCheckState->mMessage);
                 };
 
