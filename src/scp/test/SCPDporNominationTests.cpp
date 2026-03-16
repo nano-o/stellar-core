@@ -230,7 +230,9 @@ makeTestExternalizeEnvelope(NodeID const& nodeID, Hash const& qSetHash,
 
 SCPEnvelope
 makeTestPrepareEnvelope(NodeID const& nodeID, Hash const& qSetHash,
-                        uint64 slotIndex, SCPBallot const& ballot)
+                        uint64 slotIndex, SCPBallot const& ballot,
+                        std::optional<SCPBallot> prepared = std::nullopt,
+                        std::optional<SCPBallot> preparedPrime = std::nullopt)
 {
     SCPEnvelope envelope;
     envelope.statement.nodeID = nodeID;
@@ -241,6 +243,14 @@ makeTestPrepareEnvelope(NodeID const& nodeID, Hash const& qSetHash,
     prepare.quorumSetHash = qSetHash;
     prepare.nC = 0;
     prepare.nH = 0;
+    if (prepared)
+    {
+        prepare.prepared.activate() = *prepared;
+    }
+    if (preparedPrime)
+    {
+        prepare.preparedPrime.activate() = *preparedPrime;
+    }
     return envelope;
 }
 
@@ -931,7 +941,43 @@ TEST_CASE("dpor nomination investigation falsy-1 detects skip prepare after "
     REQUIRE(falsy1->find("counter=1") != std::string::npos);
 }
 
-TEST_CASE("dpor nomination investigation threshold-split balloting satisfies "
+TEST_CASE("dpor nomination investigation falsy-1 detects non-skip prepare "
+          "with same-counter prepared skip",
+          "[scp][dpor][investigation]")
+{
+    SmallTopologyVerifyFixture fixture;
+    dpor::model::ExplorationGraphT<DporNominationValue> graph;
+
+    auto const destination = DporNominationDporAdapter::toThreadID(1);
+    auto const thread0 = DporNominationDporAdapter::toThreadID(0);
+
+    static_cast<void>(graph.add_event(
+        thread0,
+        DporNominationDporAdapter::EventLabel{
+            DporNominationDporAdapter::SendLabel{
+                .destination = destination,
+                .value = DporNominationValue{
+                    .mSenderThread = thread0,
+                    .mDestinationThread = destination,
+                    .mSlotIndex = kSlotIndex,
+                    .mEnvelope = makeTestPrepareEnvelope(
+                        fixture.mNodeIDs.at(0), fixture.mQSetHashes.at(0),
+                        kSlotIndex, SCPBallot(2, fixture.mYValue),
+                        SCPBallot(2, makeSkipValue(fixture.mXValue))),
+                },
+            }}));
+
+    auto const falsy1 =
+        dpor_nomination_investigation::
+            findFalsy1SkipPrepareAfterNonSkipSameBallot(
+                graph, kSmallTopologyValidatorCount);
+    REQUIRE(falsy1.has_value());
+    REQUIRE(falsy1->find("falsy-1: thread 0") != std::string::npos);
+    REQUIRE(falsy1->find("prepared=") != std::string::npos);
+    REQUIRE(falsy1->find("counter=2") != std::string::npos);
+}
+
+TEST_CASE("dpor nomination investigation threshold-split balloting triggers "
           "falsy-1",
           "[scp][dpor][investigation]")
 {
@@ -939,7 +985,7 @@ TEST_CASE("dpor nomination investigation threshold-split balloting satisfies "
 
     auto const results =
         dpor_nomination_investigation::runRuntimeGrowthInvestigation(
-            1, std::size_t{4},
+            1, std::size_t{10},
             dpor_nomination_investigation::InvestigationScenario::Id::
                 ThresholdSplitBalloting,
             false, kSmallTopologyValidatorCount,
@@ -951,8 +997,12 @@ TEST_CASE("dpor nomination investigation threshold-split balloting satisfies "
 
     REQUIRE(results.size() == 1);
     REQUIRE(results.front().mVerifyResult.kind ==
-            VerifyResultKind::AllExecutionsExplored);
+            VerifyResultKind::ErrorFound);
     REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+    REQUIRE(results.front().mVerifyResult.message.find("falsy-1: thread ") !=
+            std::string::npos);
+    REQUIRE(results.front().mVerifyResult.message.find("prepared=") !=
+            std::string::npos);
 }
 
 TEST_CASE("dpor nomination investigation can detect divergent externalize "

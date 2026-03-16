@@ -768,6 +768,20 @@ findFalsy1SkipPrepareAfterNonSkipSameBallot(GraphT const& graph,
     std::map<std::pair<dpor::model::ThreadId, uint32_t>, PrepareState>
         prepareStateByThreadAndCounter;
 
+    auto falsy1SameCounterPreparedSkip =
+        [](dpor::model::ThreadId thread, std::size_t eventID,
+           SCPBallot const& ballot, SCPBallot const& prepared,
+           char const* preparedFieldName) {
+            std::ostringstream out;
+            out << "falsy-1: thread " << thread
+                << " sent non-skip PREPARE counter=" << ballot.counter
+                << " value=" << formatValueAbbrev(ballot.value)
+                << " with " << preparedFieldName << "="
+                << formatValueAbbrev(prepared.value)
+                << " at the same ballot counter in event " << eventID;
+            return out.str();
+        };
+
     for (std::size_t eventID = 0; eventID < graph.event_count(); ++eventID)
     {
         auto const* send = dpor::model::as_send(graph.event(eventID));
@@ -783,7 +797,27 @@ findFalsy1SkipPrepareAfterNonSkipSameBallot(GraphT const& graph,
         }
 
         auto const thread = graph.event(eventID).thread;
-        auto const& ballot = envelope.statement.pledges.prepare().ballot;
+        auto const& prepare = envelope.statement.pledges.prepare();
+        auto const& ballot = prepare.ballot;
+        if (!isDporSkipValue(ballot.value))
+        {
+            if (prepare.prepared &&
+                prepare.prepared->counter == ballot.counter &&
+                isDporSkipValue(prepare.prepared->value))
+            {
+                return falsy1SameCounterPreparedSkip(
+                    thread, eventID, ballot, *prepare.prepared, "prepared");
+            }
+            if (prepare.preparedPrime &&
+                prepare.preparedPrime->counter == ballot.counter &&
+                isDporSkipValue(prepare.preparedPrime->value))
+            {
+                return falsy1SameCounterPreparedSkip(
+                    thread, eventID, ballot, *prepare.preparedPrime,
+                    "preparedPrime");
+            }
+        }
+
         auto& state =
             prepareStateByThreadAndCounter[{thread, ballot.counter}];
         if (!isDporSkipValue(ballot.value))
