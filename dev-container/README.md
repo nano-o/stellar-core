@@ -171,6 +171,9 @@ pdf-extract docs/software/core-data-flow.pdf | less
 # Write extracted text to a file
 pdf-extract paper.pdf paper.txt
 
+# Force OCR even if the PDF already has an embedded text layer
+pdf-extract --ocr paper.pdf paper-ocr.txt
+
 # Force OCR on a scanned PDF and keep a sidecar text file
 ocrmypdf --skip-text --language eng --sidecar paper.txt scan.pdf scan-ocr.pdf
 
@@ -183,9 +186,8 @@ qpdf --decrypt paper.pdf normalized.pdf
 ```
 
 `pdf-extract` first tries embedded text with `pdftotext`, falls back to
-`mutool` for some PDFs that Poppler handles poorly, and then falls back to OCR.
-For image-only PDFs, `pdftoppm` and `tesseract` are also available if you want
-manual page-by-page processing.
+`mutool` for some PDFs that Poppler handles poorly, and then rasterizes pages
+with `pdftoppm` and OCRs them with `tesseract`.
 
 ## Hardening
 
