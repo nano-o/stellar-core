@@ -98,6 +98,15 @@ requireReceive(DporNominationDporAdapter::EventLabel const& label)
     return *receive;
 }
 
+inline dpor::model::ErrorLabel const&
+requireError(DporNominationDporAdapter::EventLabel const& label)
+{
+    auto const* error =
+        std::get_if<dpor::model::ErrorLabel>(&label);
+    REQUIRE(error != nullptr);
+    return *error;
+}
+
 inline void
 requireNominationEnvelope(SCPEnvelope const& envelope, NodeID const& nodeID,
                           Hash const& qSetHash, uint64 slotIndex,

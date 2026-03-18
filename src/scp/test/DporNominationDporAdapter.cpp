@@ -4,8 +4,11 @@
 
 #include "scp/test/DporNominationDporAdapter.h"
 
+#include "scp/BallotProtocol.h"
+#include "scp/QuorumSetUtils.h"
 #include "scp/Slot.h"
 
+#include <algorithm>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -19,6 +22,9 @@ namespace
 {
 
 using ThreadId = dpor::model::ThreadId;
+
+constexpr std::uint8_t kBallotPhaseConfirm = 1;
+constexpr std::uint8_t kBallotPhaseExternalize = 2;
 
 ThreadId
 toThreadID(std::size_t nodeIndex)
@@ -34,7 +40,8 @@ DporNominationDporAdapter::ReceiveLabel
 makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
 {
     auto matcher = [destinationThread](DporNominationValue const& value) {
-        return value.mDestinationThread == destinationThread;
+        return value.mKind == DporNominationValue::Kind::Envelope &&
+               value.mDestinationThread == destinationThread;
     };
 
     if (nonBlocking)
@@ -44,6 +51,57 @@ makeReceiveLabel(ThreadId destinationThread, bool nonBlocking)
     }
     return dpor::model::make_receive_label<DporNominationValue>(
         std::move(matcher));
+}
+
+DporNominationValue
+makeTxSetDownloadWaitTimeChoiceValue(std::chrono::milliseconds waitTime)
+{
+    DporNominationValue value;
+    value.mKind = DporNominationValue::Kind::TxSetDownloadWaitTimeChoice;
+    value.mTxSetDownloadWaitTimeMilliseconds = waitTime.count();
+    return value;
+}
+
+bool
+isTxSetDownloadWaitTimeChoiceValue(DporNominationValue const& value)
+{
+    return value.mKind ==
+           DporNominationValue::Kind::TxSetDownloadWaitTimeChoice;
+}
+
+std::chrono::milliseconds
+getTxSetDownloadWaitTimeChoice(DporNominationValue const& value)
+{
+    if (!isTxSetDownloadWaitTimeChoiceValue(value))
+    {
+        throw std::logic_error(
+            "value is not a txset download wait time choice");
+    }
+    return std::chrono::milliseconds{
+        value.mTxSetDownloadWaitTimeMilliseconds};
+}
+
+DporNominationDporAdapter::EventLabel
+makeTxSetDownloadWaitTimeChoiceEvent(
+    std::vector<std::chrono::milliseconds> const& waitTimes)
+{
+    std::vector<DporNominationValue> choices;
+    choices.reserve(waitTimes.size());
+    for (auto const& waitTime : waitTimes)
+    {
+        choices.push_back(makeTxSetDownloadWaitTimeChoiceValue(waitTime));
+    }
+    if (choices.empty())
+    {
+        throw std::logic_error(
+            "nondeterministic txset download wait time choices are empty");
+    }
+
+    return DporNominationDporAdapter::EventLabel{
+        dpor::model::NondeterministicChoiceLabelT<DporNominationValue>{
+            .value = choices.front(),
+            .choices = std::move(choices),
+        }};
 }
 
 void
@@ -85,6 +143,172 @@ struct ReplayStateCacheKeyHasher
         return value;
     }
 };
+
+int
+compareBallots(SCPBallot const& lhs, SCPBallot const& rhs)
+{
+    if (lhs.counter < rhs.counter)
+    {
+        return -1;
+    }
+    if (rhs.counter < lhs.counter)
+    {
+        return 1;
+    }
+    if (lhs.value < rhs.value)
+    {
+        return -1;
+    }
+    if (rhs.value < lhs.value)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+bool
+areBallotsCompatible(SCPBallot const& lhs, SCPBallot const& rhs)
+{
+    return lhs.value == rhs.value;
+}
+
+bool
+areBallotsLessAndCompatible(SCPBallot const& lhs, SCPBallot const& rhs)
+{
+    return compareBallots(lhs, rhs) <= 0 && areBallotsCompatible(lhs, rhs);
+}
+
+bool
+areBallotsLessAndIncompatible(SCPBallot const& lhs, SCPBallot const& rhs)
+{
+    return compareBallots(lhs, rhs) <= 0 && !areBallotsCompatible(lhs, rhs);
+}
+
+template <typename ValueContainer>
+bool
+isStrictlySorted(ValueContainer const& values)
+{
+    return std::adjacent_find(values.begin(), values.end(),
+                              [](Value const& lhs, Value const& rhs) {
+                                  return !(lhs < rhs);
+                              }) == values.end();
+}
+
+std::optional<std::string>
+checkNominationStatementSane(SCPStatement const& statement)
+{
+    auto const& nomination = statement.pledges.nominate();
+    if ((nomination.votes.size() + nomination.accepted.size()) == 0)
+    {
+        return "nomination statement is empty";
+    }
+    if (!isStrictlySorted(nomination.votes))
+    {
+        return "nomination votes are not strictly sorted";
+    }
+    if (!isStrictlySorted(nomination.accepted))
+    {
+        return "nomination accepted values are not strictly sorted";
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string>
+checkBallotStatementSane(DporNominationNode const& node,
+                         SCPStatement const& statement)
+{
+    auto const qSetHash =
+        BallotProtocol::getCompanionQuorumSetHashFromStatement(statement);
+    auto const qSet = node.getStoredQuorumSet(qSetHash);
+    if (!qSet)
+    {
+        return "ballot statement references an unknown quorum set";
+    }
+
+    char const* errString = nullptr;
+    if (!isQuorumSetSane(*qSet, false, errString))
+    {
+        if (errString != nullptr)
+        {
+            return std::string("ballot statement references an invalid quorum "
+                               "set: ") +
+                   errString;
+        }
+        return "ballot statement references an invalid quorum set";
+    }
+
+    switch (statement.pledges.type())
+    {
+    case SCP_ST_PREPARE:
+    {
+        auto const& prepare = statement.pledges.prepare();
+        if (prepare.ballot.counter == 0)
+        {
+            return "prepare statement ballot counter is zero";
+        }
+        if (prepare.preparedPrime && prepare.prepared &&
+            !areBallotsLessAndIncompatible(*prepare.preparedPrime,
+                                           *prepare.prepared))
+        {
+            return "prepare statement preparedPrime is not below prepared and "
+                   "incompatible";
+        }
+        if (prepare.nH != 0 &&
+            (!prepare.prepared || prepare.nH > prepare.prepared->counter))
+        {
+            return "prepare statement nH exceeds prepared";
+        }
+        if (prepare.nC != 0 &&
+            (prepare.nH == 0 || prepare.ballot.counter < prepare.nH ||
+             prepare.nH < prepare.nC))
+        {
+            return "prepare statement violates nC <= nH <= ballot.counter";
+        }
+        return std::nullopt;
+    }
+    case SCP_ST_CONFIRM:
+    {
+        auto const& confirm = statement.pledges.confirm();
+        if (confirm.ballot.counter == 0)
+        {
+            return "confirm statement ballot counter is zero";
+        }
+        if (confirm.nH > confirm.ballot.counter ||
+            confirm.nCommit > confirm.nH)
+        {
+            return "confirm statement violates nCommit <= nH <= ballot.counter";
+        }
+        return std::nullopt;
+    }
+    case SCP_ST_EXTERNALIZE:
+    {
+        auto const& externalize = statement.pledges.externalize();
+        if (externalize.commit.counter == 0)
+        {
+            return "externalize statement commit counter is zero";
+        }
+        if (externalize.nH < externalize.commit.counter)
+        {
+            return "externalize statement violates commit.counter <= nH";
+        }
+        return std::nullopt;
+    }
+    default:
+        return "ballot statement has an unknown pledge type";
+    }
+}
+
+std::optional<std::string>
+checkEnvelopeStatementSane(DporNominationNode const& node,
+                           SCPEnvelope const& envelope)
+{
+    auto const& statement = envelope.statement;
+    if (statement.pledges.type() == SCP_ST_NOMINATE)
+    {
+        return checkNominationStatementSane(statement);
+    }
+    return checkBallotStatementSane(node, statement);
+}
 
 }
 
@@ -154,6 +378,161 @@ DporNominationDporAdapter::setCombineCandidates(
 }
 
 void
+DporNominationDporAdapter::setInvariantCheck(
+    DporNominationNode::InvariantCheck const& fn)
+{
+    mConfig.mInvariantCheck = fn;
+    rebuildReplayBaselines();
+}
+
+void
+DporNominationDporAdapter::enableBuiltInSCPInvariantChecks(bool enable)
+{
+    mEnableBuiltInSCPInvariantChecks = enable;
+    rebuildReplayBaselines();
+}
+
+std::optional<std::string>
+DporNominationDporAdapter::checkBuiltInSCPInvariantViolation(
+    DporNominationNode const& node,
+    DporNominationNode::InvariantCheckContext const& context)
+{
+    if (context.mEvent ==
+        DporNominationNode::InvariantCheckEvent::EnvelopeReceive)
+    {
+        if (!context.mEnvelope)
+        {
+            return "envelope receive invariant check is missing the envelope";
+        }
+        if (auto violation = checkEnvelopeStatementSane(node, *context.mEnvelope))
+        {
+            return violation;
+        }
+    }
+
+    auto const replayBaseline = node.snapshotReplayBaseline(context.mSlotIndex);
+    if (!replayBaseline.mSlotState)
+    {
+        return "slot state is missing during invariant evaluation";
+    }
+
+    auto const& slot = *replayBaseline.mSlotState;
+    auto const& nomination = slot.mNominationState;
+    auto const& ballot = slot.mBallotState;
+    auto const nominationTimerActive =
+        node.hasActiveTimer(context.mSlotIndex, Slot::NOMINATION_TIMER);
+    auto const ballotTimerActive =
+        node.hasActiveTimer(context.mSlotIndex, Slot::BALLOT_PROTOCOL_TIMER);
+
+    if (ballot.mCurrentMessageLevel != 0)
+    {
+        return "ballot recursion level did not unwind to zero";
+    }
+
+    if (nomination.mNominationStarted && nomination.mPreviousValue.empty())
+    {
+        return "nomination started without a previous value";
+    }
+
+    if (!nomination.mCandidates.empty())
+    {
+        if (!nomination.mLatestCompositeCandidate)
+        {
+            return "nomination candidates exist without a composite candidate";
+        }
+        if (nominationTimerActive)
+        {
+            return "nomination timer remained active after a candidate was "
+                   "ratified";
+        }
+    }
+
+    if (ballot.mPhase > kBallotPhaseExternalize)
+    {
+        return "ballot phase snapshot is out of range";
+    }
+
+    if ((ballot.mPhase == kBallotPhaseConfirm ||
+         ballot.mPhase == kBallotPhaseExternalize) &&
+        (!ballot.mCurrentBallot || !ballot.mPrepared || !ballot.mCommit ||
+         !ballot.mHighBallot))
+    {
+        return "confirm or externalize phase is missing required ballot state";
+    }
+
+    if (ballot.mCurrentBallot && ballot.mCurrentBallot->counter == 0)
+    {
+        return "current ballot counter is zero";
+    }
+
+    if (ballot.mPrepared && ballot.mPreparedPrime &&
+        !areBallotsLessAndIncompatible(*ballot.mPreparedPrime,
+                                       *ballot.mPrepared))
+    {
+        return "preparedPrime is not below prepared and incompatible";
+    }
+
+    if (ballot.mHighBallot)
+    {
+        if (!ballot.mCurrentBallot)
+        {
+            return "high ballot is set without a current ballot";
+        }
+        if (!areBallotsLessAndCompatible(*ballot.mHighBallot,
+                                         *ballot.mCurrentBallot))
+        {
+            return "high ballot is not below the current ballot and "
+                   "compatible";
+        }
+    }
+
+    if (ballot.mCommit)
+    {
+        if (!ballot.mCurrentBallot || !ballot.mHighBallot)
+        {
+            return "commit ballot is set without current and high ballots";
+        }
+        if (!areBallotsLessAndCompatible(*ballot.mCommit, *ballot.mHighBallot))
+        {
+            return "commit ballot is not below the high ballot and "
+                   "compatible";
+        }
+        if (!areBallotsLessAndCompatible(*ballot.mHighBallot,
+                                         *ballot.mCurrentBallot))
+        {
+            return "high ballot is not below the current ballot and "
+                   "compatible";
+        }
+    }
+
+    if (ballotTimerActive)
+    {
+        if (!ballot.mCurrentBallot)
+        {
+            return "ballot timer is active without a current ballot";
+        }
+        if (!ballot.mHeardFromQuorum)
+        {
+            return "ballot timer is active without having heard from quorum";
+        }
+    }
+
+    if (ballot.mPhase == kBallotPhaseExternalize)
+    {
+        if (nomination.mNominationStarted)
+        {
+            return "nomination remained started after externalize";
+        }
+        if (ballotTimerActive)
+        {
+            return "ballot timer remained active after externalize";
+        }
+    }
+
+    return std::nullopt;
+}
+
+void
 DporNominationDporAdapter::setReplayMetrics(
     std::shared_ptr<ReplayMetrics> metrics)
 {
@@ -210,9 +589,23 @@ DporNominationDporAdapter::initializeNode(ReplayState& state,
     {
     case InitialStateMode::Nomination:
         state.mNode.nominate(mSlotIndex, initialValue, mPreviousValue);
+        maybeRecordInvariantViolation(
+            state,
+            DporNominationNode::InvariantCheckContext{
+                .mEvent = DporNominationNode::InvariantCheckEvent::
+                    InitialNomination,
+                .mSlotIndex = mSlotIndex,
+            });
         break;
     case InitialStateMode::Balloting:
         state.mNode.startBalloting(mSlotIndex, initialValue);
+        maybeRecordInvariantViolation(
+            state,
+            DporNominationNode::InvariantCheckContext{
+                .mEvent = DporNominationNode::InvariantCheckEvent::
+                    InitialBalloting,
+                .mSlotIndex = mSlotIndex,
+            });
         break;
     }
     queuePendingEnvelopeSends(state, nodeIndex);
@@ -225,6 +618,7 @@ DporNominationDporAdapter::restoreBaseline(ReplayState& state,
     auto const& baseline = mReplayBaselines.at(nodeIndex);
     state.mNode.restoreReplayBaseline(baseline.mNodeState);
     state.mPendingSends = baseline.mPendingSends;
+    state.mPendingInvariantViolation = baseline.mPendingInvariantViolation;
 
     for (auto const& timer : baseline.mNodeState.mTimers)
     {
@@ -281,6 +675,7 @@ DporNominationDporAdapter::rebuildReplayBaselines()
         replayBaselines.push_back(ReplayBaseline{
             .mNodeState = state.mNode.snapshotReplayBaseline(mSlotIndex),
             .mPendingSends = state.mPendingSends,
+            .mPendingInvariantViolation = state.mPendingInvariantViolation,
         });
     }
 
@@ -290,10 +685,11 @@ DporNominationDporAdapter::rebuildReplayBaselines()
 }
 
 void
-DporNominationDporAdapter::replayObservation(DporNominationNode& node,
+DporNominationDporAdapter::replayObservation(ReplayState& state,
                                              std::size_t nodeIndex,
                                              ObservedValue const& observed) const
 {
+    auto& node = state.mNode;
     auto const localThread = toThreadID(nodeIndex);
     if (observed.is_bottom())
     {
@@ -310,10 +706,22 @@ DporNominationDporAdapter::replayObservation(DporNominationNode& node,
                 "trace requested a timer firing without an active enabled "
                 "timer");
         }
+        maybeRecordInvariantViolation(
+            state,
+            DporNominationNode::InvariantCheckContext{
+                .mEvent = DporNominationNode::InvariantCheckEvent::TimerFire,
+                .mSlotIndex = mSlotIndex,
+                .mTimerID = *timerID,
+            });
         return;
     }
 
     auto const& delivery = observed.value();
+    if (isTxSetDownloadWaitTimeChoiceValue(delivery))
+    {
+        throw std::logic_error(
+            "trace contains an unexpected txset download wait time choice");
+    }
     if (delivery.mDestinationThread != localThread)
     {
         throw std::logic_error(
@@ -324,6 +732,84 @@ DporNominationDporAdapter::replayObservation(DporNominationNode& node,
         throw std::logic_error("trace delivered an envelope for the wrong slot");
     }
     node.receiveEnvelope(delivery.mEnvelope);
+    maybeRecordInvariantViolation(
+        state,
+        DporNominationNode::InvariantCheckContext{
+            .mEvent = DporNominationNode::InvariantCheckEvent::EnvelopeReceive,
+            .mSlotIndex = mSlotIndex,
+            .mEnvelope = delivery.mEnvelope,
+        });
+}
+
+DporNominationDporAdapter::ReplayObservationProgress
+DporNominationDporAdapter::replayObservation(ReplayState& state,
+                                             std::size_t nodeIndex,
+                                             ThreadTrace const& trace,
+                                             std::size_t observedIndex) const
+{
+    if (observedIndex >= trace.size())
+    {
+        throw std::out_of_range("observed trace index out of range");
+    }
+
+    auto const applyWithMaybeChoice =
+        [&](auto&& applyObservation) -> ReplayObservationProgress {
+        std::size_t consumedChoices = 0;
+        while (true)
+        {
+            try
+            {
+                applyObservation();
+                return ReplayObservationProgress{
+                    .mConsumedTraceEntries = 1 + consumedChoices,
+                    .mConsumedStepCount = consumedChoices};
+            }
+            catch (DporNominationNode::TxSetDownloadWaitTimeChoiceRequired
+                       const& e)
+            {
+                auto const choiceIndex = observedIndex + 1 + consumedChoices;
+                if (choiceIndex >= trace.size())
+                {
+                    return ReplayObservationProgress{
+                        .mPendingEvent = makeTxSetDownloadWaitTimeChoiceEvent(
+                            e.getChoices())};
+                }
+
+                auto const& choiceObserved = trace.at(choiceIndex);
+                if (choiceObserved.is_bottom())
+                {
+                    throw std::logic_error(
+                        "trace contains bottom where a txset download wait "
+                        "time choice was required");
+                }
+
+                auto const& choiceValue = choiceObserved.value();
+                if (!isTxSetDownloadWaitTimeChoiceValue(choiceValue))
+                {
+                    throw std::logic_error(
+                        "trace entry is not a txset download wait time "
+                        "choice");
+                }
+
+                auto const waitTime =
+                    getTxSetDownloadWaitTimeChoice(choiceValue);
+                if (std::find(e.getChoices().begin(), e.getChoices().end(),
+                              waitTime) == e.getChoices().end())
+                {
+                    throw std::logic_error(
+                        "trace chose an unsupported txset download wait "
+                        "time");
+                }
+
+                state.mNode.enqueueTxSetDownloadWaitTimeChoice(waitTime);
+                ++consumedChoices;
+            }
+        }
+    };
+
+    auto const& observed = trace.at(observedIndex);
+    return applyWithMaybeChoice(
+        [&]() { replayObservation(state, nodeIndex, observed); });
 }
 
 void
@@ -373,6 +859,41 @@ DporNominationDporAdapter::queuePendingEnvelopeSends(
     }
 }
 
+void
+DporNominationDporAdapter::maybeRecordInvariantViolation(
+    ReplayState& state,
+    DporNominationNode::InvariantCheckContext const& context) const
+{
+    if (state.mPendingInvariantViolation)
+    {
+        return;
+    }
+
+    state.mPendingInvariantViolation =
+        evaluateInvariantViolation(state.mNode, context);
+}
+
+std::optional<std::string>
+DporNominationDporAdapter::evaluateInvariantViolation(
+    DporNominationNode const& node,
+    DporNominationNode::InvariantCheckContext const& context) const
+{
+    if (mEnableBuiltInSCPInvariantChecks)
+    {
+        if (auto violation =
+                checkBuiltInSCPInvariantViolation(node, context))
+        {
+            return violation;
+        }
+    }
+
+    if (mConfig.mInvariantCheck)
+    {
+        return mConfig.mInvariantCheck(node, context);
+    }
+    return std::nullopt;
+}
+
 std::optional<DporNominationDporAdapter::EventLabel>
 DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
                                             ThreadTrace const& trace,
@@ -403,6 +924,16 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
 
     while (true)
     {
+        if (state.mPendingInvariantViolation)
+        {
+            if (eventCount == step)
+            {
+                return finish(EventLabel{dpor::model::ErrorLabel{}});
+            }
+            throw std::logic_error(
+                "trace advanced past a pending invariant error");
+        }
+
         if (!state.mPendingSends.empty())
         {
             auto nextSend = EventLabel{state.mPendingSends.front()};
@@ -437,8 +968,21 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
                 "requested step");
         }
 
-        replayObservation(state.mNode, nodeIndex, trace.at(observedCount));
-        ++observedCount;
+        auto replayed =
+            replayObservation(state, nodeIndex, trace, observedCount);
+        if (replayed.mPendingEvent)
+        {
+            if (eventCount == step)
+            {
+                return finish(replayed.mPendingEvent);
+            }
+            throw std::logic_error(
+                "trace does not contain enough observations to replay the "
+                "requested step");
+        }
+
+        observedCount += replayed.mConsumedTraceEntries;
+        eventCount += replayed.mConsumedStepCount;
 
         queuePendingEnvelopeSends(state, nodeIndex);
     }
@@ -483,16 +1027,26 @@ DporNominationDporAdapter::replayTraceForBoundaryInspection(
     restoreBaseline(state, nodeIndex);
     state.mPendingSends.clear();
 
-    for (std::size_t observedIndex = 0; observedIndex < trace.size();
-         ++observedIndex)
+    for (std::size_t observedIndex = 0; observedIndex < trace.size();)
     {
         if (state.mNode.hasCrossedNominationBoundary())
         {
             break;
         }
 
-        replayObservation(state.mNode, nodeIndex, trace.at(observedIndex));
+        auto replayed =
+            replayObservation(state, nodeIndex, trace, observedIndex);
+        if (replayed.mPendingEvent)
+        {
+            break;
+        }
+
+        observedIndex += replayed.mConsumedTraceEntries;
         discardPendingEnvelopes(state.mNode);
+        if (state.mPendingInvariantViolation)
+        {
+            break;
+        }
     }
 }
 

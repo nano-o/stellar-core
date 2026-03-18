@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace stellar
@@ -27,23 +28,49 @@ namespace stellar
 
 struct DporNominationValue
 {
+    enum class Kind : std::uint8_t
+    {
+        Envelope,
+        TxSetDownloadWaitTimeChoice
+    };
+
     dpor::model::ThreadId mSenderThread{};
     dpor::model::ThreadId mDestinationThread{};
     uint64_t mSlotIndex{};
     SCPEnvelope mEnvelope;
+    Kind mKind{Kind::Envelope};
+    int64_t mTxSetDownloadWaitTimeMilliseconds{0};
 
     bool
     operator==(DporNominationValue const& other) const
     {
+        if (mKind != other.mKind)
+        {
+            return false;
+        }
+        if (mKind == Kind::TxSetDownloadWaitTimeChoice)
+        {
+            return mTxSetDownloadWaitTimeMilliseconds ==
+                   other.mTxSetDownloadWaitTimeMilliseconds;
+        }
         return mSenderThread == other.mSenderThread &&
                mDestinationThread == other.mDestinationThread &&
                mSlotIndex == other.mSlotIndex &&
-               mEnvelope == other.mEnvelope;
+                mEnvelope == other.mEnvelope;
     }
 
     bool
     operator<(DporNominationValue const& other) const
     {
+        if (mKind != other.mKind)
+        {
+            return mKind < other.mKind;
+        }
+        if (mKind == Kind::TxSetDownloadWaitTimeChoice)
+        {
+            return mTxSetDownloadWaitTimeMilliseconds <
+                   other.mTxSetDownloadWaitTimeMilliseconds;
+        }
         if (mSenderThread != other.mSenderThread)
         {
             return mSenderThread < other.mSenderThread;
@@ -113,6 +140,17 @@ class DporNominationDporAdapter
             fn);
 
     void
+    setInvariantCheck(DporNominationNode::InvariantCheck const& fn);
+
+    void
+    enableBuiltInSCPInvariantChecks(bool enable = true);
+
+    static std::optional<std::string>
+    checkBuiltInSCPInvariantViolation(
+        DporNominationNode const& node,
+        DporNominationNode::InvariantCheckContext const& context);
+
+    void
     setReplayMetrics(std::shared_ptr<ReplayMetrics> metrics);
 
     void
@@ -147,12 +185,14 @@ class DporNominationDporAdapter
 
         DporNominationNode mNode;
         std::deque<SendLabel> mPendingSends;
+        std::optional<std::string> mPendingInvariantViolation;
     };
 
     struct ReplayBaseline
     {
         DporNominationNode::ReplayBaseline mNodeState;
         std::deque<SendLabel> mPendingSends;
+        std::optional<std::string> mPendingInvariantViolation;
     };
 
     void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
@@ -160,13 +200,33 @@ class DporNominationDporAdapter
     ReplayState& acquireReplayState(std::size_t nodeIndex) const;
     void rebuildReplayBaselines();
 
-    void replayObservation(DporNominationNode& node, std::size_t nodeIndex,
+    void replayObservation(ReplayState& state, std::size_t nodeIndex,
                            ObservedValue const& observed) const;
+
+    struct ReplayObservationProgress
+    {
+        std::size_t mConsumedTraceEntries{0};
+        std::size_t mConsumedStepCount{0};
+        std::optional<EventLabel> mPendingEvent;
+    };
+
+    ReplayObservationProgress
+    replayObservation(ReplayState& state, std::size_t nodeIndex,
+                      ThreadTrace const& trace,
+                      std::size_t observedIndex) const;
 
     void discardPendingEnvelopes(DporNominationNode& node) const;
 
     void queuePendingEnvelopeSends(ReplayState& state,
                                    std::size_t senderIndex) const;
+
+    void maybeRecordInvariantViolation(
+        ReplayState& state,
+        DporNominationNode::InvariantCheckContext const& context) const;
+
+    std::optional<std::string> evaluateInvariantViolation(
+        DporNominationNode const& node,
+        DporNominationNode::InvariantCheckContext const& context) const;
 
     void replayTraceForBoundaryInspection(ReplayState& state,
                                           std::size_t nodeIndex,
@@ -184,6 +244,7 @@ class DporNominationDporAdapter
     std::vector<Value> mInitialValues;
     DporNominationNode::Configuration mConfig;
     InitialStateMode mInitialStateMode{InitialStateMode::Nomination};
+    bool mEnableBuiltInSCPInvariantChecks{false};
     bool mEnableNominationTimeouts{true};
     bool mEnableBallotingTimeouts{false};
     std::shared_ptr<ReplayMetrics> mReplayMetrics;

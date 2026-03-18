@@ -29,6 +29,7 @@ struct CommandLineOptions
     bool mCheckExternalizeDivergence = false;
     bool mPrintSkipExternalize = false;
     bool mCheckFalsy1 = false;
+    bool mNondetSkip = false;
     TimeoutSettings mTimeoutSettings;
     TimerSetLimitSettings mTimerSetLimitSettings;
     std::optional<std::size_t> mDepthOverride;
@@ -47,6 +48,7 @@ printUsage(char const* argv0)
                  " [--externalize]"
                  " [--externalize-divergence]"
                  " [--falsy-1]"
+                 " [--nondet-skip]"
                  " [--print-skip-externalize]"
                  " [--nomination-timer-limit N]"
                  " [--balloting-timer-limit N]"
@@ -72,6 +74,8 @@ printUsage(char const* argv0)
                  "counter\n"
               << "--print-skip-externalize prints when an explored execution "
                  "contains a skip EXTERNALIZE message\n"
+              << "--nondet-skip makes the scenario-5 round>=2 txset download "
+                 "wait-time query branch above/below the skip threshold\n"
               << "--nomination-only stops exploration at the first "
                  "PREPARE(1) boundary\n";
 }
@@ -197,6 +201,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--falsy-1")
         {
             options.mCheckFalsy1 = true;
+            continue;
+        }
+        if (arg == "--nondet-skip")
+        {
+            options.mNondetSkip = true;
             continue;
         }
         if (arg == "--print-skip-externalize")
@@ -333,7 +342,8 @@ main(int argc, char* argv[])
             options.mCheckExternalizeDivergence,
             options.mPrintSkipExternalize,
             options.mCommunicationModel,
-            options.mCheckFalsy1);
+            options.mCheckFalsy1,
+            options.mNondetSkip);
         printInvestigationResults(std::cout, results, options.mWorkers,
                                   options.mNumNodes,
                                   options.mNominationOnly,
@@ -345,7 +355,8 @@ main(int argc, char* argv[])
                                   options.mCheckExternalizeDivergence,
                                   options.mPrintSkipExternalize,
                                   options.mCommunicationModel,
-                                  options.mCheckFalsy1);
+                                  options.mCheckFalsy1,
+                                  options.mNondetSkip);
 
         for (auto const& result : results)
         {

@@ -11,11 +11,14 @@
 #include <cstddef>
 #include <ctime>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -39,6 +42,39 @@ class DporNominationNode : public SCPDriver
     {
         Prepare,
         Commit
+    };
+
+    enum class InvariantCheckEvent : std::uint8_t
+    {
+        InitialNomination,
+        InitialBalloting,
+        EnvelopeReceive,
+        TimerFire
+    };
+
+    struct InvariantCheckContext
+    {
+        InvariantCheckEvent mEvent{InvariantCheckEvent::InitialNomination};
+        uint64 mSlotIndex{};
+        std::optional<int> mTimerID;
+        std::optional<SCPEnvelope> mEnvelope;
+    };
+
+    using InvariantCheck = std::function<std::optional<std::string>(
+        DporNominationNode const&, InvariantCheckContext const&)>;
+
+    class TxSetDownloadWaitTimeChoiceRequired
+        : public std::runtime_error
+    {
+      public:
+        explicit TxSetDownloadWaitTimeChoiceRequired(
+            std::vector<std::chrono::milliseconds> choices);
+
+        std::vector<std::chrono::milliseconds> const&
+        getChoices() const;
+
+      private:
+        std::vector<std::chrono::milliseconds> mChoices;
     };
 
     // Default replay/test cutoff for nomination-only exploration.
@@ -70,8 +106,10 @@ class DporNominationNode : public SCPDriver
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
             mTxSetDownloadWaitTimesByNode;
+        bool mNondeterministicTxSetDownloadWaitTimeAfterFirstCall{false};
         std::optional<uint32_t> mNominationTimerSetLimit;
         std::optional<uint32_t> mBallotingTimerSetLimit;
+        InvariantCheck mInvariantCheck;
     };
 
     struct TimerState
@@ -181,6 +219,8 @@ class DporNominationNode : public SCPDriver
 
     void storeQuorumSet(SCPQuorumSet const& qSet);
 
+    SCPQuorumSetPtr getStoredQuorumSet(Hash const& qSetHash) const;
+
     bool nominate(uint64 slotIndex, Value const& value,
                   Value const& previousValue);
 
@@ -210,6 +250,9 @@ class DporNominationNode : public SCPDriver
     std::optional<TimerState> getTimer(uint64 slotIndex, int timerID) const;
 
     bool fireTimer(uint64 slotIndex, int timerID);
+
+    void enqueueTxSetDownloadWaitTimeChoice(
+        std::chrono::milliseconds waitTime);
 
     ReplayBaseline
     snapshotReplayBaseline(uint64 slotIndex) const;
@@ -284,6 +327,9 @@ class DporNominationNode : public SCPDriver
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
     std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
+    bool mNondeterministicTxSetDownloadWaitTimeAfterFirstCall{false};
+    mutable std::deque<std::chrono::milliseconds>
+        mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;

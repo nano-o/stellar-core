@@ -315,8 +315,17 @@ formatTraceSummary(DporNominationDporAdapter::ThreadTrace const& trace)
         }
 
         auto const& delivery = observed.value();
-        out << "recv<-" << delivery.mSenderThread << ":"
-            << formatEnvelopeSummary(delivery.mEnvelope);
+        if (delivery.mKind ==
+            DporNominationValue::Kind::TxSetDownloadWaitTimeChoice)
+        {
+            out << "nd-wait="
+                << delivery.mTxSetDownloadWaitTimeMilliseconds << "ms";
+        }
+        else
+        {
+            out << "recv<-" << delivery.mSenderThread << ":"
+                << formatEnvelopeSummary(delivery.mEnvelope);
+        }
     }
 
     if (first)
@@ -837,6 +846,45 @@ TEST_CASE("dpor nomination investigation can start directly in balloting with "
     }
 }
 
+TEST_CASE("dpor nomination invariant checks turn initial replay violations "
+          "into error events",
+          "[scp][dpor][investigation][invariant]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    dpor_nomination_investigation::ThresholdFixture fixture(
+        kSmallTopologyValidatorCount, false,
+        dpor_nomination_investigation::TimerSetLimitSettings{},
+        dpor_nomination_investigation::InitialValuePattern::ThresholdSplitXY,
+        DporNominationDporAdapter::InitialStateMode::Balloting);
+
+    fixture.mAdapter.setInvariantCheck(
+        [](DporNominationNode const&,
+           DporNominationNode::InvariantCheckContext const& context)
+            -> std::optional<std::string> {
+            if (context.mEvent ==
+                DporNominationNode::InvariantCheckEvent::InitialBalloting)
+            {
+                return "reject initial prepare replay";
+            }
+            return std::nullopt;
+        });
+
+    for (std::size_t nodeIndex = 0; nodeIndex < fixture.mValidatorCount;
+         ++nodeIndex)
+    {
+        auto next = fixture.mAdapter.captureNextEvent(nodeIndex, {}, 0);
+        REQUIRE(next.has_value());
+        static_cast<void>(requireError(*next));
+    }
+
+    VerifyConfig config;
+    config.program = fixture.mAdapter.makeProgram();
+    auto const result = dpor::algo::verify(config);
+    REQUIRE(result.kind == VerifyResultKind::ErrorFound);
+    REQUIRE(result.executions_explored == 1);
+}
+
 TEST_CASE("dpor nomination investigation threshold-split balloting only "
           "switches x nodes to skip on ballot 2 timeout",
           "[scp][dpor][investigation]")
@@ -890,6 +938,214 @@ TEST_CASE("dpor nomination investigation threshold-split balloting only "
                                fixture.mQSetHashes.at(nodeIndex), kSlotIndex,
                                SCPBallot(2, expectedSecondBallotValue));
     }
+}
+
+TEST_CASE("dpor nomination investigation threshold-split balloting can "
+          "branch ballot-2 skip timeout nondeterministically",
+          "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto const scenarios =
+        dpor_nomination_investigation::selectedRuntimeGrowthScenarios(
+            kSmallTopologyValidatorCount,
+            dpor_nomination_investigation::InvestigationScenario::Id::
+                ThresholdSplitBalloting);
+    REQUIRE(scenarios.size() == 1);
+
+    auto const& scenario = scenarios.front();
+    dpor_nomination_investigation::ThresholdFixture fixture(
+        kSmallTopologyValidatorCount, false,
+        dpor_nomination_investigation::TimerSetLimitSettings{},
+        scenario.mInitialValuePattern, scenario.mInitialStateMode,
+        scenario.mTxSetDownloadWaitTimes,
+        scenario.mPerNodeTxSetDownloadWaitTimes, true);
+    fixture.mAdapter.setTimeoutModes(false, true);
+
+    auto const belowThresholdWait =
+        static_cast<int64_t>(DporNominationNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS) -
+        1;
+    auto const aboveThresholdWait =
+        static_cast<int64_t>(DporNominationNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS) +
+        1;
+
+    for (std::size_t nodeIndex = 0; nodeIndex < fixture.mValidatorCount;
+         ++nodeIndex)
+    {
+        auto firstSend = fixture.mAdapter.captureNextEvent(nodeIndex, {}, 0);
+        REQUIRE(firstSend.has_value());
+
+        DporNominationDporAdapter::ThreadTrace trace{
+            DporNominationDporAdapter::ObservedValue::bottom()};
+
+        auto nextEvent = fixture.mAdapter.captureNextEvent(nodeIndex, trace, 3);
+        REQUIRE(nextEvent.has_value());
+
+        if (nodeIndex < fixture.mThreshold)
+        {
+            auto const* choice =
+                std::get_if<dpor::model::NondeterministicChoiceLabelT<
+                    DporNominationValue>>(&*nextEvent);
+            REQUIRE(choice != nullptr);
+            REQUIRE(choice->choices.size() == 2);
+            REQUIRE(choice->choices.at(0).mKind ==
+                    DporNominationValue::Kind::TxSetDownloadWaitTimeChoice);
+            REQUIRE(choice->choices.at(1).mKind ==
+                    DporNominationValue::Kind::TxSetDownloadWaitTimeChoice);
+            REQUIRE(choice->choices.at(0).mTxSetDownloadWaitTimeMilliseconds ==
+                    belowThresholdWait);
+            REQUIRE(choice->choices.at(1).mTxSetDownloadWaitTimeMilliseconds ==
+                    aboveThresholdWait);
+
+            auto belowTrace = trace;
+            belowTrace.emplace_back(choice->choices.at(0));
+            auto belowSend =
+                fixture.mAdapter.captureNextEvent(nodeIndex, belowTrace, 4);
+            REQUIRE(belowSend.has_value());
+            requirePrepareEnvelope(requireSend(*belowSend).value.mEnvelope,
+                                   fixture.mNodeIDs.at(nodeIndex),
+                                   fixture.mQSetHashes.at(nodeIndex),
+                                   kSlotIndex,
+                                   SCPBallot(2, fixture.mThresholdXValue));
+
+            auto aboveTrace = trace;
+            aboveTrace.emplace_back(choice->choices.at(1));
+            auto aboveSend =
+                fixture.mAdapter.captureNextEvent(nodeIndex, aboveTrace, 4);
+            REQUIRE(aboveSend.has_value());
+            requirePrepareEnvelope(
+                requireSend(*aboveSend).value.mEnvelope,
+                fixture.mNodeIDs.at(nodeIndex),
+                fixture.mQSetHashes.at(nodeIndex), kSlotIndex,
+                SCPBallot(2, makeSkipValue(fixture.mThresholdXValue)));
+        }
+        else
+        {
+            requirePrepareEnvelope(requireSend(*nextEvent).value.mEnvelope,
+                                   fixture.mNodeIDs.at(nodeIndex),
+                                   fixture.mQSetHashes.at(nodeIndex),
+                                   kSlotIndex,
+                                   SCPBallot(2, fixture.mThresholdYValue));
+        }
+    }
+}
+
+TEST_CASE("dpor nomination invariant checks surface receive-time violations "
+          "before later local sends",
+          "[scp][dpor][investigation][invariant]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    dpor_nomination_investigation::ThresholdFixture fixture(
+        kSmallTopologyValidatorCount, false,
+        dpor_nomination_investigation::TimerSetLimitSettings{},
+        dpor_nomination_investigation::InitialValuePattern::ThresholdSplitXY,
+        DporNominationDporAdapter::InitialStateMode::Balloting);
+
+    fixture.mAdapter.setInvariantCheck(
+        [](DporNominationNode const&,
+           DporNominationNode::InvariantCheckContext const& context)
+            -> std::optional<std::string> {
+            if (context.mEvent ==
+                DporNominationNode::InvariantCheckEvent::EnvelopeReceive)
+            {
+                return "reject receive replay";
+            }
+            return std::nullopt;
+        });
+
+    auto leaderSendToFollower = fixture.mAdapter.captureNextEvent(0, {}, 0);
+    REQUIRE(leaderSendToFollower.has_value());
+    auto const& send = requireSend(*leaderSendToFollower);
+    REQUIRE(send.destination == DporNominationDporAdapter::toThreadID(1));
+
+    auto followerReceive = fixture.mAdapter.captureNextEvent(1, {}, 2);
+    REQUIRE(followerReceive.has_value());
+    static_cast<void>(requireReceive(*followerReceive));
+
+    DporNominationDporAdapter::ThreadTrace trace{send.value};
+    auto error = fixture.mAdapter.captureNextEvent(1, trace, 3);
+    REQUIRE(error.has_value());
+    static_cast<void>(requireError(*error));
+}
+
+TEST_CASE("dpor nomination built-in SCP invariants reject malformed received "
+          "ballot statements",
+          "[scp][dpor][investigation][invariant]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    dpor_nomination_investigation::ThresholdFixture fixture(
+        kSmallTopologyValidatorCount, false,
+        dpor_nomination_investigation::TimerSetLimitSettings{},
+        dpor_nomination_investigation::InitialValuePattern::ThresholdSplitXY,
+        DporNominationDporAdapter::InitialStateMode::Balloting);
+    fixture.mAdapter.enableBuiltInSCPInvariantChecks();
+
+    auto leaderSendToFollower = fixture.mAdapter.captureNextEvent(0, {}, 0);
+    REQUIRE(leaderSendToFollower.has_value());
+    auto malformedDelivery = requireSend(*leaderSendToFollower).value;
+    auto& prepare = malformedDelivery.mEnvelope.statement.pledges.prepare();
+    prepare.nC = 1;
+    prepare.nH = 0;
+
+    auto followerReceive = fixture.mAdapter.captureNextEvent(1, {}, 2);
+    REQUIRE(followerReceive.has_value());
+    static_cast<void>(requireReceive(*followerReceive));
+
+    DporNominationDporAdapter::ThreadTrace trace{malformedDelivery};
+    auto error = fixture.mAdapter.captureNextEvent(1, trace, 3);
+    REQUIRE(error.has_value());
+    static_cast<void>(requireError(*error));
+}
+
+TEST_CASE("dpor nomination built-in SCP invariants catch nomination still "
+          "running after externalize",
+          "[scp][dpor][investigation][invariant]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    auto validators = DporNominationSanityCheckHarness::makeValidatorSecretKeys(
+        "dpor-builtin-scp-invariants-", 1);
+    auto nodeIDs = DporNominationSanityCheckHarness::getNodeIDs(validators);
+    auto const qSet =
+        DporNominationSanityCheckHarness::makeQuorumSet(nodeIDs, 1);
+    auto const qSetHash = getNormalizedQSetHash(qSet);
+    auto const previousValue = makeValue("builtin-prev");
+    auto const xValue = makeValue("builtin-x");
+
+    DporNominationNode node(validators.front(), qSet);
+    REQUIRE(node.nominate(kSlotIndex, xValue, previousValue));
+
+    node.setStateFromEnvelope(
+        kSlotIndex, makeTestExternalizeEnvelope(node.getNodeID(), qSetHash,
+                                                kSlotIndex,
+                                                SCPBallot(1, xValue), 1));
+
+    auto const violation =
+        DporNominationDporAdapter::checkBuiltInSCPInvariantViolation(
+            node, DporNominationNode::InvariantCheckContext{
+                      .mEvent =
+                          DporNominationNode::InvariantCheckEvent::
+                              InitialNomination,
+                      .mSlotIndex = kSlotIndex,
+                  });
+    REQUIRE(violation.has_value());
+    REQUIRE(violation->find("nomination remained started after externalize") !=
+            std::string::npos);
+}
+
+TEST_CASE("dpor nomination built-in SCP invariants accept the baseline small "
+          "topology exploration",
+          "[scp][dpor][investigation][invariant]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    SmallTopologyVerifyFixture fixture;
+    fixture.mAdapter.enableBuiltInSCPInvariantChecks();
+
+    auto const result = exploreExecutions(fixture);
+    REQUIRE(result.mVerifyResult.kind != VerifyResultKind::ErrorFound);
 }
 
 TEST_CASE("dpor nomination investigation falsy-1 detects skip prepare after "

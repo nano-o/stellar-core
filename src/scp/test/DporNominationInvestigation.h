@@ -157,7 +157,8 @@ struct ThresholdFixture
             DporNominationDporAdapter::InitialStateMode::Nomination,
         std::vector<std::chrono::milliseconds> txSetDownloadWaitTimes = {},
         std::vector<std::vector<std::chrono::milliseconds>>
-            perNodeTxSetDownloadWaitTimes = {})
+            perNodeTxSetDownloadWaitTimes = {},
+        bool nondeterministicSkip = false)
         : mValidatorCount(validatorCount)
         , mThreshold(computeTwoThirdsThreshold(validatorCount))
         , mValidators(DporNominationSanityCheckHarness::makeValidatorSecretKeys(
@@ -242,6 +243,8 @@ struct ThresholdFixture
                                    perNodeTxSetDownloadWaitTimes.at(i));
                            }
                        }
+                       config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall =
+                           nondeterministicSkip;
                        config.mNominationTimerSetLimit =
                            timerSetLimitSettings.mNomination;
                        config.mBallotingTimerSetLimit =
@@ -569,8 +572,17 @@ formatTraceSummary(DporNominationDporAdapter::ThreadTrace const& trace)
         }
 
         auto const& delivery = observed.value();
-        out << "recv<-" << delivery.mSenderThread << ":"
-            << formatEnvelopeSummary(delivery.mEnvelope);
+        if (delivery.mKind ==
+            DporNominationValue::Kind::TxSetDownloadWaitTimeChoice)
+        {
+            out << "nd-wait="
+                << delivery.mTxSetDownloadWaitTimeMilliseconds << "ms";
+        }
+        else
+        {
+            out << "recv<-" << delivery.mSenderThread << ":"
+                << formatEnvelopeSummary(delivery.mEnvelope);
+        }
     }
 
     if (first)
@@ -1081,7 +1093,8 @@ runRuntimeGrowthInvestigation(
     bool printSkipExternalize = false,
     dpor::model::CommunicationModel communicationModel =
         dpor::model::CommunicationModel::Async,
-    bool checkFalsy1 = false)
+    bool checkFalsy1 = false,
+    bool nondetSkip = false)
 {
     ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
 
@@ -1108,7 +1121,10 @@ runRuntimeGrowthInvestigation(
             timerSetLimitSettings, scenario.mInitialValuePattern,
             scenario.mInitialStateMode,
             scenario.mTxSetDownloadWaitTimes,
-            scenario.mPerNodeTxSetDownloadWaitTimes);
+            scenario.mPerNodeTxSetDownloadWaitTimes,
+            nondetSkip &&
+                scenario.mId ==
+                    InvestigationScenario::Id::ThresholdSplitBalloting);
         fixture.mAdapter.setTimeoutModes(timeoutSettings.mNomination,
                                          timeoutSettings.mBalloting);
 
@@ -1308,7 +1324,8 @@ runFourNodeRuntimeGrowthInvestigation(
     bool printSkipExternalize = false,
     dpor::model::CommunicationModel communicationModel =
         dpor::model::CommunicationModel::Async,
-    bool checkFalsy1 = false)
+    bool checkFalsy1 = false,
+    bool nondetSkip = false)
 {
     return runRuntimeGrowthInvestigation(workers, depthOverride,
                                          scenarioFilter, nominationOnly,
@@ -1321,7 +1338,8 @@ runFourNodeRuntimeGrowthInvestigation(
                                          checkExternalizeDivergence,
                                          printSkipExternalize,
                                          communicationModel,
-                                         checkFalsy1);
+                                         checkFalsy1,
+                                         nondetSkip);
 }
 
 inline std::string
@@ -1356,7 +1374,8 @@ printInvestigationResults(std::ostream& out,
                           bool printSkipExternalize = false,
                           dpor::model::CommunicationModel communicationModel =
                               dpor::model::CommunicationModel::Async,
-                          bool checkFalsy1 = false)
+                          bool checkFalsy1 = false,
+                          bool nondetSkip = false)
 {
     auto const threshold = computeTwoThirdsThreshold(validatorCount);
     for (auto const& result : results)
@@ -1381,6 +1400,7 @@ printInvestigationResults(std::ostream& out,
             << " print_skip_externalize="
             << (printSkipExternalize ? "on" : "off")
             << " falsy_1=" << (checkFalsy1 ? "on" : "off")
+            << " nondet_skip=" << (nondetSkip ? "on" : "off")
             << " prepare_boundary="
             << (nominationOnly ? "1" : "off")
             << " nomination_timer_limit=";

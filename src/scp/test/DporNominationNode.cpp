@@ -38,6 +38,20 @@ defaultValueHash(Value const& value)
 
 }
 
+DporNominationNode::TxSetDownloadWaitTimeChoiceRequired::
+    TxSetDownloadWaitTimeChoiceRequired(
+        std::vector<std::chrono::milliseconds> choices)
+    : std::runtime_error("txset download wait time choice is required")
+    , mChoices(std::move(choices))
+{
+}
+
+std::vector<std::chrono::milliseconds> const&
+DporNominationNode::TxSetDownloadWaitTimeChoiceRequired::getChoices() const
+{
+    return mChoices;
+}
+
 DporNominationNode::DporNominationNode(SecretKey const& secretKey,
                                        SCPQuorumSet const& localQSet)
     : DporNominationNode(secretKey, localQSet, Configuration{})
@@ -81,6 +95,17 @@ void
 DporNominationNode::storeQuorumSet(SCPQuorumSet const& qSet)
 {
     mQuorumSets[getQSetHash(qSet)] = std::make_shared<SCPQuorumSet>(qSet);
+}
+
+SCPQuorumSetPtr
+DporNominationNode::getStoredQuorumSet(Hash const& qSetHash) const
+{
+    auto it = mQuorumSets.find(qSetHash);
+    if (it == mQuorumSets.end())
+    {
+        return nullptr;
+    }
+    return it->second;
 }
 
 bool
@@ -175,6 +200,8 @@ DporNominationNode::applyConfiguration(Configuration const& config)
     {
         mTxSetDownloadWaitTimes = config.mTxSetDownloadWaitTimes;
     }
+    mNondeterministicTxSetDownloadWaitTimeAfterFirstCall =
+        config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall;
     mNominationTimerSetLimit = config.mNominationTimerSetLimit;
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 
@@ -199,6 +226,7 @@ DporNominationNode::clearReplayState()
     mTimers.clear();
     mTimerSetCountByKey.clear();
     mNominationRoundBySlot.clear();
+    mPendingTxSetDownloadWaitTimeChoices.clear();
     mTxSetDownloadWaitTimeCallCount = 0;
     mHasCrossedNominationBoundary = false;
     mNominationBoundaryEnvelope.reset();
@@ -310,6 +338,13 @@ DporNominationNode::fireTimer(uint64 slotIndex, int timerID)
         cb();
     }
     return true;
+}
+
+void
+DporNominationNode::enqueueTxSetDownloadWaitTimeChoice(
+    std::chrono::milliseconds waitTime)
+{
+    mPendingTxSetDownloadWaitTimeChoices.push_back(waitTime);
 }
 
 DporNominationNode::ReplayBaseline
@@ -674,6 +709,24 @@ DporNominationNode::getQSet(Hash const& qSetHash)
 std::optional<std::chrono::milliseconds>
 DporNominationNode::getTxSetDownloadWaitTime(Value const&) const
 {
+    if (mNondeterministicTxSetDownloadWaitTimeAfterFirstCall &&
+        mTxSetDownloadWaitTimeCallCount >= 1 &&
+        mTxSetDownloadWaitTimes.size() >= 2 &&
+        mTxSetDownloadWaitTimes.front() != mTxSetDownloadWaitTimes.at(1))
+    {
+        if (mPendingTxSetDownloadWaitTimeChoices.empty())
+        {
+            throw TxSetDownloadWaitTimeChoiceRequired(
+                {mTxSetDownloadWaitTimes.front(),
+                 mTxSetDownloadWaitTimes.at(1)});
+        }
+
+        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.front();
+        mPendingTxSetDownloadWaitTimeChoices.pop_front();
+        ++mTxSetDownloadWaitTimeCallCount;
+        return waitTime;
+    }
+
     if (mTxSetDownloadWaitTimes.empty())
     {
         return getTxSetDownloadTimeout();
