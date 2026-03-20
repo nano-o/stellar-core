@@ -1030,6 +1030,34 @@ TEST_CASE("dpor nomination investigation threshold-split balloting can "
     }
 }
 
+TEST_CASE("dpor nomination investigation threshold-split balloting replays "
+          "nondet skip timer choices with balloting timer limits",
+          "[scp][dpor][investigation]")
+{
+    ScopedPartitionLogLevel quietSCP("SCP", LogLevel::LVL_WARNING);
+
+    std::vector<dpor_nomination_investigation::InvestigationResult> results;
+    REQUIRE_NOTHROW(results =
+                        dpor_nomination_investigation::
+                            runRuntimeGrowthInvestigation(
+                                1, std::nullopt,
+                                dpor_nomination_investigation::
+                                    InvestigationScenario::Id::
+                                        ThresholdSplitBalloting,
+                                false, kSmallTopologyValidatorCount,
+                                dpor_nomination_investigation::
+                                    TimeoutSettings{.mBalloting = true},
+                                dpor_nomination_investigation::
+                                    TimerSetLimitSettings{
+                                        .mBalloting = uint32_t{2}},
+                                false, false, false, false, false,
+                                dpor::model::CommunicationModel::FifoP2P,
+                                false, true));
+
+    REQUIRE(results.size() == 1);
+    REQUIRE(results.front().mVerifyResult.executions_explored > 0);
+}
+
 TEST_CASE("dpor nomination invariant checks surface receive-time violations "
           "before later local sends",
           "[scp][dpor][investigation][invariant]")

@@ -196,6 +196,9 @@ class DporNominationDporAdapter
     };
 
     void initializeNode(ReplayState& state, std::size_t nodeIndex) const;
+    void restoreNodeBaseline(
+        ReplayState& state, std::size_t nodeIndex,
+        DporNominationNode::ReplayBaseline const& baseline) const;
     void restoreBaseline(ReplayState& state, std::size_t nodeIndex) const;
     ReplayState& acquireReplayState(std::size_t nodeIndex) const;
     void rebuildReplayBaselines();

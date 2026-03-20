@@ -616,11 +616,18 @@ DporNominationDporAdapter::restoreBaseline(ReplayState& state,
                                            std::size_t nodeIndex) const
 {
     auto const& baseline = mReplayBaselines.at(nodeIndex);
-    state.mNode.restoreReplayBaseline(baseline.mNodeState);
+    restoreNodeBaseline(state, nodeIndex, baseline.mNodeState);
     state.mPendingSends = baseline.mPendingSends;
     state.mPendingInvariantViolation = baseline.mPendingInvariantViolation;
+}
 
-    for (auto const& timer : baseline.mNodeState.mTimers)
+void
+DporNominationDporAdapter::restoreNodeBaseline(
+    ReplayState& state, std::size_t nodeIndex,
+    DporNominationNode::ReplayBaseline const& baseline) const
+{
+    state.mNode.restoreReplayBaseline(baseline);
+    for (auto const& timer : baseline.mTimers)
     {
         switch (timer.mTimerID)
         {
@@ -754,23 +761,39 @@ DporNominationDporAdapter::replayObservation(ReplayState& state,
 
     auto const applyWithMaybeChoice =
         [&](auto&& applyObservation) -> ReplayObservationProgress {
-        std::size_t consumedChoices = 0;
+        auto const replayBaseline = state.mNode.snapshotReplayBaseline(mSlotIndex);
+        auto const pendingInvariantViolation = state.mPendingInvariantViolation;
+        std::vector<std::chrono::milliseconds> chosenWaitTimes;
+
+        auto const restoreReplayCheckpoint = [&]() {
+            restoreNodeBaseline(state, nodeIndex, replayBaseline);
+            state.mPendingInvariantViolation = pendingInvariantViolation;
+            for (auto const& waitTime : chosenWaitTimes)
+            {
+                state.mNode.enqueueTxSetDownloadWaitTimeChoice(waitTime);
+            }
+        };
+
         while (true)
         {
+            restoreReplayCheckpoint();
             try
             {
                 applyObservation();
                 return ReplayObservationProgress{
-                    .mConsumedTraceEntries = 1 + consumedChoices,
-                    .mConsumedStepCount = consumedChoices};
+                    .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
+                    .mConsumedStepCount = chosenWaitTimes.size()};
             }
             catch (DporNominationNode::TxSetDownloadWaitTimeChoiceRequired
                        const& e)
             {
-                auto const choiceIndex = observedIndex + 1 + consumedChoices;
+                auto const choiceIndex =
+                    observedIndex + 1 + chosenWaitTimes.size();
                 if (choiceIndex >= trace.size())
                 {
                     return ReplayObservationProgress{
+                        .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
+                        .mConsumedStepCount = chosenWaitTimes.size(),
                         .mPendingEvent = makeTxSetDownloadWaitTimeChoiceEvent(
                             e.getChoices())};
                 }
@@ -801,8 +824,7 @@ DporNominationDporAdapter::replayObservation(ReplayState& state,
                         "time");
                 }
 
-                state.mNode.enqueueTxSetDownloadWaitTimeChoice(waitTime);
-                ++consumedChoices;
+                chosenWaitTimes.push_back(waitTime);
             }
         }
     };
@@ -972,6 +994,7 @@ DporNominationDporAdapter::captureNextEvent(std::size_t nodeIndex,
             replayObservation(state, nodeIndex, trace, observedCount);
         if (replayed.mPendingEvent)
         {
+            eventCount += replayed.mConsumedStepCount;
             if (eventCount == step)
             {
                 return finish(replayed.mPendingEvent);
