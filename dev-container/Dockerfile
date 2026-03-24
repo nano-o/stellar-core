@@ -26,11 +26,13 @@ RUN set -eux; \
         bat \
         bear \
         bison \
+        bubblewrap \
         build-essential \
         ca-certificates \
         ccache \
         clang-20 \
         clang-format-20 \
+        clang-tidy-20 \
         clangd-20 \
         cmake \
         cpp-14 \
@@ -45,6 +47,7 @@ RUN set -eux; \
         gdb \
         git \
         google-perftools \
+        libgoogle-perftools-dev \
         heaptrack \
         hyperfine \
         iwyu \
@@ -76,10 +79,13 @@ RUN set -eux; \
         postgresql \
         procps \
         python3 \
+        python3-pip \
+        python3-venv \
         qpdf \
         ripgrep \
         rsync \
         sed \
+        socat \
         sqlite3 \
         strace \
         sudo \

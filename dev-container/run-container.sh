@@ -90,6 +90,7 @@ mkdir -p "${codex_state_dir}"
 
 docker_args=(
   -it
+  --init
   --name "${container_name}"
   -e PROJECT_NAME="${project_name}"
   -e COLORTERM=truecolor
