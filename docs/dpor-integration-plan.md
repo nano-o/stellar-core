@@ -5,6 +5,10 @@
 This note describes a minimal, opt-in build integration for experimenting with
 the DPOR model checker in `stellar-core`.
 
+The integration should treat DPOR as a source-pinned, test-only dependency.
+The important factor is not just that it is header-only; it is also that the
+checker is still unstable enough that we want churn and blast radius contained.
+
 The immediate goal is to make it possible to build and run:
 
 - DPOR-based smoke and property tests for SCP
@@ -35,6 +39,8 @@ Important consequences:
 - existing test sources are compiled into the main `stellar-core` binary when
   `BUILD_TESTS` is enabled
 - DPOR is a header-only C++20 library
+- DPOR should be treated as a source-pinned test dependency, not a system
+  dependency discovered from "whatever is installed"
 - `stellar-core` is still a C++17 project, and the current configure flow bakes
   `-std=c++17` into `CXX`
 - the earlier `dpor-skip-ledgers-p25` integration ended up keeping reusable
@@ -54,10 +60,11 @@ include paths and target-local C++20 flags.
 In [configure.ac](/home/nano/code/stellar-core/configure.ac):
 
 - add `--enable-dpor`, default `no`
-- make it valid only when tests are enabled
+- make it valid only when tests are enabled, so DPOR stays behind both
+  `BUILD_TESTS` and `ENABLE_DPOR`
 - add `--with-dpor-dir=PATH`
-- support both a sibling checkout such as `../dpor` and an in-tree pinned copy
-  such as `external/dpor`
+- treat an in-tree pinned copy such as `external/dpor` as the primary layout
+- allow a sibling checkout such as `../dpor` only as a local override
 - export:
   - `DPOR_DIR`
   - `DPOR_CPPFLAGS`
@@ -70,8 +77,8 @@ Recommended default behavior:
 - otherwise prefer `external/dpor` if present
 - otherwise fall back to `../dpor`
 
-This keeps local iteration convenient while still leaving room for a pinned,
-reproducible in-tree DPOR checkout.
+This keeps the default build reproducible while still leaving a convenient
+escape hatch for local iteration against a sibling checkout.
 
 Configure-time checks should verify:
 
@@ -83,6 +90,12 @@ That compile probe should use the actual target-local compatibility flags, not
 just plain `-std=c++20`. In practice this may include a workaround such as
 `-DFMT_CONSTEVAL=` if the same issue seen in `dpor-skip-ledgers-p25` still
 applies.
+
+Do not make DPOR a system dependency in this phase:
+
+- no package-manager integration
+- no configure-time search for an arbitrary installed DPOR
+- no import of the upstream DPOR build system
 
 ### 2. Keep DPOR Sources Out Of The Main Test Source Bucket
 
@@ -125,6 +138,9 @@ That shared support will likely include:
 - the DPOR replay adapter
 - small utility helpers shared by both tests and the investigation runner
 
+The rest of `stellar-core` should talk to this local adapter layer, not to
+upstream `dpor/...` headers directly. That keeps upstream API churn localized.
+
 The previous branch needed this split immediately, not as a later cleanup.
 There are likely to be at least two DPOR-facing binaries that reuse the same
 support code.
@@ -139,6 +155,7 @@ Acceptable shapes:
 In either case:
 
 - do not add DPOR sources to `stellar_core_SOURCES`
+- keep direct `#include <dpor/...>` usage confined to the DPOR support layer
 - compile the shared DPOR support with `$(DPOR_CXXFLAGS)`
 - keep `$(DPOR_CPPFLAGS)` target-local rather than adding it to all test builds
 
@@ -334,7 +351,8 @@ Mitigation:
 
 1. Add `--enable-dpor`, `--with-dpor-dir`, `DPOR_CPPFLAGS`, and
    `DPOR_CXXFLAGS` in configure, and make the compile probe use those exact
-   flags.
+   flags. Treat `external/dpor` as the default pinned source location and
+   `../dpor` as an override.
 2. Decide the initial `src/scp/test/Dpor*` and `src/scp/test/SCPDpor*` file
    set, then update `make-mks` to keep those files out of `SRC_TEST_*`.
 3. Add the shared DPOR/SCP support build unit in `src/Makefile.am`, compiled
@@ -353,10 +371,13 @@ Mitigation:
 The right first step is not to integrate DPOR into the existing test runner.
 It is to add a strictly optional DPOR build island that:
 
-- is enabled only with `--enable-dpor`
-- resolves DPOR from either a sibling checkout or a pinned in-tree copy
+- treats DPOR as a source-pinned, test-only dependency
+- is enabled only behind `BUILD_TESTS` plus `--enable-dpor`
+- resolves DPOR from a pinned in-tree copy by default, with a sibling checkout
+  only as an override
 - keeps reusable DPOR/SCP support under `src/scp/test/` but outside the normal
   `SRC_TEST_*` buckets
+- confines direct `dpor/...` includes to the local DPOR adapter/support layer
 - compiles DPOR targets with their own C++20 compatibility flags
 - provides two explicit entry points: Catch smoke/property tests and a CLI
   investigation runner
