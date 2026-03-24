@@ -241,6 +241,8 @@ Reusable deterministic SCP replay support:
 
 - `src/scp/test/DporScpNode.h`
 - `src/scp/test/DporScpNode.cpp`
+- `src/scp/test/ScpDporReplaySupport.h`
+- `src/scp/test/ScpDporReplaySupport.cpp`
 
 First SCP DPOR scenario module, following the `two_phase_commit_timeout/sim/`
 split into DPOR types, bridge, and scenario:
@@ -282,12 +284,25 @@ the old branch's simplest useful replay fixture:
   support layer and scenario naming broad enough to extend into later SCP
   phases
 
+The 2PC analogy here is about decomposition and thread-function contract, not
+about implementation size. The SCP scenario should copy the `types / bridge /
+scenario` split, but it should not pretend SCP replay is as lightweight as the
+2PC `ReplayState`. The old SCP branch already showed that SCP needs shared
+snapshot, baseline, and timer-reinstallation support.
+
 This is the smallest scenario that still exercises:
 
 - real early-SCP fanout to multiple receivers
 - deterministic leader/follower asymmetry
 - timer-versus-delivery behavior
 - reconstruction of the first handoff into balloting
+
+The choice of `[x, y, y]` is deliberate:
+
+- `[x, x, x]` is too trivial for a first DPOR-backed SCP slice
+- `[x, y, z]` adds branching without giving as clear a first expected outcome
+- `[x, y, y]` creates a useful asymmetry where the distinguished leader starts
+  from one value while the threshold-majority followers share another
 
 ### 1. DPOR Types File
 
@@ -299,18 +314,43 @@ For SCP, this should likely include:
 - a `ScpDporValue` type
 - a `Kind` enum for at least:
   - SCP envelope delivery
+  - timer-selection choices if multiple timers can fire
   - replay-only external choices such as txset download wait-time choices
 - the DPOR aliases:
   - `EventLabel`
   - `SendLabel`
   - `ReceiveLabel`
+  - `NondeterministicChoiceLabel`
   - `ObservedValue`
+  - `ExplorationGraph`
   - `ThreadTrace`
   - `ThreadFunction`
   - `Program`
 
 This file should not know about the concrete scenario topology. Its job is only
 to define the DPOR-facing value universe.
+
+The file should also make an explicit choice about `ScpDporValue` shape.
+Initially, the simplest correct option is likely to follow the old branch and
+carry:
+
+- sender thread
+- destination thread
+- slot index
+- either a full `SCPEnvelope` or a replay-choice payload
+
+This is less compact than the 2PC example's 64-bit `SimValue`, but it is much
+more realistic for a first SCP harness because full envelopes are easier to
+debug and the old branch already proved out comparison on that shape.
+
+Whichever representation is chosen, `ScpDporValue` must provide:
+
+- equality comparison
+- ordering for nondeterministic choice handling
+- a `std::hash` specialization
+
+This should be stated up front because DPOR uses ordering and equality on
+choice values, and hashability matters for graph and test utilities.
 
 ### 2. Bridge File
 
@@ -320,15 +360,24 @@ objects and `ScpDporValue`, analogous to `sim/bridge.hpp` in the 2PC example.
 Initially this should own:
 
 - node-index to DPOR-thread mapping helpers
-- receive-label construction for one local SCP node
 - conversion of emitted `SCPEnvelope`s into `ScpDporValue`
 - conversion of replayed `ScpDporValue`s back into envelope deliveries
+- encoding and decoding of timer-selection choices
 - encoding and decoding of external replay choices such as txset download wait
   times
 - human-readable formatting helpers for diagnostics
 
 Conceptually, this is where the DPOR encoding lives. The rest of the SCP test
 code should not manipulate the low-level DPOR value encoding directly.
+
+The bridge should stay narrow. In particular, it should not own:
+
+- receive-label construction
+- replay-step counting
+- send fanout from one emitted SCP envelope to `N - 1` peers
+
+Those are replay-logic responsibilities of the scenario layer, even if they use
+bridge helpers for encoding and destination mapping.
 
 ### 3. Scenario File
 
@@ -351,10 +400,38 @@ The scenario file should own:
   - previous value
   - per-node initial values
   - boundary mode and timeout toggles
-- a replay state wrapper for one node/thread
+- a scenario-specific replay state wrapper for one node/thread
 - the thread functions for the three validators
 - a `makeProgram()` factory
-- boundary inspection helpers used by tests and the investigation runner
+- concrete prepare-boundary inspection helpers used by tests and the
+  investigation runner
+
+The scenario-specific replay state is the SCP counterpart of the 2PC example's
+`ReplayState`, but it should stay focused on the scenario-level control flow:
+
+- counting replayed and captured I/O steps
+- deciding when the current thread-function call has reached its step boundary
+- constructing receive labels
+- queueing send fanout for newly emitted envelopes
+- emitting nondeterministic choice events when the scenario requires them
+
+### 4. Shared Replay Support
+
+Unlike the 2PC example, SCP also needs a shared replay-support layer beneath
+the scenario file. That support should live in a file such as
+`ScpDporReplaySupport.h/.cpp` and own the machinery that is expensive,
+cross-cutting, and reusable across multiple SCP scenarios:
+
+- slot-state snapshots and restore
+- replay baselines
+- timer re-installation helpers
+- thread-local replay-state caching
+- any allocation-heavy or snapshot-heavy replay support needed to keep the
+  thread functions deterministic and fast enough
+
+This is the part that corresponds to the old branch's heavier machinery in
+`DporNominationNode` plus the baseline-caching parts of
+`DporNominationDporAdapter`.
 
 ### Deterministic SCP Interface Used By The Scenario
 
@@ -387,9 +464,11 @@ Historically, the branch achieved this with methods such as:
 - `hasCrossedNominationBoundary()` and `getNominationBoundaryEnvelope()`
 
 The new support layer should offer the same capabilities under broader SCP
-terminology, for example via names such as `hasCrossedScenarioBoundary()` and
-`getBoundaryEnvelope()`, rather than baking "nomination" into the public replay
-surface.
+terminology in the shared support, but the scenario-facing helpers should use
+concrete names that match the actual boundary they inspect. For this first
+scenario, names like `hasReachedPrepareBoundary()` and
+`getPrepareBoundaryEnvelope()` are clearer than a generic
+`hasCrossedScenarioBoundary()`.
 
 For performance, the scenario module may also use:
 
@@ -401,13 +480,13 @@ but those are optimizations on top of the basic replay contract above.
 
 ### Replay Strategy
 
-The first SCP scenario should follow the same replay-from-scratch shape as the
-2PC example, while reusing the richer deterministic SCP driver support from the
-old branch.
+The first SCP scenario should follow the same thread-function contract as the
+2PC example, while using a substantially richer replay implementation under the
+hood.
 
 For each thread-function call:
 
-1. create or restore a fresh deterministic `DporScpNode`
+1. acquire or restore the shared replay-support state for that node
 2. start SCP once for that node's configured initial state
 3. replay prior observed values from the trace in order
 4. after each replayed observation, drain newly emitted envelopes and queue the
@@ -425,6 +504,61 @@ The observation mapping should be:
 The scenario should stop producing further events once
 the chosen SCP scenario boundary becomes true. Tests can then inspect the
 recorded boundary envelope to verify which first ballot boundary was reached.
+
+### Receive Matchers
+
+Receive labels should be constructed in the scenario replay logic, not in the
+bridge.
+
+For the first SCP scenario, the receive matcher should at least:
+
+- accept only `ScpDporValue` instances representing delivered SCP envelopes
+- require `destinationThread == localThread`
+
+It should not use `match_any_value()`. SCP needs per-destination receive
+matching for correctness.
+
+The first prepare-boundary scenario does not need to filter by ballot-envelope
+type at receive time, because once a local node reaches the prepare boundary the
+boundary envelope is recorded diagnostically rather than reintroduced as a
+normal modeled send.
+
+### Broadcast Fanout
+
+One emitted SCP envelope corresponds to a broadcast to the other validators.
+The scenario replay logic should therefore expand one local emission into
+`N - 1` `SendLabel`s, one per destination peer.
+
+This is an important difference from the 2PC example:
+
+- 2PC mostly has one protocol send call per modeled send event
+- SCP fanout turns one local protocol action into multiple DPOR send events
+
+This should be called out explicitly because it materially affects exploration
+size.
+
+### Timer Model And Multiple Timers
+
+The scenario should not assume the 2PC invariant of "at most one active timer at
+a receive point". SCP may have multiple relevant timers, and the old branch
+already needed timer-selection logic.
+
+The plan for timer handling should therefore be:
+
+- if no enabled timer is active, emit a blocking receive
+- if exactly one enabled timer is active, emit a non-blocking receive and treat
+  bottom as firing that timer
+- if multiple enabled timers are active, first emit a
+  `NondeterministicChoiceLabel` choosing which timer is the one that will fire,
+  then emit the non-blocking receive whose bottom corresponds to the chosen
+  timer
+
+That implies `ScpDporValue` needs a timer-choice variant in addition to
+envelope-delivery and external-choice variants.
+
+The initial prepare-boundary scenario may happen not to exercise multiple
+concurrent timers often, but the replay design should not rely on that as a
+semantic invariant.
 
 ### Why This Split Is Better For SCP
 
@@ -447,6 +581,8 @@ to:
 
 The first tests using this scenario should stay small:
 
+- a determinism test that the same `(trace, step)` input yields the same thread
+  output every time
 - a smoke test that `makeProgram()` builds and explores at least one execution
 - a step-shape test that the leader first emits the expected initial SCP sends
   before waiting
