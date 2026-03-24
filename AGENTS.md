@@ -33,9 +33,11 @@ Key files:
 
 The project is **C++17** (`AX_CXX_COMPILE_STDCXX(17)` in configure.ac bakes
 `-std=c++17` into `CXX`). DPOR requires **C++20**. DPOR targets must use
-per-target `_CXXFLAGS = -std=c++20 -DFMT_CONSTEVAL=` to override the baseline.
-The `-DFMT_CONSTEVAL=` workaround is required because the vendored fmt version
-misuses `consteval` under C++20.
+per-target flags exported via `DPOR_CXXFLAGS` to override the baseline. Unless
+a local build proves otherwise, `DPOR_CXXFLAGS` should include
+`-std=c++20 -DFMT_CONSTEVAL=`. The `-DFMT_CONSTEVAL=` workaround is required
+because the vendored fmt/spdlog headers are not currently safe under C++20
+without it.
 
 Normal build:
 ```bash
@@ -80,15 +82,20 @@ SCP implementation:
 Existing SCP tests:
 - `src/scp/test/SCPTests.cpp` — main SCP test file with `TestSCP` driver
 
-DPOR harness files go in `src/scp/test/` with `Dpor*` or `SCPDpor*` prefixes,
-but must be excluded from `SRC_TEST_CXX_FILES` via `make-mks`.
+DPOR harness files go in `src/scp/test/`, but must be excluded from
+`SRC_TEST_CXX_FILES` via `make-mks`. This includes both the historical
+`Dpor*` / `SCPDpor*` names and the newer `ScpDpor*` files from the current
+plan.
 
 ## Implementation order (from the plan)
 
 1. `configure.ac`: add `--enable-dpor`, `--with-dpor-dir`, `DPOR_CPPFLAGS`,
    `DPOR_CXXFLAGS`, `ENABLE_DPOR` conditional, compile probe
-2. `make-mks`: carve `Dpor*` and `SCPDpor*` files out of `SRC_TEST_*`
-3. `src/Makefile.am`: add convenience library with target-local C++20 flags
+2. `make-mks`: carve `Dpor*`, `SCPDpor*`, and `ScpDpor*` files out of
+   `SRC_TEST_*`
+3. `src/Makefile.am`: add the shared DPOR/SCP support target with target-local
+   C++20 flags; use a convenience library only if you are comfortable with
+   `--enable-dpor` making `make` build that support
 4. `src/Makefile.am`: add `EXTRA_PROGRAMS` for test binary and investigation
    runner behind `ENABLE_DPOR`
 5. `ScpDporTypes.h`, `ScpDporBridge.h` — value type and encoding layer
@@ -99,8 +106,9 @@ but must be excluded from `SRC_TEST_CXX_FILES` via `make-mks`.
 9. Verify emitted compile/link commands
 10. Expand replay model; add SCP-header testability hooks only if needed
 
-Create stub files for steps 1-4 in parallel with steps 5-6, since the build
-skeleton needs at least one real source file to validate against.
+This is dependency order, not literal commit order. In practice, steps 2-8 will
+be interleaved, starting with stub files so the build skeleton has concrete
+sources to classify and compile.
 
 ## Container environment
 
