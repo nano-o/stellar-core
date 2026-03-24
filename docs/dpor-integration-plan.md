@@ -86,9 +86,9 @@ Configure-time checks should verify:
   same flags intended for real DPOR targets
 
 That compile probe should use the actual target-local compatibility flags, not
-just plain `-std=c++20`. In practice this may include a workaround such as
-`-DFMT_CONSTEVAL=` if the same issue seen in `dpor-skip-ledgers-p25` still
-applies.
+just plain `-std=c++20`. Unless a local build proves otherwise, the DPOR target
+flags should assume the same `-DFMT_CONSTEVAL=` workaround used in
+`dpor-skip-ledgers-p25`.
 
 Do not make DPOR a system dependency in this phase:
 
@@ -207,7 +207,10 @@ Practical implication:
 - keep the investigation runner as a separate non-Catch executable
 
 Routing DPOR through the existing `test` subcommand would drag the DPOR code
-back into the main binary, which defeats the C++17/C++20 separation.
+back into the default test binary and increase build coupling. The main reason
+to avoid that in this phase is not link-time C++17/C++20 incompatibility; it is
+to keep DPOR churn, compile cost, and workflow impact out of the normal test
+surface.
 
 ### 6. Keep Manual And Smoke Runs At The Binary Level
 
@@ -334,14 +337,22 @@ The file should also make an explicit choice about `ScpDporValue` shape.
 Initially, the simplest correct option is likely to follow the old branch and
 carry:
 
-- sender thread
-- destination thread
 - slot index
 - either a full `SCPEnvelope` or a replay-choice payload
+- optionally, additional small discriminators needed for replay-only choices
 
 This is less compact than the 2PC example's 64-bit `SimValue`, but it is much
 more realistic for a first SCP harness because full envelopes are easier to
 debug and the old branch already proved out comparison on that shape.
+
+`ScpDporValue` should be treated primarily as payload, not routing metadata.
+In particular:
+
+- `SendLabel.destination` should remain the source of truth for destination
+  routing
+- the sending thread is already tracked by the execution graph event
+- if sender identity is needed while replaying a delivered SCP envelope, it can
+  usually be recovered from `envelope.statement.nodeID`
 
 Whichever representation is chosen, `ScpDporValue` must provide:
 
@@ -433,6 +444,25 @@ This is the part that corresponds to the old branch's heavier machinery in
 `DporNominationNode` plus the baseline-caching parts of
 `DporNominationDporAdapter`.
 
+The split between the two reusable layers should be explicit:
+
+- `DporScpNode` is the SCP-facing layer: deterministic `SCPDriver` behavior,
+  timer hooks, envelope capture, and replay primitives such as
+  `receiveEnvelope(...)` and `fireTimer(...)`
+- `ScpDporReplaySupport` is the DPOR-facing layer: baselines, restore logic,
+  thread-local caching, and replay-state management for the thread functions
+
+For the first scenario, the baseline strategy should stay simple:
+
+- take a baseline after initial SCP startup for each node
+- restore that baseline for each thread-function call
+- replay the remaining trace suffix from that point
+
+This still leaves replay cost O(trace length) from the baseline forward, which
+is acceptable for the first scenario. Intermediate baselines can be deferred and
+should be treated as a later scaling optimization if deeper scenarios make
+envelope replay too expensive.
+
 ### Deterministic SCP Interface Used By The Scenario
 
 The old branch already identified the deterministic SCP interface the scenario
@@ -513,10 +543,12 @@ bridge.
 For the first SCP scenario, the receive matcher should at least:
 
 - accept only `ScpDporValue` instances representing delivered SCP envelopes
-- require `destinationThread == localThread`
+- require the scenario slot and value kind to match what this thread can
+  currently receive
 
-It should not use `match_any_value()`. SCP needs per-destination receive
-matching for correctness.
+It should not use `match_any_value()`. SCP needs receive matching that is at
+least kind-aware, and DPOR already separately enforces
+`SendLabel.destination == tid` when choosing compatible sends.
 
 The first prepare-boundary scenario does not need to filter by ballot-envelope
 type at receive time, because once a local node reaches the prepare boundary the
@@ -555,6 +587,18 @@ The plan for timer handling should therefore be:
 
 That implies `ScpDporValue` needs a timer-choice variant in addition to
 envelope-delivery and external-choice variants.
+
+This timer-selection path is a two-event DPOR sequence, not a single logical
+step:
+
+- one DPOR event for the timer choice
+- one DPOR event for the later non-blocking receive whose bottom fires the
+  chosen timer
+
+The scenario replay state must account for both the `step` counter and the
+trace accordingly. When replaying a previously explored sequence, it should
+consume the chosen timer value first and then the later bottom observation,
+rather than treating timer choice and timer firing as the same replay event.
 
 The initial prepare-boundary scenario may happen not to exercise multiple
 concurrent timers often, but the replay design should not rely on that as a
@@ -691,6 +735,10 @@ Mitigation:
 
 ## Recommended Implementation Order
 
+This is dependency order, not necessarily literal commit order. In practice,
+steps 2 through 8 will likely be interleaved, starting with stub files so the
+build wiring has concrete sources to classify and compile.
+
 1. Add `--enable-dpor`, `--with-dpor-dir`, `DPOR_CPPFLAGS`, and
    `DPOR_CXXFLAGS` in configure, and make the compile probe use those exact
    flags. Treat `external/dpor` as the default pinned source location and
@@ -701,12 +749,20 @@ Mitigation:
    with target-local C++20 flags.
 4. Add an explicit Catch-based DPOR test binary and an explicit investigation
    runner binary behind `ENABLE_DPOR`.
-5. Add one trivial smoke test and one trivial investigation mode to prove both
-   binary paths work.
-6. Inspect the emitted compile and link commands before iterating on the real
-   SCP harness.
-7. Only after that, start expanding the replay model, allowing small SCP-header
-   testability hooks if they prove necessary.
+5. Add `ScpDporTypes` and `ScpDporBridge`, including the chosen
+   `ScpDporValue` representation and required comparison/hash support.
+6. Add `DporScpNode` plus `ScpDporReplaySupport`, with a simple
+   post-initialization baseline strategy.
+7. Add the first concrete scenario module,
+   `ScpDporThreeNodePrepareBoundaryScenario`, including receive matchers,
+   broadcast fanout, and timer-choice sequencing.
+8. Add one trivial smoke test, one determinism test, and one trivial
+   investigation mode to prove the binary paths and the first scenario path
+   work.
+9. Inspect the emitted compile and link commands before iterating on deeper SCP
+   scenarios.
+10. Only after that, start expanding the replay model, allowing small SCP-header
+    testability hooks if they prove necessary.
 
 ## Summary
 
