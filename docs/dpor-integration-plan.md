@@ -96,6 +96,21 @@ Do not make DPOR a system dependency in this phase:
 - no configure-time search for an arbitrary installed DPOR
 - no import of the upstream DPOR build system
 
+The upstream DPOR repository is:
+
+- `https://github.com/nano-o/CPP-DPOR.git` (branch `main`)
+
+In environments where only the `stellar-core` working directory is mounted (for
+example, a dev container), clone DPOR into `external/dpor` before running
+configure:
+
+```bash
+git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
+```
+
+The `external/dpor` path is already the preferred default for
+`--with-dpor-dir`, so no additional flags are needed after cloning.
+
 ### 2. Keep DPOR Sources Out Of The Main Test Source Bucket
 
 The first reusable DPOR/SCP harness should live next to the existing SCP tests
