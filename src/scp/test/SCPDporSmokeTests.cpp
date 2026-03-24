@@ -165,6 +165,76 @@ TEST_CASE("scp dpor exploration finds a prepare boundary",
     REQUIRE(foundPrepareBoundary);
 }
 
+TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
+          "[scp][dpor][smoke]")
+{
+    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    std::vector<ThreadTrace> threadTraces(
+        scenario.options().mValidators.size());
+    bool capturedTrace = false;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 12;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            if (!execution.is_full_execution())
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+
+            for (std::size_t nodeIndex = 0;
+                 nodeIndex < scenario.options().mValidators.size();
+                 ++nodeIndex)
+            {
+                threadTraces.at(nodeIndex) = execution.graph.thread_trace(
+                    threadIdForNodeIndex(nodeIndex));
+            }
+            capturedTrace = true;
+            return dpor::algo::TerminalExecutionAction::Stop;
+        };
+
+    static_cast<void>(dpor::algo::verify(config));
+    REQUIRE(capturedTrace);
+
+    bool sawFollowerEmitNominate = false;
+    bool sawBoundaryPrepare = false;
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto inspection =
+            scenario.inspectThreadReplayTrace(nodeIndex, threadTraces.at(nodeIndex));
+        REQUIRE(!inspection.mSteps.empty());
+
+        for (auto const& step : inspection.mSteps)
+        {
+            for (auto const& effect : step.mSideEffects)
+            {
+                if (nodeIndex > 0 &&
+                    effect.mKind ==
+                        DporScpNode::ReplayDebugEvent::Kind::EmitEnvelope &&
+                    effect.mEnvelope &&
+                    effect.mEnvelope->statement.pledges.type() ==
+                        SCP_ST_NOMINATE)
+                {
+                    sawFollowerEmitNominate = true;
+                }
+                if (effect.mKind ==
+                        DporScpNode::ReplayDebugEvent::Kind::EmitEnvelope &&
+                    effect.mBoundary && effect.mEnvelope &&
+                    effect.mEnvelope->statement.pledges.type() ==
+                        SCP_ST_PREPARE)
+                {
+                    sawBoundaryPrepare = true;
+                }
+            }
+        }
+    }
+
+    REQUIRE(sawFollowerEmitNominate);
+    REQUIRE(sawBoundaryPrepare);
+}
+
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
           "[scp][dpor][smoke]")
 {

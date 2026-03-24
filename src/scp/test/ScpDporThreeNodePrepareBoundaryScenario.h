@@ -9,6 +9,7 @@
 #include "scp/test/ScpDporReplaySupport.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -43,6 +44,31 @@ class ScpDporThreeNodePrepareBoundaryScenario
 
     struct BoundaryInspection
     {
+        bool mReachedBoundary{false};
+        std::optional<SCPEnvelope> mBoundaryEnvelope;
+    };
+
+    struct ThreadReplayTraceStep
+    {
+        enum class Kind : std::uint8_t
+        {
+            Send,
+            Receive,
+            NondeterministicChoice
+        };
+
+        Kind mKind{Kind::Send};
+        std::optional<SendLabel> mSend;
+        std::optional<ReceiveLabel> mReceive;
+        std::optional<NondeterministicChoiceLabel> mChoice;
+        std::optional<ObservedValue> mObservedValue;
+        std::vector<ObservedValue> mNestedChoices;
+        std::vector<DporScpNode::ReplayDebugEvent> mSideEffects;
+    };
+
+    struct ThreadReplayTraceInspection
+    {
+        std::vector<ThreadReplayTraceStep> mSteps;
         bool mReachedBoundary{false};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
@@ -198,6 +224,117 @@ class ScpDporThreeNodePrepareBoundaryScenario
                                ThreadTrace const& trace) const
     {
         return inspectPrepareBoundary(nodeIndex, trace).mBoundaryEnvelope;
+    }
+
+    ThreadReplayTraceInspection
+    inspectThreadReplayTrace(std::size_t nodeIndex,
+                             ThreadTrace const& trace) const
+    {
+        ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
+
+        auto& node = mReplaySupport.acquireNode(nodeIndex);
+        mReplaySupport.restoreBaseline(node, nodeIndex);
+
+        auto pendingSends = mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
+        std::size_t nextPendingSend = 0;
+        std::size_t observedCount = 0;
+        std::optional<int> selectedTimerID;
+        ThreadReplayTraceInspection inspection;
+
+        while (true)
+        {
+            while (nextPendingSend < pendingSends.size())
+            {
+                inspection.mSteps.push_back(ThreadReplayTraceStep{
+                    .mKind = ThreadReplayTraceStep::Kind::Send,
+                    .mSend = pendingSends.at(nextPendingSend++)});
+            }
+
+            if (node.hasReachedPrepareBoundary() || observedCount >= trace.size())
+            {
+                break;
+            }
+
+            auto const activeTimers = enabledTimerIDs(node);
+            if (!selectedTimerID && activeTimers.size() > 1)
+            {
+                std::vector<ScpDporValue> choices;
+                choices.reserve(activeTimers.size());
+                for (auto const timerID : activeTimers)
+                {
+                    choices.push_back(
+                        makeTimerChoiceValue(mOptions.mSlotIndex, timerID));
+                }
+
+                auto const& observed = trace.at(observedCount);
+                if (observed.is_bottom())
+                {
+                    throw std::logic_error(
+                        "trace does not contain a timer-choice observation");
+                }
+                auto const& observedValue = observed.value();
+                if (!isTimerChoiceValue(observedValue))
+                {
+                    throw std::logic_error(
+                        "trace entry is not a timer-choice value");
+                }
+                auto const timerID = decodeTimerChoice(observedValue);
+                if (std::find(activeTimers.begin(), activeTimers.end(),
+                              timerID) == activeTimers.end())
+                {
+                    throw std::logic_error(
+                        "trace selected a timer that is not active");
+                }
+
+                inspection.mSteps.push_back(ThreadReplayTraceStep{
+                    .mKind = ThreadReplayTraceStep::Kind::NondeterministicChoice,
+                    .mChoice = NondeterministicChoiceLabel{
+                        .value = choices.front(), .choices = std::move(choices)},
+                    .mObservedValue = observed});
+                selectedTimerID = timerID;
+                ++observedCount;
+                continue;
+            }
+
+            auto const nonBlocking =
+                selectedTimerID.has_value() || activeTimers.size() == 1;
+            auto timerToFire = selectedTimerID;
+            if (!timerToFire && activeTimers.size() == 1)
+            {
+                timerToFire = activeTimers.front();
+            }
+
+            auto replayed = mReplaySupport.replayObservation(
+                node, nodeIndex, trace, observedCount, timerToFire);
+
+            ThreadReplayTraceStep step;
+            step.mKind = ThreadReplayTraceStep::Kind::Receive;
+            step.mReceive = nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
+                                        : makeReceiveLabel(nodeIndex);
+            step.mObservedValue = trace.at(observedCount);
+            for (std::size_t i = 1; i < replayed.mConsumedTraceEntries; ++i)
+            {
+                step.mNestedChoices.push_back(trace.at(observedCount + i));
+            }
+            step.mSideEffects = node.takeReplayDebugEvents();
+            inspection.mSteps.push_back(std::move(step));
+
+            if (replayed.mPendingEvent)
+            {
+                break;
+            }
+
+            observedCount += replayed.mConsumedTraceEntries;
+            queuePendingEnvelopeSends(pendingSends, node, nodeIndex);
+            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
+        }
+
+        inspection.mReachedBoundary = node.hasReachedPrepareBoundary();
+        if (auto const* envelope = node.getPrepareBoundaryEnvelope())
+        {
+            inspection.mBoundaryEnvelope = *envelope;
+        }
+        return inspection;
     }
 
     Options const&

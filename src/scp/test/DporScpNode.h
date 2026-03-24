@@ -151,6 +151,26 @@ class DporScpNode : public SCPDriver
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
 
+    struct ReplayDebugEvent
+    {
+        enum class Kind : std::uint8_t
+        {
+            EmitEnvelope,
+            SetupTimer,
+            StopTimer,
+            FireTimer,
+            UseTxSetDownloadWaitTime
+        };
+
+        Kind mKind{Kind::EmitEnvelope};
+        uint64 mSlotIndex{};
+        int mTimerID{};
+        std::chrono::milliseconds mTimeout{};
+        std::optional<SCPEnvelope> mEnvelope;
+        std::optional<std::chrono::milliseconds> mWaitTime;
+        bool mBoundary{false};
+    };
+
     explicit DporScpNode(SecretKey const& secretKey,
                          SCPQuorumSet const& localQSet);
 
@@ -202,6 +222,9 @@ class DporScpNode : public SCPDriver
 
     void
     enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
+
+    std::vector<ReplayDebugEvent>
+    takeReplayDebugEvents();
 
     ReplayBaseline
     snapshotReplayBaseline(uint64 slotIndex) const;
@@ -325,6 +348,7 @@ class DporScpNode : public SCPDriver
         mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};
     mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
+    mutable std::vector<ReplayDebugEvent> mReplayDebugEvents;
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;
 

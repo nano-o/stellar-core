@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string_view>
 #include <type_traits>
@@ -21,6 +22,7 @@ struct CommandLineOptions
     std::size_t mDepth{12};
     std::optional<std::size_t> mDumpInitialSteps;
     bool mDumpTerminalTrace{false};
+    bool mDumpTerminalReplayTrace{false};
     dpor::model::CommunicationModel mCommunicationModel{
         dpor::model::CommunicationModel::Async};
 };
@@ -30,7 +32,151 @@ printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
               << " [--workers N] [--depth N] [--fifo]"
-              << " [--dump-initial-steps N] [--dump-terminal-trace]\n";
+              << " [--dump-initial-steps N] [--dump-terminal-trace]"
+              << " [--dump-terminal-replay-trace]\n";
+}
+
+template <typename T>
+std::string
+formatWithStream(T const& value)
+{
+    std::ostringstream out;
+    out << value;
+    return out.str();
+}
+
+std::string
+formatObservedValue(stellar::scpdpor::ObservedValue const& observed)
+{
+    return observed.is_bottom() ? std::string("<bottom>")
+                                : formatWithStream(observed.value());
+}
+
+void
+printEventLabel(std::ostream& out, stellar::scpdpor::EventLabel const& event)
+{
+    std::visit(
+        [&](auto const& label) {
+            using Label = std::decay_t<decltype(label)>;
+            if constexpr (std::is_same_v<Label, stellar::scpdpor::SendLabel>)
+            {
+                out << "send(dst=" << label.destination
+                    << ", value=" << label.value << ")";
+            }
+            else if constexpr (std::is_same_v<Label,
+                                              stellar::scpdpor::ReceiveLabel>)
+            {
+                out << "receive(nonblocking="
+                    << (label.is_nonblocking() ? "true" : "false") << ")";
+            }
+            else if constexpr (std::is_same_v<
+                                   Label,
+                                   stellar::scpdpor::NondeterministicChoiceLabel>)
+            {
+                out << "choice(count=" << label.choices.size()
+                    << ", first=" << label.value << ")";
+            }
+            else if constexpr (std::is_same_v<Label, dpor::model::BlockLabel>)
+            {
+                out << "block";
+            }
+            else if constexpr (std::is_same_v<Label, dpor::model::ErrorLabel>)
+            {
+                out << "error(message=" << label.message << ")";
+            }
+        },
+        event);
+}
+
+void
+printReplayDebugEvent(std::ostream& out, uint64_t slotIndex,
+                      stellar::DporScpNode::ReplayDebugEvent const& event)
+{
+    using ReplayDebugEvent = stellar::DporScpNode::ReplayDebugEvent;
+
+    switch (event.mKind)
+    {
+    case ReplayDebugEvent::Kind::EmitEnvelope:
+        out << "emit(";
+        if (event.mBoundary)
+        {
+            out << "boundary=true, ";
+        }
+        out << "value="
+            << stellar::scpdpor::makeEnvelopeValue(slotIndex, *event.mEnvelope)
+            << ")";
+        return;
+    case ReplayDebugEvent::Kind::SetupTimer:
+        out << "setup-timer(slot=" << event.mSlotIndex
+            << ", id=" << stellar::scpdpor::timerName(event.mTimerID)
+            << ", ms=" << event.mTimeout.count() << ")";
+        return;
+    case ReplayDebugEvent::Kind::StopTimer:
+        out << "stop-timer(slot=" << event.mSlotIndex
+            << ", id=" << stellar::scpdpor::timerName(event.mTimerID) << ")";
+        return;
+    case ReplayDebugEvent::Kind::FireTimer:
+        out << "fire-timer(slot=" << event.mSlotIndex
+            << ", id=" << stellar::scpdpor::timerName(event.mTimerID)
+            << ", ms=" << event.mTimeout.count() << ")";
+        return;
+    case ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime:
+        out << "txset-wait(ms=" << event.mWaitTime->count() << ")";
+        return;
+    }
+}
+
+void
+printThreadReplayTrace(
+    std::ostream& out, uint64_t slotIndex,
+    stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+        ThreadReplayTraceInspection const& inspection)
+{
+    for (std::size_t stepIndex = 0; stepIndex < inspection.mSteps.size();
+         ++stepIndex)
+    {
+        auto const& step = inspection.mSteps.at(stepIndex);
+        out << "  step=" << stepIndex << " ";
+        switch (step.mKind)
+        {
+        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            ThreadReplayTraceStep::Kind::Send:
+            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mSend});
+            break;
+        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            ThreadReplayTraceStep::Kind::NondeterministicChoice:
+            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mChoice});
+            out << " selected=" << formatObservedValue(*step.mObservedValue);
+            break;
+        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            ThreadReplayTraceStep::Kind::Receive:
+            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mReceive});
+            out << " observed=" << formatObservedValue(*step.mObservedValue);
+            break;
+        }
+        out << "\n";
+
+        for (auto const& choice : step.mNestedChoices)
+        {
+            out << "    choice=" << formatObservedValue(choice) << "\n";
+        }
+        for (auto const& effect : step.mSideEffects)
+        {
+            out << "    effect=";
+            printReplayDebugEvent(out, slotIndex, effect);
+            out << "\n";
+        }
+    }
+
+    out << "  reached-boundary="
+        << (inspection.mReachedBoundary ? "true" : "false") << "\n";
+    if (inspection.mBoundaryEnvelope)
+    {
+        out << "  boundary="
+            << stellar::scpdpor::makeEnvelopeValue(slotIndex,
+                                                   *inspection.mBoundaryEnvelope)
+            << "\n";
+    }
 }
 
 CommandLineOptions
@@ -74,6 +220,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mDumpTerminalTrace = true;
             continue;
         }
+        if (arg == "--dump-terminal-replay-trace")
+        {
+            options.mDumpTerminalReplayTrace = true;
+            continue;
+        }
         throw std::invalid_argument("unknown or incomplete argument: " +
                                     std::string(arg));
     }
@@ -110,59 +261,7 @@ main(int argc, char* argv[])
                         auto event = thread({}, step);
                         if (event)
                         {
-                            std::visit(
-                                [&](auto const& label) {
-                                    using Label = std::decay_t<decltype(label)>;
-                                    if constexpr (std::is_same_v<
-                                                      Label,
-                                                      stellar::scpdpor::SendLabel>)
-                                    {
-                                        std::cout << "send(dst="
-                                                  << label.destination
-                                                  << ", value=" << label.value
-                                                  << ")";
-                                    }
-                                    else if constexpr (std::is_same_v<
-                                                           Label,
-                                                           stellar::scpdpor::
-                                                               ReceiveLabel>)
-                                    {
-                                        std::cout
-                                            << "receive(nonblocking="
-                                            << (label.is_nonblocking()
-                                                    ? "true"
-                                                    : "false")
-                                            << ")";
-                                    }
-                                    else if constexpr (std::is_same_v<
-                                                           Label,
-                                                           stellar::scpdpor::
-                                                               NondeterministicChoiceLabel>)
-                                    {
-                                        std::cout
-                                            << "choice(count="
-                                            << label.choices.size()
-                                            << ", first=" << label.value
-                                            << ")";
-                                    }
-                                    else if constexpr (std::is_same_v<
-                                                           Label,
-                                                           dpor::model::
-                                                               BlockLabel>)
-                                    {
-                                        std::cout << "block";
-                                    }
-                                    else if constexpr (std::is_same_v<
-                                                           Label,
-                                                           dpor::model::
-                                                               ErrorLabel>)
-                                    {
-                                        std::cout
-                                            << "error(message="
-                                            << label.message << ")";
-                                    }
-                                },
-                                *event);
+                            printEventLabel(std::cout, *event);
                         }
                         else
                         {
@@ -187,7 +286,7 @@ main(int argc, char* argv[])
         config.program = scenario.makeProgram();
         config.max_depth = options.mDepth;
         config.communication_model = options.mCommunicationModel;
-        if (options.mDumpTerminalTrace)
+        if (options.mDumpTerminalTrace || options.mDumpTerminalReplayTrace)
         {
             config.on_terminal_execution =
                 [&](dpor::algo::TerminalExecutionT<
@@ -213,20 +312,34 @@ main(int argc, char* argv[])
                     {
                         auto const tid =
                             stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-                        auto const trace = execution.graph.thread_trace(tid);
-                        std::cout << "thread=" << tid << "\n";
-                        for (std::size_t i = 0; i < trace.size(); ++i)
+                        if (options.mDumpTerminalTrace)
                         {
-                            std::cout << "  obs=" << i << " ";
-                            if (trace.at(i).is_bottom())
+                            auto const trace = execution.graph.thread_trace(tid);
+                            std::cout << "thread=" << tid << "\n";
+                            for (std::size_t i = 0; i < trace.size(); ++i)
                             {
-                                std::cout << "<bottom>";
+                                std::cout << "  obs=" << i << " ";
+                                if (trace.at(i).is_bottom())
+                                {
+                                    std::cout << "<bottom>";
+                                }
+                                else
+                                {
+                                    std::cout << trace.at(i).value();
+                                }
+                                std::cout << "\n";
                             }
-                            else
-                            {
-                                std::cout << trace.at(i).value();
-                            }
-                            std::cout << "\n";
+                        }
+                        if (options.mDumpTerminalReplayTrace)
+                        {
+                            auto const trace = execution.graph.thread_trace(tid);
+                            auto inspection =
+                                scenario.inspectThreadReplayTrace(nodeIndex,
+                                                                  trace);
+                            std::cout << "thread=" << tid << " replay\n";
+                            printThreadReplayTrace(std::cout,
+                                                   scenario.options().mSlotIndex,
+                                                   inspection);
                         }
                     }
                     return dpor::algo::TerminalExecutionAction::Stop;

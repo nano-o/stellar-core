@@ -176,6 +176,11 @@ DporScpNode::fireTimer(uint64 slotIndex, int timerID)
     }
 
     auto cb = it->mCallback;
+    mReplayDebugEvents.push_back(ReplayDebugEvent{
+        .mKind = ReplayDebugEvent::Kind::FireTimer,
+        .mSlotIndex = slotIndex,
+        .mTimerID = timerID,
+        .mTimeout = it->mTimeout});
     mTimers.erase(it);
     if (cb)
     {
@@ -189,6 +194,14 @@ DporScpNode::enqueueTxSetDownloadWaitTimeChoice(
     std::chrono::milliseconds waitTime)
 {
     mPendingTxSetDownloadWaitTimeChoices.push_back(waitTime);
+}
+
+std::vector<DporScpNode::ReplayDebugEvent>
+DporScpNode::takeReplayDebugEvents()
+{
+    auto events = std::move(mReplayDebugEvents);
+    mReplayDebugEvents.clear();
+    return events;
 }
 
 DporScpNode::ReplayBaseline
@@ -573,12 +586,19 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
         auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
             mNextPendingTxSetDownloadWaitTimeChoice++);
         ++mTxSetDownloadWaitTimeCallCount;
+        mReplayDebugEvents.push_back(ReplayDebugEvent{
+            .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
+            .mWaitTime = waitTime});
         return waitTime;
     }
 
     if (mTxSetDownloadWaitTimes.empty())
     {
-        return getTxSetDownloadTimeout();
+        auto const waitTime = getTxSetDownloadTimeout();
+        mReplayDebugEvents.push_back(ReplayDebugEvent{
+            .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
+            .mWaitTime = waitTime});
+        return waitTime;
     }
 
     auto index = mTxSetDownloadWaitTimeCallCount;
@@ -586,8 +606,12 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
     {
         index = mTxSetDownloadWaitTimes.size() - 1;
     }
+    auto const waitTime = mTxSetDownloadWaitTimes[index];
     ++mTxSetDownloadWaitTimeCallCount;
-    return mTxSetDownloadWaitTimes[index];
+    mReplayDebugEvents.push_back(ReplayDebugEvent{
+        .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
+        .mWaitTime = waitTime});
+    return waitTime;
 }
 
 std::chrono::milliseconds
@@ -613,6 +637,10 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
     }
 
     mEmittedEnvelopes.push_back(envelope);
+    mReplayDebugEvents.push_back(
+        ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
+                         .mEnvelope = envelope,
+                         .mBoundary = reachesBoundaryNow});
     if (!alreadyReachedBoundary && !reachesBoundaryNow)
     {
         mPendingEnvelopes.push_back(envelope);
@@ -735,6 +763,10 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 {
     if (!cb)
     {
+        mReplayDebugEvents.push_back(
+            ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
+                             .mSlotIndex = slotIndex,
+                             .mTimerID = timerID});
         clearTimer(slotIndex, timerID);
         return;
     }
@@ -761,16 +793,29 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 
     if (timerSetLimit && setCount >= *timerSetLimit)
     {
+        mReplayDebugEvents.push_back(
+            ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
+                             .mSlotIndex = slotIndex,
+                             .mTimerID = timerID});
         clearTimer(slotIndex, timerID);
         return;
     }
 
+    mReplayDebugEvents.push_back(
+        ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::SetupTimer,
+                         .mSlotIndex = slotIndex,
+                         .mTimerID = timerID,
+                         .mTimeout = timeout});
     setTimer(TimerState{slotIndex, timerID, timeout, std::move(cb)});
 }
 
 void
 DporScpNode::stopTimer(uint64 slotIndex, int timerID)
 {
+    mReplayDebugEvents.push_back(
+        ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
+                         .mSlotIndex = slotIndex,
+                         .mTimerID = timerID});
     clearTimer(slotIndex, timerID);
 }
 
@@ -893,6 +938,7 @@ DporScpNode::clearReplayState()
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
     mTxSetDownloadWaitTimeCallCount = 0;
+    mReplayDebugEvents.clear();
     mHasReachedBoundary = false;
     mBoundaryEnvelope.reset();
 }
