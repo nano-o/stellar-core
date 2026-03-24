@@ -5,9 +5,12 @@
 #include "scp/test/ScpDporThreeNodePrepareBoundaryScenario.h"
 #include "util/Logging.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -32,6 +35,7 @@ struct CommandLineOptions
     uint32_t mMaxNominationRounds{1};
     bool mMaxNominationRoundsExplicit{false};
     std::optional<std::size_t> mDumpInitialSteps;
+    std::optional<std::chrono::seconds> mPrintStatsInterval;
     bool mDumpTerminalTrace{false};
     bool mDumpTerminalReplayTrace{false};
     dpor::model::CommunicationModel mCommunicationModel{
@@ -45,6 +49,7 @@ printUsage(char const* argv0)
               << " [--scenario prepare-boundary|nomination-timers]"
               << " [--workers N|--parallel] [--depth N]"
               << " [--max-nomination-rounds N] [--fifo]"
+              << " [--print-stats N]"
               << " [--dump-initial-steps N] [--dump-terminal-trace]"
               << " [--dump-terminal-replay-trace]\n";
 }
@@ -108,6 +113,63 @@ formatObservedValue(stellar::scpdpor::ObservedValue const& observed)
 {
     return observed.is_bottom() ? std::string("<bottom>")
                                 : formatWithStream(observed.value());
+}
+
+std::chrono::seconds
+parsePositiveSecondsValue(std::string_view arg, std::string_view value)
+{
+    auto const parsed = std::stoull(std::string(value));
+    if (parsed == 0)
+    {
+        throw std::invalid_argument(std::string(arg) +
+                                    " requires a value greater than 0");
+    }
+    if (parsed > static_cast<unsigned long long>(
+                     std::numeric_limits<std::chrono::seconds::rep>::max()))
+    {
+        throw std::invalid_argument(std::string(arg) + " value out of range");
+    }
+    return std::chrono::seconds(
+        static_cast<std::chrono::seconds::rep>(parsed));
+}
+
+std::string_view
+progressStateName(dpor::algo::ProgressState state)
+{
+    switch (state)
+    {
+    case dpor::algo::ProgressState::Running:
+        return "running";
+    case dpor::algo::ProgressState::Stopped:
+        return "stopped";
+    case dpor::algo::ProgressState::AllExplored:
+        return "all-explored";
+    }
+    throw std::logic_error("unknown progress state");
+}
+
+void
+printProgressSnapshot(std::ostream& out,
+                      dpor::algo::ProgressSnapshot const& snapshot)
+{
+    auto const elapsedMS =
+        std::chrono::duration_cast<std::chrono::duration<double, std::milli>>(
+            snapshot.elapsed);
+
+    std::ostringstream line;
+    line << "progress"
+         << " state=" << progressStateName(snapshot.state)
+         << " elapsed_ms=" << std::fixed << std::setprecision(3)
+         << elapsedMS.count()
+         << " terminal_executions=" << snapshot.terminal_executions
+         << " full_executions=" << snapshot.full_executions
+         << " error_executions=" << snapshot.error_executions
+         << " depth_limit_executions=" << snapshot.depth_limit_executions
+         << " active_workers=" << snapshot.active_workers << "/"
+         << snapshot.max_workers << " queued_tasks=" << snapshot.queued_tasks
+         << "/" << snapshot.max_queued_tasks << " counts_exact="
+         << std::boolalpha << snapshot.counts_exact;
+    out << line.str() << "\n" << std::flush;
 }
 
 void
@@ -290,6 +352,12 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
+        if (arg == "--print-stats" && i + 1 < argc)
+        {
+            options.mPrintStatsInterval =
+                parsePositiveSecondsValue(arg, argv[++i]);
+            continue;
+        }
         if (arg == "--dump-terminal-trace")
         {
             options.mDumpTerminalTrace = true;
@@ -361,6 +429,19 @@ main(int argc, char* argv[])
         config.program = scenario.makeProgram();
         config.max_depth = options.mDepth;
         config.communication_model = options.mCommunicationModel;
+        if (options.mPrintStatsInterval)
+        {
+            config.progress_report_interval =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    *options.mPrintStatsInterval);
+            config.on_progress =
+                [](dpor::algo::ProgressSnapshot const& snapshot) {
+                    if (snapshot.state == dpor::algo::ProgressState::Running)
+                    {
+                        printProgressSnapshot(std::cout, snapshot);
+                    }
+                };
+        }
         if (options.mDumpTerminalTrace || options.mDumpTerminalReplayTrace)
         {
             config.on_terminal_execution =
