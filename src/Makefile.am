@@ -56,6 +56,38 @@ endif
 if BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES) $(SRC_TEST_CXX_FILES)
 CARGO_FEATURE_TESTUTILS = --features testutils
+if ENABLE_DPOR
+EXTRA_PROGRAMS = stellar-core-dpor-tests scp-dpor-investigation
+
+SCP_DPOR_TEST_MAIN = scp/test/SCPDporTestMain.cpp
+SCP_DPOR_INVESTIGATION_MAIN = scp/test/DporScpInvestigationMain.cpp
+SCP_DPOR_GENERATED_FILES = rust/RustBridge.h
+SCP_DPOR_SHARED_SOURCES = $(SRC_DPOR_SUPPORT_H_FILES) $(SRC_DPOR_SUPPORT_CXX_FILES) $(SCP_DPOR_GENERATED_FILES)
+STELLAR_CORE_DPOR_LINK_OBJECTS = $(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS))
+
+stellar_core_dpor_tests_SOURCES = \
+	$(SCP_DPOR_SHARED_SOURCES) \
+	$(SRC_DPOR_TEST_CXX_FILES) \
+	$(SCP_DPOR_TEST_MAIN)
+stellar_core_dpor_tests_CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)
+stellar_core_dpor_tests_CXXFLAGS = $(AM_CXXFLAGS) $(DPOR_CXXFLAGS)
+stellar_core_dpor_tests_DEPENDENCIES = $(STELLAR_CORE_DPOR_LINK_OBJECTS) $(LIBRUST_STELLAR_CORE)
+stellar_core_dpor_tests_LDADD = \
+	$(STELLAR_CORE_DPOR_LINK_OBJECTS) \
+	$(stellar_core_LDADD)
+$(stellar_core_dpor_tests_OBJECTS): $(SCP_DPOR_GENERATED_FILES)
+
+scp_dpor_investigation_SOURCES = \
+	$(SCP_DPOR_SHARED_SOURCES) \
+	$(SCP_DPOR_INVESTIGATION_MAIN)
+scp_dpor_investigation_CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)
+scp_dpor_investigation_CXXFLAGS = $(AM_CXXFLAGS) $(DPOR_CXXFLAGS)
+scp_dpor_investigation_DEPENDENCIES = $(STELLAR_CORE_DPOR_LINK_OBJECTS) $(LIBRUST_STELLAR_CORE)
+scp_dpor_investigation_LDADD = \
+	$(STELLAR_CORE_DPOR_LINK_OBJECTS) \
+	$(stellar_core_LDADD)
+$(scp_dpor_investigation_OBJECTS): $(SCP_DPOR_GENERATED_FILES)
+endif
 else # !BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES)
 CARGO_FEATURE_TESTUTILS =
