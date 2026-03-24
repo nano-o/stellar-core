@@ -11,7 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
-#include <deque>
 #include <functional>
 #include <map>
 #include <memory>
@@ -276,10 +275,30 @@ class DporScpNode : public SCPDriver
     computeTimeout(uint32 roundNumber, bool isNomination) override;
 
   private:
-    using TimerKey = std::pair<uint64, int>;
+    struct TimerSetCountEntry
+    {
+        uint64 mSlotIndex{};
+        int mTimerID{};
+        uint32_t mCount{};
+    };
 
     void
     applyConfiguration(Configuration const& config);
+
+    TimerState*
+    findTimer(uint64 slotIndex, int timerID);
+
+    TimerState const*
+    findTimer(uint64 slotIndex, int timerID) const;
+
+    void
+    setTimer(TimerState timer);
+
+    void
+    clearTimer(uint64 slotIndex, int timerID);
+
+    TimerSetCountEntry*
+    findTimerSetCount(uint64 slotIndex, int timerID);
 
     void
     clearReplayState();
@@ -302,8 +321,9 @@ class DporScpNode : public SCPDriver
     uint32_t mIncrementBallotTimeoutMS{1000};
     std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
     bool mNondeterministicTxSetDownloadWaitTimeAfterFirstCall{false};
-    mutable std::deque<std::chrono::milliseconds>
+    mutable std::vector<std::chrono::milliseconds>
         mPendingTxSetDownloadWaitTimeChoices;
+    mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};
     mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;
@@ -311,8 +331,8 @@ class DporScpNode : public SCPDriver
     std::map<Hash, SCPQuorumSetPtr> mQuorumSets;
     std::vector<SCPEnvelope> mEmittedEnvelopes;
     std::vector<SCPEnvelope> mPendingEnvelopes;
-    std::map<TimerKey, TimerState> mTimers;
-    std::map<TimerKey, uint32_t> mTimerSetCountByKey;
+    std::vector<TimerState> mTimers;
+    std::vector<TimerSetCountEntry> mTimerSetCounts;
     bool mHasReachedBoundary{false};
     std::optional<SCPEnvelope> mBoundaryEnvelope;
 };

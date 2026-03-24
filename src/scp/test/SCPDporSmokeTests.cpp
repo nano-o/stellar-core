@@ -200,4 +200,44 @@ TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
     REQUIRE(foundFollowerTimeout);
 }
 
+TEST_CASE("scp dpor node restores txset wait-time choices in order",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mAwaitTxSetDownloads = true;
+    config.mTxSetDownloadWaitTimes = {
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+    config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall = true;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
+    auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
+
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+
+    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetDownloadWaitTimeChoice(belowTimeout);
+    node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+}
+
 } // namespace stellar::scpdpor

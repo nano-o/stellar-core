@@ -9,7 +9,6 @@
 #include "scp/test/ScpDporReplaySupport.h"
 
 #include <algorithm>
-#include <deque>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -72,14 +71,15 @@ class ScpDporThreeNodePrepareBoundaryScenario
              ++nodeIndex)
         {
             ScenarioBaseline baseline;
-            std::deque<SendLabel> pendingSends;
             auto const& nodeBaseline = mReplaySupport.getNodeBaseline(nodeIndex);
+            baseline.mInitialPendingSends.reserve(
+                nodeBaseline.mInitialPendingEnvelopes.size() *
+                (mOptions.mValidators.size() - 1));
             for (auto const& envelope : nodeBaseline.mInitialPendingEnvelopes)
             {
-                fanOutEnvelope(pendingSends, nodeIndex, envelope);
+                fanOutEnvelope(baseline.mInitialPendingSends, nodeIndex,
+                               envelope);
             }
-            baseline.mInitialPendingSends.assign(pendingSends.begin(),
-                                                 pendingSends.end());
             mScenarioBaselines.push_back(std::move(baseline));
         }
     }
@@ -286,7 +286,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
     }
 
     void
-    fanOutEnvelope(std::deque<SendLabel>& pendingSends, std::size_t senderIndex,
+    fanOutEnvelope(std::vector<SendLabel>& pendingSends,
+                   std::size_t senderIndex,
                    SCPEnvelope const& envelope) const
     {
         for (std::size_t receiverIndex = 0;
@@ -304,7 +305,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
     }
 
     void
-    queuePendingEnvelopeSends(std::deque<SendLabel>& pendingSends,
+    queuePendingEnvelopeSends(std::vector<SendLabel>& pendingSends,
                               DporScpNode& node,
                               std::size_t senderIndex) const
     {
@@ -344,19 +345,17 @@ class ScpDporThreeNodePrepareBoundaryScenario
         auto& node = mReplaySupport.acquireNode(nodeIndex);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
-        std::deque<SendLabel> pendingSends(
-            mScenarioBaselines.at(nodeIndex).mInitialPendingSends.begin(),
-            mScenarioBaselines.at(nodeIndex).mInitialPendingSends.end());
+        auto pendingSends = mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
+        std::size_t nextPendingSend = 0;
         std::size_t eventCount = 0;
         std::size_t observedCount = 0;
         std::optional<int> selectedTimerID;
 
         while (true)
         {
-            if (!pendingSends.empty())
+            if (nextPendingSend < pendingSends.size())
             {
-                auto nextSend = EventLabel{pendingSends.front()};
-                pendingSends.pop_front();
+                auto nextSend = EventLabel{pendingSends.at(nextPendingSend++)};
                 if (eventCount == step)
                 {
                     return nextSend;

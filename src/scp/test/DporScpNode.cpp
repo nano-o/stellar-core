@@ -9,6 +9,7 @@
 #include "scp/Slot.h"
 #include "xdrpp/marshal.h"
 
+#include <algorithm>
 #include <limits>
 
 namespace stellar
@@ -147,30 +148,34 @@ DporScpNode::getEmittedEnvelopes() const
 bool
 DporScpNode::hasActiveTimer(uint64 slotIndex, int timerID) const
 {
-    return mTimers.find({slotIndex, timerID}) != mTimers.end();
+    return findTimer(slotIndex, timerID) != nullptr;
 }
 
 std::optional<DporScpNode::TimerState>
 DporScpNode::getTimer(uint64 slotIndex, int timerID) const
 {
-    auto const it = mTimers.find({slotIndex, timerID});
-    if (it == mTimers.end())
+    auto const* timer = findTimer(slotIndex, timerID);
+    if (!timer)
     {
         return std::nullopt;
     }
-    return it->second;
+    return *timer;
 }
 
 bool
 DporScpNode::fireTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = mTimers.find({slotIndex, timerID});
+    auto const it = std::find_if(
+        mTimers.begin(), mTimers.end(),
+        [slotIndex, timerID](TimerState const& timer) {
+            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
+        });
     if (it == mTimers.end())
     {
         return false;
     }
 
-    auto cb = it->second.mCallback;
+    auto cb = it->mCallback;
     mTimers.erase(it);
     if (cb)
     {
@@ -308,21 +313,20 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
 
     baseline.mEmittedEnvelopes = mEmittedEnvelopes;
     baseline.mTimers.reserve(mTimers.size());
-    for (auto const& [key, timer] : mTimers)
+    for (auto const& timer : mTimers)
     {
-        static_cast<void>(key);
         baseline.mTimers.push_back(
             ReplayTimerSnapshot{.mSlotIndex = timer.mSlotIndex,
                                 .mTimerID = timer.mTimerID,
                                 .mTimeout = timer.mTimeout});
     }
-    baseline.mTimerSetCounts.reserve(mTimerSetCountByKey.size());
-    for (auto const& [key, count] : mTimerSetCountByKey)
+    baseline.mTimerSetCounts.reserve(mTimerSetCounts.size());
+    for (auto const& count : mTimerSetCounts)
     {
         baseline.mTimerSetCounts.push_back(
-            ReplayTimerSetCountSnapshot{.mSlotIndex = key.first,
-                                        .mTimerID = key.second,
-                                        .mCount = count});
+            ReplayTimerSetCountSnapshot{.mSlotIndex = count.mSlotIndex,
+                                        .mTimerID = count.mTimerID,
+                                        .mCount = count.mCount});
     }
     baseline.mTxSetDownloadWaitTimeCallCount =
         mTxSetDownloadWaitTimeCallCount;
@@ -469,8 +473,10 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
     mEmittedEnvelopes = baseline.mEmittedEnvelopes;
     for (auto const& timerSetCount : baseline.mTimerSetCounts)
     {
-        mTimerSetCountByKey[{timerSetCount.mSlotIndex, timerSetCount.mTimerID}] =
-            timerSetCount.mCount;
+        mTimerSetCounts.push_back(TimerSetCountEntry{
+            .mSlotIndex = timerSetCount.mSlotIndex,
+            .mTimerID = timerSetCount.mTimerID,
+            .mCount = timerSetCount.mCount});
     }
     mTxSetDownloadWaitTimeCallCount =
         baseline.mTxSetDownloadWaitTimeCallCount;
@@ -485,11 +491,10 @@ DporScpNode::installNominationReplayTimer(
 {
     auto slot = mSCP.getSlot(slotIndex, true);
     auto wrappedValue = wrapValue(value);
-    mTimers[{slotIndex, Slot::NOMINATION_TIMER}] =
-        TimerState{slotIndex, Slot::NOMINATION_TIMER, timeout,
-                   [slot, wrappedValue, previousValue]() {
-                       slot->nominate(wrappedValue, previousValue, true);
-                   }};
+    setTimer(TimerState{slotIndex, Slot::NOMINATION_TIMER, timeout,
+                        [slot, wrappedValue, previousValue]() {
+                            slot->nominate(wrappedValue, previousValue, true);
+                        }});
 }
 
 void
@@ -497,11 +502,10 @@ DporScpNode::installBallotingReplayTimer(
     uint64 slotIndex, std::chrono::milliseconds timeout)
 {
     auto slot = mSCP.getSlot(slotIndex, true);
-    mTimers[{slotIndex, Slot::BALLOT_PROTOCOL_TIMER}] =
-        TimerState{slotIndex, Slot::BALLOT_PROTOCOL_TIMER, timeout,
-                   [slot]() {
-                       slot->getBallotProtocol().ballotProtocolTimerExpired();
-                   }};
+    setTimer(TimerState{slotIndex, Slot::BALLOT_PROTOCOL_TIMER, timeout,
+                        [slot]() {
+                            slot->getBallotProtocol().ballotProtocolTimerExpired();
+                        }});
 }
 
 bool
@@ -558,15 +562,16 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
         mTxSetDownloadWaitTimes.size() >= 2 &&
         mTxSetDownloadWaitTimes.front() != mTxSetDownloadWaitTimes.at(1))
     {
-        if (mPendingTxSetDownloadWaitTimeChoices.empty())
+        if (mNextPendingTxSetDownloadWaitTimeChoice >=
+            mPendingTxSetDownloadWaitTimeChoices.size())
         {
             throw TxSetDownloadWaitTimeChoiceRequired(
                 {mTxSetDownloadWaitTimes.front(),
                  mTxSetDownloadWaitTimes.at(1)});
         }
 
-        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.front();
-        mPendingTxSetDownloadWaitTimeChoices.pop_front();
+        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
+            mNextPendingTxSetDownloadWaitTimeChoice++);
         ++mTxSetDownloadWaitTimeCallCount;
         return waitTime;
     }
@@ -728,15 +733,20 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
                         std::chrono::milliseconds timeout,
                         std::function<void()> cb)
 {
-    auto const key = TimerKey{slotIndex, timerID};
-
     if (!cb)
     {
-        mTimers.erase(key);
+        clearTimer(slotIndex, timerID);
         return;
     }
 
-    auto const setCount = ++mTimerSetCountByKey[key];
+    auto* setCountEntry = findTimerSetCount(slotIndex, timerID);
+    if (!setCountEntry)
+    {
+        mTimerSetCounts.push_back(
+            TimerSetCountEntry{.mSlotIndex = slotIndex, .mTimerID = timerID});
+        setCountEntry = &mTimerSetCounts.back();
+    }
+    auto const setCount = ++setCountEntry->mCount;
     auto const timerSetLimit = [&]() -> std::optional<uint32_t> {
         if (timerID == Slot::NOMINATION_TIMER)
         {
@@ -751,17 +761,17 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 
     if (timerSetLimit && setCount >= *timerSetLimit)
     {
-        mTimers.erase(key);
+        clearTimer(slotIndex, timerID);
         return;
     }
 
-    mTimers[key] = TimerState{slotIndex, timerID, timeout, std::move(cb)};
+    setTimer(TimerState{slotIndex, timerID, timeout, std::move(cb)});
 }
 
 void
 DporScpNode::stopTimer(uint64 slotIndex, int timerID)
 {
-    mTimers.erase({slotIndex, timerID});
+    clearTimer(slotIndex, timerID);
 }
 
 std::chrono::milliseconds
@@ -813,6 +823,64 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 }
 
+DporScpNode::TimerState*
+DporScpNode::findTimer(uint64 slotIndex, int timerID)
+{
+    auto const it = std::find_if(
+        mTimers.begin(), mTimers.end(),
+        [slotIndex, timerID](TimerState const& timer) {
+            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
+        });
+    return it == mTimers.end() ? nullptr : &*it;
+}
+
+DporScpNode::TimerState const*
+DporScpNode::findTimer(uint64 slotIndex, int timerID) const
+{
+    auto const it = std::find_if(
+        mTimers.begin(), mTimers.end(),
+        [slotIndex, timerID](TimerState const& timer) {
+            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
+        });
+    return it == mTimers.end() ? nullptr : &*it;
+}
+
+void
+DporScpNode::setTimer(TimerState timer)
+{
+    if (auto* existing = findTimer(timer.mSlotIndex, timer.mTimerID))
+    {
+        *existing = std::move(timer);
+        return;
+    }
+    mTimers.push_back(std::move(timer));
+}
+
+void
+DporScpNode::clearTimer(uint64 slotIndex, int timerID)
+{
+    auto const it = std::find_if(
+        mTimers.begin(), mTimers.end(),
+        [slotIndex, timerID](TimerState const& timer) {
+            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
+        });
+    if (it != mTimers.end())
+    {
+        mTimers.erase(it);
+    }
+}
+
+DporScpNode::TimerSetCountEntry*
+DporScpNode::findTimerSetCount(uint64 slotIndex, int timerID)
+{
+    auto const it = std::find_if(
+        mTimerSetCounts.begin(), mTimerSetCounts.end(),
+        [slotIndex, timerID](TimerSetCountEntry const& entry) {
+            return entry.mSlotIndex == slotIndex && entry.mTimerID == timerID;
+        });
+    return it == mTimerSetCounts.end() ? nullptr : &*it;
+}
+
 void
 DporScpNode::clearReplayState()
 {
@@ -821,8 +889,9 @@ DporScpNode::clearReplayState()
     mEmittedEnvelopes.clear();
     mPendingEnvelopes.clear();
     mTimers.clear();
-    mTimerSetCountByKey.clear();
+    mTimerSetCounts.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
+    mNextPendingTxSetDownloadWaitTimeChoice = 0;
     mTxSetDownloadWaitTimeCallCount = 0;
     mHasReachedBoundary = false;
     mBoundaryEnvelope.reset();
