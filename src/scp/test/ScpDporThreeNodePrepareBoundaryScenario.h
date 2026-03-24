@@ -106,6 +106,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
     Program
     makeProgram() const
     {
+        ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
+
         Program program;
         auto self =
             std::make_shared<ScpDporThreeNodePrepareBoundaryScenario const>(
@@ -127,6 +129,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
     BoundaryInspection
     inspectPrepareBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
+        ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
+
         auto& node = mReplaySupport.acquireNode(nodeIndex);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 

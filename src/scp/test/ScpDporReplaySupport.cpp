@@ -4,7 +4,7 @@
 
 #include "scp/test/ScpDporReplaySupport.h"
 
-#include <unordered_map>
+#include <vector>
 
 namespace stellar::scpdpor
 {
@@ -12,38 +12,21 @@ namespace stellar::scpdpor
 namespace
 {
 
-struct ReplayStateCacheKey
+struct ReplayStateCacheEntry
 {
     ScpDporReplaySupport const* mSupport{};
     std::size_t mNodeIndex{};
-
-    bool
-    operator==(ReplayStateCacheKey const& other) const
-    {
-        return mSupport == other.mSupport && mNodeIndex == other.mNodeIndex;
-    }
+    std::unique_ptr<DporScpNode> mNode;
 };
 
-struct ReplayStateCacheKeyHasher
+std::vector<ReplayStateCacheEntry>&
+threadLocalReplayStateCache()
 {
-    std::size_t
-    operator()(ReplayStateCacheKey const& key) const noexcept
-    {
-        auto value = std::hash<void const*>{}(key.mSupport);
-        value ^= std::hash<std::size_t>{}(key.mNodeIndex) + 0x9e3779b9 +
-                 (value << 6) + (value >> 2);
-        return value;
-    }
-};
+    static thread_local std::vector<ReplayStateCacheEntry> cache;
+    return cache;
+}
 
 } // namespace
-
-ScpDporReplaySupport::ReplayState::ReplayState(
-    SecretKey const& secretKey, SCPQuorumSet const& qSet,
-    DporScpNode::Configuration const& config)
-    : mNode(secretKey, qSet, config)
-{
-}
 
 ScpDporReplaySupport::ScpDporReplaySupport(
     std::vector<SecretKey> validators, SCPQuorumSet qSet, uint64_t slotIndex,
@@ -83,21 +66,25 @@ ScpDporReplaySupport::getNodeBaseline(std::size_t nodeIndex) const
 DporScpNode&
 ScpDporReplaySupport::acquireNode(std::size_t nodeIndex) const
 {
-    static thread_local std::unordered_map<
-        ReplayStateCacheKey, std::unique_ptr<ReplayState>,
-        ReplayStateCacheKeyHasher>
-        cache;
-
-    ReplayStateCacheKey const key{this, nodeIndex};
-    auto it = cache.find(key);
-    if (it == cache.end())
+    auto& cache = threadLocalReplayStateCache();
+    for (auto& entry : cache)
     {
-        it = cache
-                 .emplace(key, std::make_unique<ReplayState>(
-                                   mValidators.at(nodeIndex), mQSet, mConfig))
-                 .first;
+        if (entry.mSupport == this && entry.mNodeIndex == nodeIndex)
+        {
+            return *entry.mNode;
+        }
     }
-    return it->second->mNode;
+
+    cache.push_back(ReplayStateCacheEntry{
+        this, nodeIndex,
+        std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet, mConfig)});
+    return *cache.back().mNode;
+}
+
+void
+ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread()
+{
+    threadLocalReplayStateCache().clear();
 }
 
 void

@@ -45,6 +45,9 @@ class ScpDporReplaySupport
     DporScpNode&
     acquireNode(std::size_t nodeIndex) const;
 
+    static void
+    clearThreadLocalCacheForCurrentThread();
+
     void
     restoreBaseline(DporScpNode& node, std::size_t nodeIndex) const;
 
@@ -54,14 +57,6 @@ class ScpDporReplaySupport
                       std::optional<int> selectedTimerID) const;
 
   private:
-    struct ReplayState
-    {
-        explicit ReplayState(SecretKey const& secretKey, SCPQuorumSet const& qSet,
-                             DporScpNode::Configuration const& config);
-
-        DporScpNode mNode;
-    };
-
     void
     initializeNode(DporScpNode& node, std::size_t nodeIndex) const;
 

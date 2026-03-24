@@ -147,7 +147,7 @@ RUN install -d -o "${UID}" -g "${GID}" \
 
 ENV CARGO_HOME="/home/${USER}/.cargo" \
     NPM_CONFIG_PREFIX="/home/${USER}/.npm-global" \
-    PATH="/home/${USER}/.local/bin:/home/${USER}/.npm-global/bin:/home/${USER}/.cargo/bin:${PATH}" \
+    PATH="/usr/lib/ccache:/home/${USER}/.local/bin:/home/${USER}/.npm-global/bin:/home/${USER}/.cargo/bin:${PATH}" \
     RUSTUP_HOME="/home/${USER}/.rustup"
 
 COPY --chown=${UID}:${GID} install-rust.sh rust-toolchain.toml /tmp/stellar-core/

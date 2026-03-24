@@ -513,7 +513,7 @@ DporScpNode::hasReachedBoundary() const
 bool
 DporScpNode::hasReachedPrepareBoundary() const
 {
-    return mHasReachedBoundary;
+    return mBoundaryMode == BoundaryMode::Prepare && mHasReachedBoundary;
 }
 
 SCPEnvelope const*
@@ -525,7 +525,8 @@ DporScpNode::getBoundaryEnvelope() const
 SCPEnvelope const*
 DporScpNode::getPrepareBoundaryEnvelope() const
 {
-    return getBoundaryEnvelope();
+    return mBoundaryMode == BoundaryMode::Prepare ? getBoundaryEnvelope()
+                                                  : nullptr;
 }
 
 void
