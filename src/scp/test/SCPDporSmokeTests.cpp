@@ -165,6 +165,21 @@ TEST_CASE("scp dpor exploration finds a prepare boundary",
     REQUIRE(foundPrepareBoundary);
 }
 
+TEST_CASE("scp dpor replay detects the timer-driven round boundary",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    options.mEnableNominationTimeouts = true;
+    options.mMaxNominationRounds = 1;
+    ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
+    ThreadTrace leaderTrace;
+    leaderTrace.emplace_back(ObservedValue::bottom());
+
+    auto const inspection = scenario.inspectBoundary(0, leaderTrace);
+    REQUIRE(inspection.mReachedBoundary);
+    REQUIRE_FALSE(inspection.mBoundaryEnvelope.has_value());
+}
+
 TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
           "[scp][dpor][smoke]")
 {

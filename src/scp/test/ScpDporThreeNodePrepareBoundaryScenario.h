@@ -33,6 +33,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
             DporScpNode::BoundaryMode::Prepare};
         uint32_t mPrepareBoundaryCounter{
             DporScpNode::DEFAULT_PREPARE_BOUNDARY_COUNTER};
+        std::optional<uint32_t> mMaxNominationRounds;
+        std::optional<uint32_t> mNominationTimerSetLimit;
         bool mEnableNominationTimeouts{true};
         bool mEnableBallotingTimeouts{false};
         bool mAwaitTxSetDownloads{false};
@@ -153,7 +155,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
     }
 
     BoundaryInspection
-    inspectPrepareBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
+    inspectBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
         ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
 
@@ -163,7 +165,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
         std::optional<int> selectedTimerID;
         for (std::size_t observedIndex = 0; observedIndex < trace.size();)
         {
-            if (node.hasReachedPrepareBoundary())
+            if (node.hasReachedBoundary())
             {
                 break;
             }
@@ -204,12 +206,30 @@ class ScpDporThreeNodePrepareBoundaryScenario
         }
 
         BoundaryInspection inspection;
-        inspection.mReachedBoundary = node.hasReachedPrepareBoundary();
-        if (auto const* envelope = node.getPrepareBoundaryEnvelope())
+        inspection.mReachedBoundary = node.hasReachedBoundary();
+        if (auto const* envelope = node.getBoundaryEnvelope())
         {
             inspection.mBoundaryEnvelope = *envelope;
         }
         return inspection;
+    }
+
+    BoundaryInspection
+    inspectPrepareBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
+    {
+        return inspectBoundary(nodeIndex, trace);
+    }
+
+    bool
+    hasReachedBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
+    {
+        return inspectBoundary(nodeIndex, trace).mReachedBoundary;
+    }
+
+    std::optional<SCPEnvelope>
+    getBoundaryEnvelope(std::size_t nodeIndex, ThreadTrace const& trace) const
+    {
+        return inspectBoundary(nodeIndex, trace).mBoundaryEnvelope;
     }
 
     bool
@@ -265,7 +285,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
                     .mSend = pendingSends.at(nextPendingSend++)});
             }
 
-            if (node.hasReachedPrepareBoundary() || observedCount >= trace.size())
+            if (node.hasReachedBoundary() || observedCount >= trace.size())
             {
                 break;
             }
@@ -344,8 +364,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
             updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
         }
 
-        inspection.mReachedBoundary = node.hasReachedPrepareBoundary();
-        if (auto const* envelope = node.getPrepareBoundaryEnvelope())
+        inspection.mReachedBoundary = node.hasReachedBoundary();
+        if (auto const* envelope = node.getBoundaryEnvelope())
         {
             inspection.mBoundaryEnvelope = *envelope;
         }
@@ -384,6 +404,8 @@ class ScpDporThreeNodePrepareBoundaryScenario
         }
         config.mBoundaryMode = options.mBoundaryMode;
         config.mPrepareBoundaryCounter = options.mPrepareBoundaryCounter;
+        config.mMaxNominationRounds = options.mMaxNominationRounds;
+        config.mNominationTimerSetLimit = options.mNominationTimerSetLimit;
         config.mAwaitTxSetDownloads = options.mAwaitTxSetDownloads;
         config.mInitialNominationTimeoutMS =
             options.mInitialNominationTimeoutMS;
@@ -516,7 +538,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
                 continue;
             }
 
-            if (node.hasReachedPrepareBoundary())
+            if (node.hasReachedBoundary())
             {
                 return std::nullopt;
             }

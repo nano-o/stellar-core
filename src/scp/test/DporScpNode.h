@@ -29,7 +29,8 @@ class DporScpNode : public SCPDriver
     enum class BoundaryMode : std::uint8_t
     {
         Prepare,
-        Commit
+        Commit,
+        NominationRound
     };
 
     class TxSetDownloadWaitTimeChoiceRequired : public std::runtime_error
@@ -56,6 +57,7 @@ class DporScpNode : public SCPDriver
             mCombineCandidates;
         uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
         BoundaryMode mBoundaryMode{BoundaryMode::Prepare};
+        std::optional<uint32_t> mMaxNominationRounds;
         bool mAwaitTxSetDownloads{false};
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
@@ -335,6 +337,12 @@ class DporScpNode : public SCPDriver
     bool
     isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
 
+    uint32_t
+    inferNominationRound(std::chrono::milliseconds timeout) const;
+
+    uint32_t
+    getNominationRoundForEnvelope(SCPEnvelope const& envelope) const;
+
     SecretKey mSecretKey;
     SCP mSCP;
     std::map<NodeID, std::size_t> mNodeIndexMap;
@@ -343,6 +351,7 @@ class DporScpNode : public SCPDriver
         mCombineCandidates;
     uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
     BoundaryMode mBoundaryMode{BoundaryMode::Prepare};
+    std::optional<uint32_t> mMaxNominationRounds;
     bool mAwaitTxSetDownloads{false};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};

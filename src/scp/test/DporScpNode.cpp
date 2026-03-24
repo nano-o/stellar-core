@@ -540,7 +540,8 @@ DporScpNode::hasReachedBoundary() const
 bool
 DporScpNode::hasReachedPrepareBoundary() const
 {
-    return mBoundaryMode == BoundaryMode::Prepare && mHasReachedBoundary;
+    return mBoundaryEnvelope &&
+           mBoundaryEnvelope->statement.pledges.type() == SCP_ST_PREPARE;
 }
 
 SCPEnvelope const*
@@ -552,8 +553,7 @@ DporScpNode::getBoundaryEnvelope() const
 SCPEnvelope const*
 DporScpNode::getPrepareBoundaryEnvelope() const
 {
-    return mBoundaryMode == BoundaryMode::Prepare ? getBoundaryEnvelope()
-                                                  : nullptr;
+    return hasReachedPrepareBoundary() ? getBoundaryEnvelope() : nullptr;
 }
 
 void
@@ -766,6 +766,40 @@ DporScpNode::getUpgradeNominationTimeoutLimit() const
     return std::numeric_limits<uint32_t>::max();
 }
 
+uint32_t
+DporScpNode::inferNominationRound(std::chrono::milliseconds timeout) const
+{
+    auto const timeoutMS = timeout.count();
+    if (timeoutMS < static_cast<int64_t>(mInitialNominationTimeoutMS))
+    {
+        throw std::logic_error(
+            "nomination timer timeout is below the configured initial value");
+    }
+
+    if (mIncrementNominationTimeoutMS == 0)
+    {
+        if (timeoutMS != static_cast<int64_t>(mInitialNominationTimeoutMS))
+        {
+            throw std::logic_error(
+                "nomination timer timeout does not match the configured "
+                "constant timeout");
+        }
+        return 1;
+    }
+
+    auto const deltaMS =
+        timeoutMS - static_cast<int64_t>(mInitialNominationTimeoutMS);
+    auto const incrementMS = static_cast<int64_t>(mIncrementNominationTimeoutMS);
+    if ((deltaMS % incrementMS) != 0)
+    {
+        throw std::logic_error(
+            "nomination timer timeout does not match the configured round "
+            "schedule");
+    }
+
+    return 1 + static_cast<uint32_t>(deltaMS / incrementMS);
+}
+
 void
 DporScpNode::setupTimer(uint64 slotIndex, int timerID,
                         std::chrono::milliseconds timeout,
@@ -779,6 +813,12 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
                              .mTimerID = timerID});
         clearTimer(slotIndex, timerID);
         return;
+    }
+
+    if (timerID == Slot::NOMINATION_TIMER && mMaxNominationRounds &&
+        inferNominationRound(timeout) > *mMaxNominationRounds)
+    {
+        mHasReachedBoundary = true;
     }
 
     auto* setCountEntry = findTimerSetCount(slotIndex, timerID);
@@ -856,6 +896,7 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mPrepareBoundaryCounter =
         std::max<uint32_t>(1, config.mPrepareBoundaryCounter);
     mBoundaryMode = config.mBoundaryMode;
+    mMaxNominationRounds = config.mMaxNominationRounds;
     mAwaitTxSetDownloads = config.mAwaitTxSetDownloads;
     mInitialNominationTimeoutMS = config.mInitialNominationTimeoutMS;
     mIncrementNominationTimeoutMS = config.mIncrementNominationTimeoutMS;
@@ -967,11 +1008,6 @@ bool
 DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
 {
     auto const type = envelope.statement.pledges.type();
-    if (type == SCP_ST_NOMINATE)
-    {
-        return false;
-    }
-
     switch (mBoundaryMode)
     {
     case BoundaryMode::Prepare:
@@ -980,8 +1016,39 @@ DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
                    mPrepareBoundaryCounter;
     case BoundaryMode::Commit:
         return type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE;
+    case BoundaryMode::NominationRound:
+        if (type != SCP_ST_NOMINATE)
+        {
+            return false;
+        }
+        if (!mMaxNominationRounds)
+        {
+            throw std::logic_error(
+                "nomination-round boundary requires max nomination rounds");
+        }
+        return getNominationRoundForEnvelope(envelope) > *mMaxNominationRounds;
     }
     throw std::logic_error("unknown replay boundary mode");
+}
+
+uint32_t
+DporScpNode::getNominationRoundForEnvelope(SCPEnvelope const& envelope) const
+{
+    if (envelope.statement.pledges.type() != SCP_ST_NOMINATE)
+    {
+        throw std::logic_error(
+            "nomination round requested for non-nomination envelope");
+    }
+
+    auto slot =
+        const_cast<SCP&>(mSCP).getSlot(envelope.statement.slotIndex, false);
+    if (!slot)
+    {
+        throw std::logic_error(
+            "nomination-round boundary requires local slot state");
+    }
+    return static_cast<uint32_t>(
+        std::max<int32_t>(slot->mNominationProtocol.mRoundNumber, 0));
 }
 
 } // namespace stellar

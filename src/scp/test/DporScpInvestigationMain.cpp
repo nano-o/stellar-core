@@ -5,11 +5,13 @@
 #include "scp/test/ScpDporThreeNodePrepareBoundaryScenario.h"
 #include "util/Logging.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 #include <string_view>
 #include <type_traits>
 
@@ -18,8 +20,17 @@ namespace
 
 struct CommandLineOptions
 {
+    enum class Scenario : std::uint8_t
+    {
+        PrepareBoundary,
+        NominationTimers
+    };
+
+    Scenario mScenario{Scenario::PrepareBoundary};
     std::size_t mWorkers{1};
     std::size_t mDepth{12};
+    uint32_t mMaxNominationRounds{1};
+    bool mMaxNominationRoundsExplicit{false};
     std::optional<std::size_t> mDumpInitialSteps;
     bool mDumpTerminalTrace{false};
     bool mDumpTerminalReplayTrace{false};
@@ -31,9 +42,56 @@ void
 printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [--workers N] [--depth N] [--fifo]"
+              << " [--scenario prepare-boundary|nomination-timers]"
+              << " [--workers N|--parallel] [--depth N]"
+              << " [--max-nomination-rounds N] [--fifo]"
               << " [--dump-initial-steps N] [--dump-terminal-trace]"
               << " [--dump-terminal-replay-trace]\n";
+}
+
+std::size_t
+defaultParallelWorkers()
+{
+    auto const concurrency = std::thread::hardware_concurrency();
+    return concurrency == 0 ? 2u : static_cast<std::size_t>(concurrency);
+}
+
+CommandLineOptions::Scenario
+parseScenario(std::string_view value)
+{
+    if (value == "prepare-boundary")
+    {
+        return CommandLineOptions::Scenario::PrepareBoundary;
+    }
+    if (value == "nomination-timers")
+    {
+        return CommandLineOptions::Scenario::NominationTimers;
+    }
+    throw std::invalid_argument("unknown scenario: " + std::string(value));
+}
+
+stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario
+makeScenario(CommandLineOptions const& options)
+{
+    auto scenarioOptions =
+        stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            makeDefaultOptions();
+    switch (options.mScenario)
+    {
+    case CommandLineOptions::Scenario::PrepareBoundary:
+        if (options.mMaxNominationRoundsExplicit)
+        {
+            throw std::invalid_argument(
+                "--max-nomination-rounds requires --scenario nomination-timers");
+        }
+        break;
+    case CommandLineOptions::Scenario::NominationTimers:
+        scenarioOptions.mEnableNominationTimeouts = true;
+        scenarioOptions.mMaxNominationRounds = options.mMaxNominationRounds;
+        break;
+    }
+    return stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario(
+        std::move(scenarioOptions));
 }
 
 template <typename T>
@@ -197,6 +255,16 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 dpor::model::CommunicationModel::FifoP2P;
             continue;
         }
+        if (arg == "--parallel")
+        {
+            options.mWorkers = defaultParallelWorkers();
+            continue;
+        }
+        if (arg == "--scenario" && i + 1 < argc)
+        {
+            options.mScenario = parseScenario(argv[++i]);
+            continue;
+        }
         if (arg == "--workers" && i + 1 < argc)
         {
             options.mWorkers =
@@ -207,6 +275,13 @@ parseOptions(char const* argv0, int argc, char* argv[])
         {
             options.mDepth =
                 static_cast<std::size_t>(std::stoull(argv[++i]));
+            continue;
+        }
+        if (arg == "--max-nomination-rounds" && i + 1 < argc)
+        {
+            options.mMaxNominationRounds =
+                static_cast<uint32_t>(std::stoul(argv[++i]));
+            options.mMaxNominationRoundsExplicit = true;
             continue;
         }
         if (arg == "--dump-initial-steps" && i + 1 < argc)
@@ -243,7 +318,7 @@ main(int argc, char* argv[])
         stellar::Logging::setLogLevel(stellar::LogLevel::LVL_WARNING, nullptr);
 
         auto const options = parseOptions(argv[0], argc, argv);
-        stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario scenario;
+        auto scenario = makeScenario(options);
         if (options.mDumpInitialSteps)
         {
             auto const program = scenario.makeProgram();
@@ -294,7 +369,7 @@ main(int argc, char* argv[])
                     auto const leaderTrace = execution.graph.thread_trace(
                         stellar::scpdpor::threadIdForNodeIndex(0));
                     auto const boundary =
-                        scenario.inspectPrepareBoundary(0, leaderTrace);
+                        scenario.inspectBoundary(0, leaderTrace);
 
                     std::cout << "terminal-kind="
                               << (execution.is_full_execution()
