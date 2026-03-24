@@ -12,8 +12,7 @@ checker is still unstable enough that we want churn and blast radius contained.
 The immediate goal is to make it possible to build and run:
 
 - DPOR-based smoke and property tests for SCP
-- a separate manual investigation runner for deeper nomination/balloting
-  experiments
+- a separate manual investigation runner for deeper SCP experiments
 
 without changing the normal `stellar-core` binary or the default local build
 and test pipeline.
@@ -23,7 +22,7 @@ Non-goals for this phase:
 - no routing through `src/stellar-core test`
 - no addition to automake `TESTS`
 - no requirement that CI or routine developer workflows build or run DPOR code
-- no commitment yet to the detailed nomination/balloting replay model
+- no commitment yet to the detailed full-SCP replay model
 
 ## Constraints From The Current Build
 
@@ -238,19 +237,226 @@ Recommended location:
 
 - `src/scp/test/`
 
-Possible first files:
+Reusable deterministic SCP replay support:
 
-- `src/scp/test/DporNominationNode.h`
-- `src/scp/test/DporNominationNode.cpp`
-- `src/scp/test/DporNominationDporAdapter.h`
-- `src/scp/test/DporNominationDporAdapter.cpp`
+- `src/scp/test/DporScpNode.h`
+- `src/scp/test/DporScpNode.cpp`
+
+First SCP DPOR scenario module, following the `two_phase_commit_timeout/sim/`
+split into DPOR types, bridge, and scenario:
+
+- `src/scp/test/ScpDporTypes.h`
+- `src/scp/test/ScpDporBridge.h`
+- `src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h`
+
+Supporting tests and runners:
+
 - `src/scp/test/SCPDporSmokeTests.cpp`
-- `src/scp/test/SCPDporNominationTests.cpp`
-- `src/scp/test/DporNominationInvestigationMain.cpp`
+- `src/scp/test/SCPDporTests.cpp`
+- `src/scp/test/DporScpInvestigationMain.cpp`
 
 The exact names can change, but the important build assumption is that DPOR
 support should live near SCP tests while still being explicitly excluded from
 the ordinary test-source buckets.
+
+The old `dpor-skip-ledgers-p25` branch suggests that what was previously called
+an "adapter" should be split more aggressively. The reusable deterministic
+`SCPDriver`-backed node belongs in its own support file pair, while the
+scenario-facing DPOR layer should follow the 2PC example's three-way split. The
+new plan should use SCP-neutral names even if the first replay slice still
+starts from SCP's current nomination entry point and initially cuts off at
+`PREPARE`.
+
+## First SCP Scenario Following The 2PC Pattern
+
+The first concrete SCP scenario should be a small SCP replay slice that mirrors
+the old branch's simplest useful replay fixture:
+
+- 3 validators
+- one homogeneous quorum set shared by all nodes
+- quorum threshold 2
+- fixed slot index
+- deterministic leader ordering with node 0 highest in round 1
+- initial values `[x, y, y]`
+- initial scope stops at the first local `PREPARE` boundary, while keeping the
+  support layer and scenario naming broad enough to extend into later SCP
+  phases
+
+This is the smallest scenario that still exercises:
+
+- real early-SCP fanout to multiple receivers
+- deterministic leader/follower asymmetry
+- timer-versus-delivery behavior
+- reconstruction of the first handoff into balloting
+
+### 1. DPOR Types File
+
+`src/scp/test/ScpDporTypes.h` should contain only the DPOR-visible value domain
+and aliases, analogous to `sim/dpor_types.hpp` in the 2PC example.
+
+For SCP, this should likely include:
+
+- a `ScpDporValue` type
+- a `Kind` enum for at least:
+  - SCP envelope delivery
+  - replay-only external choices such as txset download wait-time choices
+- the DPOR aliases:
+  - `EventLabel`
+  - `SendLabel`
+  - `ReceiveLabel`
+  - `ObservedValue`
+  - `ThreadTrace`
+  - `ThreadFunction`
+  - `Program`
+
+This file should not know about the concrete scenario topology. Its job is only
+to define the DPOR-facing value universe.
+
+### 2. Bridge File
+
+`src/scp/test/ScpDporBridge.h` should contain the translation layer between SCP
+objects and `ScpDporValue`, analogous to `sim/bridge.hpp` in the 2PC example.
+
+Initially this should own:
+
+- node-index to DPOR-thread mapping helpers
+- receive-label construction for one local SCP node
+- conversion of emitted `SCPEnvelope`s into `ScpDporValue`
+- conversion of replayed `ScpDporValue`s back into envelope deliveries
+- encoding and decoding of external replay choices such as txset download wait
+  times
+- human-readable formatting helpers for diagnostics
+
+Conceptually, this is where the DPOR encoding lives. The rest of the SCP test
+code should not manipulate the low-level DPOR value encoding directly.
+
+### 3. Scenario File
+
+`src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h` should be the SCP
+counterpart of `sim/crash_before_decision.hpp`: one self-contained scenario
+module exposing `Options`, replay helpers, thread builders, and `makeProgram()`.
+
+This scenario module should sit on top of the reusable
+`DporScpNode` support layer. Historically, `dpor-skip-ledgers-p25` used a
+`DporNominationNode` with the replay seam described below; the new plan should
+carry that seam forward under SCP-neutral naming rather than preserve the old
+nomination-specific type names.
+
+The scenario file should own:
+
+- an `Options` struct describing:
+  - validator identities
+  - quorum set
+  - slot index
+  - previous value
+  - per-node initial values
+  - boundary mode and timeout toggles
+- a replay state wrapper for one node/thread
+- the thread functions for the three validators
+- a `makeProgram()` factory
+- boundary inspection helpers used by tests and the investigation runner
+
+### Deterministic SCP Interface Used By The Scenario
+
+The old branch already identified the deterministic SCP interface the scenario
+needs. The new `DporScpNode` should expose an SCP-wide replay seam modeled on
+the old branch's `DporNominationNode`.
+
+For the first implementation, that seam will probably still include a startup
+helper that enters SCP through its current nomination entry point, because that
+is the real entry point the old branch used. More generally, the scenario
+module needs support for:
+
+- starting SCP for one node from its configured initial state
+- replaying delivered SCP envelopes
+- replaying timer firings
+- draining newly emitted SCP envelopes into DPOR `SendLabel`s
+- checking whether the next wait is blocking or non-blocking
+- replaying external choices such as txset download wait times
+- detecting whether the scenario boundary has been crossed and, if so, what the
+  first boundary envelope was
+
+Historically, the branch achieved this with methods such as:
+
+- `nominate(slotIndex, initialValue, previousValue)`
+- `receiveEnvelope(...)`
+- `fireTimer(slotIndex, timerID)`
+- `takePendingEnvelopes()`
+- `hasActiveTimer(...)` and `getTimer(...)`
+- `enqueueTxSetDownloadWaitTimeChoice(...)`
+- `hasCrossedNominationBoundary()` and `getNominationBoundaryEnvelope()`
+
+The new support layer should offer the same capabilities under broader SCP
+terminology, for example via names such as `hasCrossedScenarioBoundary()` and
+`getBoundaryEnvelope()`, rather than baking "nomination" into the public replay
+surface.
+
+For performance, the scenario module may also use:
+
+- `snapshotReplayBaseline(...)`
+- `restoreReplayBaseline(...)`
+- replay-timer installation helpers corresponding to the active SCP phase
+
+but those are optimizations on top of the basic replay contract above.
+
+### Replay Strategy
+
+The first SCP scenario should follow the same replay-from-scratch shape as the
+2PC example, while reusing the richer deterministic SCP driver support from the
+old branch.
+
+For each thread-function call:
+
+1. create or restore a fresh deterministic `DporScpNode`
+2. start SCP once for that node's configured initial state
+3. replay prior observed values from the trace in order
+4. after each replayed observation, drain newly emitted envelopes and queue the
+   resulting sends
+5. once all earlier observations are replayed, return exactly one next event:
+   a send, a blocking receive, a non-blocking receive, a nondeterministic
+   choice, or end-of-thread
+
+The observation mapping should be:
+
+- delivered envelope value -> `receiveEnvelope(...)`
+- bottom on a non-blocking receive -> `fireTimer(...)`
+- txset wait-time choice value -> `enqueueTxSetDownloadWaitTimeChoice(...)`
+
+The scenario should stop producing further events once
+the chosen SCP scenario boundary becomes true. Tests can then inspect the
+recorded boundary envelope to verify which first ballot boundary was reached.
+
+### Why This Split Is Better For SCP
+
+The old `DporNominationDporAdapter` mixed together:
+
+- the DPOR-visible value type
+- encoding and receive-label helpers
+- replay mechanics
+- concrete scenario construction
+
+The 2PC example's split is a better template for SCP because it makes it easier
+to:
+
+- add a second SCP scenario without redefining the DPOR value type
+- share one bridge across early-SCP and later balloting/externalize scenarios
+- keep scenario-specific assumptions, like `[x, y, y]` and the round-1 leader
+  ordering, out of the reusable deterministic SCP support layer
+
+### First Tests For This Scenario
+
+The first tests using this scenario should stay small:
+
+- a smoke test that `makeProgram()` builds and explores at least one execution
+- a step-shape test that the leader first emits the expected initial SCP sends
+  before waiting
+- a boundary test that some explored leader path reaches a `PREPARE` boundary
+- a timeout test that at least one follower path observes an initial-phase SCP
+  timer firing before delivery wins
+
+That gives the SCP harness the same "types / bridge / scenario" structure as
+the 2PC example while still reusing the deterministic SCP replay seam that the
+old `dpor-skip-ledgers-p25` branch already proved out.
 
 ## Harness Design Considerations That Affect Build Integration
 
@@ -362,7 +568,7 @@ Mitigation:
 5. Add one trivial smoke test and one trivial investigation mode to prove both
    binary paths work.
 6. Inspect the emitted compile and link commands before iterating on the real
-   SCP nomination/balloting harness.
+   SCP harness.
 7. Only after that, start expanding the replay model, allowing small SCP-header
    testability hooks if they prove necessary.
 
