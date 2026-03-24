@@ -223,6 +223,9 @@ class DporScpNode : public SCPDriver
     void
     enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
 
+    void
+    setReplayDebugRecordingEnabled(bool enabled);
+
     std::vector<ReplayDebugEvent>
     takeReplayDebugEvents();
 
@@ -324,6 +327,9 @@ class DporScpNode : public SCPDriver
     findTimerSetCount(uint64 slotIndex, int timerID);
 
     void
+    recordReplayDebugEvent(ReplayDebugEvent event) const;
+
+    void
     clearReplayState();
 
     bool
@@ -348,6 +354,7 @@ class DporScpNode : public SCPDriver
         mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};
     mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
+    bool mReplayDebugRecordingEnabled{false};
     mutable std::vector<ReplayDebugEvent> mReplayDebugEvents;
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;

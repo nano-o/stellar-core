@@ -233,6 +233,21 @@ class ScpDporThreeNodePrepareBoundaryScenario
         ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
 
         auto& node = mReplaySupport.acquireNode(nodeIndex);
+        struct ReplayDebugRecordingGuard
+        {
+            DporScpNode& mNode;
+
+            explicit ReplayDebugRecordingGuard(DporScpNode& node)
+                : mNode(node)
+            {
+                mNode.setReplayDebugRecordingEnabled(true);
+            }
+
+            ~ReplayDebugRecordingGuard()
+            {
+                mNode.setReplayDebugRecordingEnabled(false);
+            }
+        } guard(node);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
         auto pendingSends = mScenarioBaselines.at(nodeIndex).mInitialPendingSends;

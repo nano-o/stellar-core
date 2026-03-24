@@ -176,7 +176,7 @@ DporScpNode::fireTimer(uint64 slotIndex, int timerID)
     }
 
     auto cb = it->mCallback;
-    mReplayDebugEvents.push_back(ReplayDebugEvent{
+    recordReplayDebugEvent(ReplayDebugEvent{
         .mKind = ReplayDebugEvent::Kind::FireTimer,
         .mSlotIndex = slotIndex,
         .mTimerID = timerID,
@@ -194,6 +194,16 @@ DporScpNode::enqueueTxSetDownloadWaitTimeChoice(
     std::chrono::milliseconds waitTime)
 {
     mPendingTxSetDownloadWaitTimeChoices.push_back(waitTime);
+}
+
+void
+DporScpNode::setReplayDebugRecordingEnabled(bool enabled)
+{
+    mReplayDebugRecordingEnabled = enabled;
+    if (!enabled)
+    {
+        mReplayDebugEvents.clear();
+    }
 }
 
 std::vector<DporScpNode::ReplayDebugEvent>
@@ -586,7 +596,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
         auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
             mNextPendingTxSetDownloadWaitTimeChoice++);
         ++mTxSetDownloadWaitTimeCallCount;
-        mReplayDebugEvents.push_back(ReplayDebugEvent{
+        recordReplayDebugEvent(ReplayDebugEvent{
             .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
             .mWaitTime = waitTime});
         return waitTime;
@@ -595,7 +605,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
     if (mTxSetDownloadWaitTimes.empty())
     {
         auto const waitTime = getTxSetDownloadTimeout();
-        mReplayDebugEvents.push_back(ReplayDebugEvent{
+        recordReplayDebugEvent(ReplayDebugEvent{
             .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
             .mWaitTime = waitTime});
         return waitTime;
@@ -608,7 +618,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
     }
     auto const waitTime = mTxSetDownloadWaitTimes[index];
     ++mTxSetDownloadWaitTimeCallCount;
-    mReplayDebugEvents.push_back(ReplayDebugEvent{
+    recordReplayDebugEvent(ReplayDebugEvent{
         .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
         .mWaitTime = waitTime});
     return waitTime;
@@ -637,7 +647,7 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
     }
 
     mEmittedEnvelopes.push_back(envelope);
-    mReplayDebugEvents.push_back(
+    recordReplayDebugEvent(
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
                          .mEnvelope = envelope,
                          .mBoundary = reachesBoundaryNow});
@@ -763,7 +773,7 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 {
     if (!cb)
     {
-        mReplayDebugEvents.push_back(
+        recordReplayDebugEvent(
             ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
                              .mSlotIndex = slotIndex,
                              .mTimerID = timerID});
@@ -793,7 +803,7 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 
     if (timerSetLimit && setCount >= *timerSetLimit)
     {
-        mReplayDebugEvents.push_back(
+        recordReplayDebugEvent(
             ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
                              .mSlotIndex = slotIndex,
                              .mTimerID = timerID});
@@ -801,7 +811,7 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
         return;
     }
 
-    mReplayDebugEvents.push_back(
+    recordReplayDebugEvent(
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::SetupTimer,
                          .mSlotIndex = slotIndex,
                          .mTimerID = timerID,
@@ -812,7 +822,7 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
 void
 DporScpNode::stopTimer(uint64 slotIndex, int timerID)
 {
-    mReplayDebugEvents.push_back(
+    recordReplayDebugEvent(
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::StopTimer,
                          .mSlotIndex = slotIndex,
                          .mTimerID = timerID});
@@ -924,6 +934,16 @@ DporScpNode::findTimerSetCount(uint64 slotIndex, int timerID)
             return entry.mSlotIndex == slotIndex && entry.mTimerID == timerID;
         });
     return it == mTimerSetCounts.end() ? nullptr : &*it;
+}
+
+void
+DporScpNode::recordReplayDebugEvent(ReplayDebugEvent event) const
+{
+    if (!mReplayDebugRecordingEnabled)
+    {
+        return;
+    }
+    mReplayDebugEvents.push_back(std::move(event));
 }
 
 void
