@@ -70,9 +70,10 @@ large SCP property suite.
   observed traces, including hidden txset wait-time choices. Replay semantics
   are also described in
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
-- [`src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h`](../src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h)
-  is the current scenario layer. It builds a three-validator, single-slot SCP
-  program and can inspect both boundary state and replay traces.
+- [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
+  is the current default scenario layer. It currently builds a three-validator,
+  single-slot SCP program and can inspect both boundary state and replay
+  traces.
 - Production SCP changes are still small. The main hooks are `friend class
   DporScpNode` in:
   - [`src/scp/SCP.h`](../src/scp/SCP.h)
@@ -84,7 +85,7 @@ large SCP property suite.
 
 - The checked-in runtime surface is still centered on one scenario class, but
   that scenario is configurable rather than fixed.
-- [`src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h`](../src/scp/test/ScpDporThreeNodePrepareBoundaryScenario.h)
+- [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
   currently supports:
   - stopping at prepare boundaries or commit boundaries
   - nomination and balloting timer enablement

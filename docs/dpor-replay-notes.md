@@ -13,8 +13,8 @@ The callback in
 returns `TerminalExecutionAction::Stop`, so DPOR prints the first terminal
 execution it encounters and then stops exploring.
 
-Without `--dump-terminal-trace`, the default three-node prepare-boundary
-scenario currently explores four executions at sufficiently large depth.
+Without `--dump-terminal-trace`, the default scenario currently explores four
+executions at sufficiently large depth.
 
 The printed "trace" is not a full per-thread step log. It uses
 `execution.graph.thread_trace(...)`, which contains only:
@@ -32,7 +32,7 @@ This is why the terminal dump can look much shorter than the actual execution.
 
 ## Scenario Start State
 
-The three-node prepare-boundary scenario does not start from empty nodes.
+The default scenario does not start from empty nodes.
 
 `ScpDporReplaySupport::rebuildBaselines()` constructs a fresh `DporScpNode` for
 each validator, calls `nominate(...)`, then snapshots the resulting node state
@@ -199,4 +199,3 @@ The simplest way to think about the current replay loop is:
 - each observed event is replayed from a per-call checkpoint
 - if replay discovers a hidden txset choice mid-step, it rewinds to that
   checkpoint and reruns the same step with the choice preloaded
-

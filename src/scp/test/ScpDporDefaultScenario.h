@@ -20,7 +20,7 @@
 namespace stellar::scpdpor
 {
 
-class ScpDporThreeNodePrepareBoundaryScenario
+class ScpDporDefaultScenario
 {
   public:
     enum class DownloadTimeMode : std::uint8_t
@@ -84,7 +84,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
 
-    explicit ScpDporThreeNodePrepareBoundaryScenario(
+    explicit ScpDporDefaultScenario(
         Options options = makeDefaultOptions())
         : mOptions(std::move(options))
         , mReplaySupport(mOptions.mValidators, mOptions.mQuorumSet,
@@ -95,7 +95,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
         if (mOptions.mValidators.size() != 3)
         {
             throw std::invalid_argument(
-                "three-node scenario requires exactly 3 validators");
+                "default scenario currently requires exactly 3 validators");
         }
         if (mOptions.mInitialValues.size() != mOptions.mValidators.size())
         {
@@ -147,7 +147,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
 
         Program program;
         auto self =
-            std::make_shared<ScpDporThreeNodePrepareBoundaryScenario const>(
+            std::make_shared<ScpDporDefaultScenario const>(
                 *this);
         for (std::size_t nodeIndex = 0; nodeIndex < mOptions.mValidators.size();
              ++nodeIndex)
@@ -230,7 +230,7 @@ class ScpDporThreeNodePrepareBoundaryScenario
         prepareOptions.mStopOnPrepare = true;
         prepareOptions.mMaxNominationRound.reset();
         prepareOptions.mMaxBallotingRound.reset();
-        return ScpDporThreeNodePrepareBoundaryScenario(
+        return ScpDporDefaultScenario(
                    std::move(prepareOptions))
             .inspectBoundary(nodeIndex, trace);
     }

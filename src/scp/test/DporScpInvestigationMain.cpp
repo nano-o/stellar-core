@@ -2,7 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-#include "scp/test/ScpDporThreeNodePrepareBoundaryScenario.h"
+#include "scp/test/ScpDporDefaultScenario.h"
 #include "util/Logging.h"
 
 #include <chrono>
@@ -31,9 +31,9 @@ struct CommandLineOptions
     bool mStopOnCommit{false};
     bool mWithNominationTimers{false};
     bool mWithBallotingTimers{false};
-    stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::DownloadTimeMode
+    stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
         mDownloadTimeMode{
-            stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            stellar::scpdpor::ScpDporDefaultScenario::
                 DownloadTimeMode::AlwaysValid};
     std::optional<std::size_t> mDumpInitialSteps;
     std::optional<std::chrono::seconds> mPrintStatsInterval;
@@ -43,21 +43,15 @@ struct CommandLineOptions
         dpor::model::CommunicationModel::Async};
 };
 
-void
-printUsage(char const* argv0)
-{
-    std::cerr << "Usage: " << argv0
-              << " [--workers N|--parallel] [--depth N]"
-              << " [--max-nomination-round N]"
-              << " [--max-balloting-round N]"
-              << " [--stop-on-prepare] [--stop-on-commit]"
-              << " [--with-nomination-timers] [--with-balloting-timers]"
-              << " [--download-time nondet|always-waiting|always-valid]"
-              << " [--fifo]"
-              << " [--print-stats N]"
-              << " [--dump-initial-steps N] [--dump-terminal-trace]"
-              << " [--dump-terminal-replay-trace]\n";
-}
+std::size_t
+defaultParallelWorkers();
+
+std::string_view
+downloadTimeModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode);
+
+std::string_view
+communicationModelName(dpor::model::CommunicationModel model);
 
 std::size_t
 defaultParallelWorkers()
@@ -66,12 +60,103 @@ defaultParallelWorkers()
     return concurrency == 0 ? 2u : static_cast<std::size_t>(concurrency);
 }
 
-stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::DownloadTimeMode
+std::string_view
+downloadTimeModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode)
+{
+    using DownloadTimeMode =
+        stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode;
+    switch (mode)
+    {
+    case DownloadTimeMode::AlwaysValid:
+        return "always-valid";
+    case DownloadTimeMode::AlwaysWaiting:
+        return "always-waiting";
+    case DownloadTimeMode::Nondeterministic:
+        return "nondet";
+    }
+    throw std::logic_error("unknown download-time mode");
+}
+
+std::string_view
+communicationModelName(dpor::model::CommunicationModel model)
+{
+    switch (model)
+    {
+    case dpor::model::CommunicationModel::Async:
+        return "async";
+    case dpor::model::CommunicationModel::FifoP2P:
+        return "fifo";
+    }
+    throw std::logic_error("unknown communication model");
+}
+
+void
+printUsage(char const* argv0)
+{
+    auto const defaults = CommandLineOptions{};
+
+    std::cerr << "Usage: " << argv0 << " [options]\n\n"
+              << "Options:\n"
+              << "  --workers N\n"
+              << "      Worker count (default: " << defaults.mWorkers << ")\n"
+              << "  --parallel\n"
+              << "      Use the host parallelism shortcut"
+              << " (default: off; this machine: "
+              << defaultParallelWorkers() << " workers)\n"
+              << "  --depth N\n"
+              << "      DPOR max depth (default: " << defaults.mDepth
+              << ")\n"
+              << "  --max-nomination-round N"
+              << " | --max-nomination-rounds N\n"
+              << "      Stop when nomination round reaches N"
+              << " (default: disabled)\n"
+              << "  --max-balloting-round N"
+              << " | --max-balloting-rounds N\n"
+              << "      Stop when balloting round reaches N"
+              << " (default: disabled)\n"
+              << "  --stop-on-prepare\n"
+              << "      Stop at the prepare boundary (default: off)\n"
+              << "  --stop-on-commit\n"
+              << "      Stop at the commit boundary (default: off)\n"
+              << "  --with-nomination-timers\n"
+              << "      Enable nomination timers (default: "
+              << (defaults.mWithNominationTimers ? "on" : "off") << ")\n"
+              << "  --with-balloting-timers\n"
+              << "      Enable balloting timers (default: "
+              << (defaults.mWithBallotingTimers ? "on" : "off") << ")\n"
+              << "  --download-time nondet|always-waiting|always-valid\n"
+              << "      Tx-set download wait-time mode (default: "
+              << downloadTimeModeName(defaults.mDownloadTimeMode) << ")\n"
+              << "  --fifo\n"
+              << "      Use FIFO point-to-point delivery"
+              << " (default communication model: "
+              << communicationModelName(defaults.mCommunicationModel)
+              << ")\n"
+              << "  --print-stats N\n"
+              << "      Print progress every N seconds"
+              << " (default: disabled)\n"
+              << "  --dump-initial-steps N\n"
+              << "      Dump the first N thread steps and exit"
+              << " (default: disabled)\n"
+              << "  --dump-terminal-trace\n"
+              << "      Dump the first terminal execution trace"
+              << " (default: off)\n"
+              << "  --dump-terminal-replay-trace\n"
+              << "      Dump replay traces for the dumped terminal execution"
+              << " (default: off)\n"
+              << "  --scenario prepare-boundary|commit-boundary|"
+                 "nomination-timers\n"
+              << "      Legacy compatibility shim (default: disabled)\n"
+              << "  --help, -h\n"
+              << "      Show this help message\n";
+}
+
+stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
 parseDownloadTimeMode(std::string_view value)
 {
     using DownloadTimeMode =
-        stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
-            DownloadTimeMode;
+        stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode;
 
     if (value == "nondet")
     {
@@ -126,7 +211,7 @@ parseUint32Value(std::string_view arg, std::string_view value)
     return static_cast<uint32_t>(parsed);
 }
 
-stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario
+stellar::scpdpor::ScpDporDefaultScenario
 makeScenario(CommandLineOptions const& options)
 {
     if (options.mStopOnPrepare && options.mStopOnCommit)
@@ -136,8 +221,7 @@ makeScenario(CommandLineOptions const& options)
     }
 
     auto scenarioOptions =
-        stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
-            makeDefaultOptions();
+        stellar::scpdpor::ScpDporDefaultScenario::makeDefaultOptions();
     scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
     scenarioOptions.mStopOnCommit = options.mStopOnCommit;
     scenarioOptions.mMaxNominationRound = options.mMaxNominationRound;
@@ -145,7 +229,7 @@ makeScenario(CommandLineOptions const& options)
     scenarioOptions.mEnableNominationTimeouts = options.mWithNominationTimers;
     scenarioOptions.mEnableBallotingTimeouts = options.mWithBallotingTimers;
     scenarioOptions.mDownloadTimeMode = options.mDownloadTimeMode;
-    return stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario(
+    return stellar::scpdpor::ScpDporDefaultScenario(
         std::move(scenarioOptions));
 }
 
@@ -299,7 +383,7 @@ printReplayDebugEvent(std::ostream& out, uint64_t slotIndex,
 void
 printThreadReplayTrace(
     std::ostream& out, uint64_t slotIndex,
-    stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+    stellar::scpdpor::ScpDporDefaultScenario::
         ThreadReplayTraceInspection const& inspection)
 {
     for (std::size_t stepIndex = 0; stepIndex < inspection.mSteps.size();
@@ -309,16 +393,16 @@ printThreadReplayTrace(
         out << "  step=" << stepIndex << " ";
         switch (step.mKind)
         {
-        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+        case stellar::scpdpor::ScpDporDefaultScenario::
             ThreadReplayTraceStep::Kind::Send:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mSend});
             break;
-        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+        case stellar::scpdpor::ScpDporDefaultScenario::
             ThreadReplayTraceStep::Kind::NondeterministicChoice:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mChoice});
             out << " selected=" << formatObservedValue(*step.mObservedValue);
             break;
-        case stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+        case stellar::scpdpor::ScpDporDefaultScenario::
             ThreadReplayTraceStep::Kind::Receive:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mReceive});
             out << " observed=" << formatObservedValue(*step.mObservedValue);

@@ -2,7 +2,7 @@
 // under the Apache License, Version 2.0. See the COPYING file at the root
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
-#include "scp/test/ScpDporThreeNodePrepareBoundaryScenario.h"
+#include "scp/test/ScpDporDefaultScenario.h"
 #include "test/Catch2.h"
 
 #include <algorithm>
@@ -87,7 +87,7 @@ requireReceiveLabel(std::optional<EventLabel> const& event)
 
 TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
 {
-    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    ScpDporDefaultScenario scenario;
     auto program = scenario.makeProgram();
     auto const& leader = program.threads.at(threadIdForNodeIndex(0));
 
@@ -99,7 +99,7 @@ TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
 TEST_CASE("scp dpor leader initially sends to both followers then waits",
           "[scp][dpor][smoke]")
 {
-    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    ScpDporDefaultScenario scenario;
     auto program = scenario.makeProgram();
     auto const& leader = program.threads.at(threadIdForNodeIndex(0));
 
@@ -122,7 +122,7 @@ TEST_CASE("scp dpor leader initially sends to both followers then waits",
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",
           "[scp][dpor][smoke]")
 {
-    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    ScpDporDefaultScenario scenario;
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = scenario.makeProgram();
     config.max_depth = 6;
@@ -138,7 +138,7 @@ TEST_CASE("scp dpor smoke explore reaches a terminal execution",
 TEST_CASE("scp dpor exploration finds a prepare boundary",
           "[scp][dpor][smoke]")
 {
-    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    ScpDporDefaultScenario scenario;
     bool foundPrepareBoundary = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -168,10 +168,10 @@ TEST_CASE("scp dpor exploration finds a prepare boundary",
 TEST_CASE("scp dpor exploration finds a commit boundary",
           "[scp][dpor][smoke]")
 {
-    auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mStopOnCommit = true;
-    ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
+    ScpDporDefaultScenario scenario(std::move(options));
     bool foundCommitBoundary = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -202,10 +202,10 @@ TEST_CASE("scp dpor exploration finds a commit boundary",
 TEST_CASE("scp dpor replay detects the timer-driven round boundary",
           "[scp][dpor][smoke]")
 {
-    auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mEnableNominationTimeouts = true;
     options.mMaxNominationRound = 1;
-    ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
+    ScpDporDefaultScenario scenario(std::move(options));
     ThreadTrace leaderTrace;
     leaderTrace.emplace_back(ObservedValue::bottom());
 
@@ -217,7 +217,7 @@ TEST_CASE("scp dpor replay detects the timer-driven round boundary",
 TEST_CASE("scp dpor node detects the balloting round boundary",
           "[scp][dpor][smoke]")
 {
-    auto const options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
 
     DporScpNode::Configuration config;
     config.mMaxBallotingRound = 1;
@@ -233,7 +233,7 @@ TEST_CASE("scp dpor node detects the balloting round boundary",
 TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
           "[scp][dpor][smoke]")
 {
-    ScpDporThreeNodePrepareBoundaryScenario scenario;
+    ScpDporDefaultScenario scenario;
     std::vector<ThreadTrace> threadTraces(
         scenario.options().mValidators.size());
     bool capturedTrace = false;
@@ -303,9 +303,9 @@ TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
           "[scp][dpor][smoke]")
 {
-    auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mEnableNominationTimeouts = true;
-    ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
+    ScpDporDefaultScenario scenario(std::move(options));
     bool foundFollowerTimeout = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -338,7 +338,7 @@ TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
 TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
           "[scp][dpor][smoke]")
 {
-    auto const options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
 
     DporScpNode::Configuration config;
     config.mAwaitTxSetDownloads = true;
