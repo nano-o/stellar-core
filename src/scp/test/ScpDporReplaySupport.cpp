@@ -26,6 +26,42 @@ threadLocalReplayStateCache()
     return cache;
 }
 
+void
+enqueueTxSetDownloadWaitTimeChoices(
+    DporScpNode& node,
+    std::vector<std::chrono::milliseconds> const& waitTimes)
+{
+    for (auto const& waitTime : waitTimes)
+    {
+        node.enqueueTxSetDownloadWaitTimeChoice(waitTime);
+    }
+}
+
+std::vector<std::chrono::milliseconds>
+decodeKnownTxSetDownloadWaitTimeChoices(ThreadTrace const& trace,
+                                        std::size_t observedIndex)
+{
+    std::vector<std::chrono::milliseconds> waitTimes;
+    for (std::size_t choiceIndex = observedIndex + 1; choiceIndex < trace.size();
+         ++choiceIndex)
+    {
+        auto const& choiceObserved = trace.at(choiceIndex);
+        if (choiceObserved.is_bottom())
+        {
+            break;
+        }
+
+        auto const& choiceValue = choiceObserved.value();
+        if (!isTxSetDownloadWaitTimeChoiceValue(choiceValue))
+        {
+            break;
+        }
+
+        waitTimes.push_back(decodeTxSetDownloadWaitTimeChoice(choiceValue));
+    }
+    return waitTimes;
+}
+
 } // namespace
 
 ScpDporReplaySupport::ScpDporReplaySupport(
@@ -102,6 +138,8 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
                                         std::size_t observedIndex,
                                         std::optional<int> selectedTimerID) const
 {
+    static_cast<void>(nodeIndex);
+
     if (observedIndex >= trace.size())
     {
         throw std::out_of_range("observed trace index out of range");
@@ -109,68 +147,34 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
 
     auto const& observed = trace.at(observedIndex);
     auto const observedBottom = observed.is_bottom();
-    auto const replayBaseline = node.snapshotReplayBaseline(mSlotIndex);
-    std::vector<std::chrono::milliseconds> chosenWaitTimes;
+    auto const chosenWaitTimes =
+        decodeKnownTxSetDownloadWaitTimeChoices(trace, observedIndex);
 
-    auto const restoreReplayCheckpoint = [&]() {
-        restoreNodeBaseline(node, nodeIndex, replayBaseline);
-        for (auto const& waitTime : chosenWaitTimes)
-        {
-            node.enqueueTxSetDownloadWaitTimeChoice(waitTime);
-        }
-    };
-
-    while (true)
+    enqueueTxSetDownloadWaitTimeChoices(node, chosenWaitTimes);
+    try
     {
-        restoreReplayCheckpoint();
-        try
+        replayOneObservedValue(node, observed, selectedTimerID);
+        return ReplayObservationProgress{
+            .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
+            .mConsumedStepCount = chosenWaitTimes.size(),
+            .mObservedBottom = observedBottom,
+        };
+    }
+    catch (DporScpNode::TxSetDownloadWaitTimeChoiceRequired const& e)
+    {
+        auto const choiceIndex = observedIndex + 1 + chosenWaitTimes.size();
+        if (choiceIndex < trace.size())
         {
-            replayOneObservedValue(node, observed, selectedTimerID);
-            return ReplayObservationProgress{
-                .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
-                .mConsumedStepCount = chosenWaitTimes.size(),
-                .mObservedBottom = observedBottom,
-            };
+            throw std::logic_error(
+                "trace omits a txset wait-time choice before the next observed event");
         }
-        catch (DporScpNode::TxSetDownloadWaitTimeChoiceRequired const& e)
-        {
-            auto const choiceIndex =
-                observedIndex + 1 + chosenWaitTimes.size();
-            if (choiceIndex >= trace.size())
-            {
-                return ReplayObservationProgress{
-                    .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
-                    .mConsumedStepCount = chosenWaitTimes.size(),
-                    .mPendingEvent =
-                        makeTxSetDownloadWaitTimeChoiceEvent(e.getChoices()),
-                    .mObservedBottom = observedBottom,
-                };
-            }
 
-            auto const& choiceObserved = trace.at(choiceIndex);
-            if (choiceObserved.is_bottom())
-            {
-                throw std::logic_error(
-                    "trace contains bottom where a txset wait-time choice was required");
-            }
-
-            auto const& choiceValue = choiceObserved.value();
-            if (!isTxSetDownloadWaitTimeChoiceValue(choiceValue))
-            {
-                throw std::logic_error(
-                    "trace entry is not a txset wait-time choice");
-            }
-
-            auto const waitTime = decodeTxSetDownloadWaitTimeChoice(choiceValue);
-            if (std::find(e.getChoices().begin(), e.getChoices().end(),
-                          waitTime) == e.getChoices().end())
-            {
-                throw std::logic_error(
-                    "trace chose an unsupported txset wait time");
-            }
-
-            chosenWaitTimes.push_back(waitTime);
-        }
+        return ReplayObservationProgress{
+            .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
+            .mConsumedStepCount = chosenWaitTimes.size(),
+            .mPendingEvent = makeTxSetDownloadWaitTimeChoiceEvent(e.getChoices()),
+            .mObservedBottom = observedBottom,
+        };
     }
 }
 

@@ -325,4 +325,72 @@ TEST_CASE("scp dpor node restores txset wait-time choices in order",
                       DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
 }
 
+TEST_CASE(
+    "scp dpor replay preloads known txset wait-time choices for non-frontier observations",
+    "[scp][dpor][smoke]")
+{
+    auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2000);
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 1;
+    qSet.validators.push_back(validator.getPublicKey());
+
+    Value previousValue;
+    previousValue.push_back('p');
+    Value initialValue;
+    initialValue.push_back('x');
+
+    DporScpNode::Configuration config;
+    config.mAwaitTxSetDownloads = true;
+    config.mTxSetDownloadWaitTimes = {
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+    config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall = true;
+
+    auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
+    auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
+
+    std::vector<SecretKey> validators{validator};
+    std::vector<Value> initialValues{initialValue};
+    ScpDporReplaySupport replaySupport(validators, qSet, 0, previousValue,
+                                       initialValues, config);
+    DporScpNode node(validator, qSet, config);
+
+    std::vector<std::chrono::milliseconds> seenWaitTimes;
+    node.setupTimer(0, Slot::NOMINATION_TIMER, std::chrono::milliseconds(10),
+                    [&node, &seenWaitTimes, initialValue]() {
+                        auto const first =
+                            node.getTxSetDownloadWaitTime(initialValue);
+                        REQUIRE(first.has_value());
+                        seenWaitTimes.push_back(*first);
+
+                        auto const second =
+                            node.getTxSetDownloadWaitTime(initialValue);
+                        REQUIRE(second.has_value());
+                        seenWaitTimes.push_back(*second);
+                    });
+
+    ThreadTrace trace;
+    trace.emplace_back(ObservedValue::bottom());
+    trace.emplace_back(
+        makeTxSetDownloadWaitTimeChoiceValue(0, aboveTimeout));
+    trace.emplace_back(ObservedValue::bottom());
+
+    auto const progress =
+        replaySupport.replayObservation(node, 0, trace, 0,
+                                        std::optional<int>{
+                                            Slot::NOMINATION_TIMER});
+
+    REQUIRE(progress.mConsumedTraceEntries == 2);
+    REQUIRE(progress.mConsumedStepCount == 1);
+    REQUIRE_FALSE(progress.mPendingEvent.has_value());
+    REQUIRE(progress.mObservedBottom);
+
+    std::vector<std::chrono::milliseconds> const expectedWaitTimes{
+        belowTimeout, aboveTimeout};
+    REQUIRE(seenWaitTimes == expectedWaitTimes);
+}
+
 } // namespace stellar::scpdpor

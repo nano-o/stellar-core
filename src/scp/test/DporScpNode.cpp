@@ -595,6 +595,12 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
 
         auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
             mNextPendingTxSetDownloadWaitTimeChoice++);
+        if (waitTime != mTxSetDownloadWaitTimes.front() &&
+            waitTime != mTxSetDownloadWaitTimes.at(1))
+        {
+            throw std::logic_error(
+                "preloaded txset wait-time choice is not supported");
+        }
         ++mTxSetDownloadWaitTimeCallCount;
         recordReplayDebugEvent(ReplayDebugEvent{
             .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
