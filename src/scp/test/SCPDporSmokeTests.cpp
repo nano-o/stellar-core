@@ -165,12 +165,46 @@ TEST_CASE("scp dpor exploration finds a prepare boundary",
     REQUIRE(foundPrepareBoundary);
 }
 
+TEST_CASE("scp dpor exploration finds a commit boundary",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mStopOnCommit = true;
+    ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
+    bool foundCommitBoundary = false;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 60;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto const leaderTrace =
+                execution.graph.thread_trace(threadIdForNodeIndex(0));
+            auto inspection = scenario.inspectBoundary(0, leaderTrace);
+            if (inspection.mReachedBoundary && inspection.mBoundaryEnvelope)
+            {
+                auto const type =
+                    inspection.mBoundaryEnvelope->statement.pledges.type();
+                if (type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE)
+                {
+                    foundCommitBoundary = true;
+                    return dpor::algo::TerminalExecutionAction::Stop;
+                }
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    static_cast<void>(dpor::algo::verify(config));
+    REQUIRE(foundCommitBoundary);
+}
+
 TEST_CASE("scp dpor replay detects the timer-driven round boundary",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
     options.mEnableNominationTimeouts = true;
-    options.mMaxNominationRounds = 1;
+    options.mMaxNominationRound = 1;
     ScpDporThreeNodePrepareBoundaryScenario scenario(std::move(options));
     ThreadTrace leaderTrace;
     leaderTrace.emplace_back(ObservedValue::bottom());
@@ -178,6 +212,22 @@ TEST_CASE("scp dpor replay detects the timer-driven round boundary",
     auto const inspection = scenario.inspectBoundary(0, leaderTrace);
     REQUIRE(inspection.mReachedBoundary);
     REQUIRE_FALSE(inspection.mBoundaryEnvelope.has_value());
+}
+
+TEST_CASE("scp dpor node detects the balloting round boundary",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mMaxBallotingRound = 1;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    node.setupTimer(options.mSlotIndex, Slot::BALLOT_PROTOCOL_TIMER,
+                    node.computeTimeout(2, false), []() {});
+
+    REQUIRE(node.hasReachedBoundary());
+    REQUIRE_FALSE(node.getBoundaryEnvelope());
 }
 
 TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
@@ -285,7 +335,7 @@ TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
     REQUIRE(foundFollowerTimeout);
 }
 
-TEST_CASE("scp dpor node restores txset wait-time choices in order",
+TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
           "[scp][dpor][smoke]")
 {
     auto const options = ScpDporThreeNodePrepareBoundaryScenario::makeDefaultOptions();
@@ -297,7 +347,7 @@ TEST_CASE("scp dpor node restores txset wait-time choices in order",
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
         std::chrono::milliseconds(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
-    config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall = true;
+    config.mNondeterministicTxSetDownloadWaitTime = true;
 
     DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
     Value value;
@@ -306,7 +356,6 @@ TEST_CASE("scp dpor node restores txset wait-time choices in order",
     auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
     auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
 
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
     REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
@@ -326,7 +375,7 @@ TEST_CASE("scp dpor node restores txset wait-time choices in order",
 }
 
 TEST_CASE(
-    "scp dpor replay preloads known txset wait-time choices for non-frontier observations",
+    "scp dpor replay preloads known txset wait-time choices from the first query",
     "[scp][dpor][smoke]")
 {
     auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2000);
@@ -347,15 +396,18 @@ TEST_CASE(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
         std::chrono::milliseconds(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
-    config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall = true;
+    config.mNondeterministicTxSetDownloadWaitTime = true;
 
     auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
     auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
 
+    auto replayConfig = config;
+    replayConfig.mNondeterministicTxSetDownloadWaitTime = false;
+
     std::vector<SecretKey> validators{validator};
     std::vector<Value> initialValues{initialValue};
     ScpDporReplaySupport replaySupport(validators, qSet, 0, previousValue,
-                                       initialValues, config);
+                                       initialValues, replayConfig);
     DporScpNode node(validator, qSet, config);
 
     std::vector<std::chrono::milliseconds> seenWaitTimes;
@@ -375,6 +427,8 @@ TEST_CASE(
     ThreadTrace trace;
     trace.emplace_back(ObservedValue::bottom());
     trace.emplace_back(
+        makeTxSetDownloadWaitTimeChoiceValue(0, belowTimeout));
+    trace.emplace_back(
         makeTxSetDownloadWaitTimeChoiceValue(0, aboveTimeout));
     trace.emplace_back(ObservedValue::bottom());
 
@@ -383,8 +437,8 @@ TEST_CASE(
                                         std::optional<int>{
                                             Slot::NOMINATION_TIMER});
 
-    REQUIRE(progress.mConsumedTraceEntries == 2);
-    REQUIRE(progress.mConsumedStepCount == 1);
+    REQUIRE(progress.mConsumedTraceEntries == 3);
+    REQUIRE(progress.mConsumedStepCount == 2);
     REQUIRE_FALSE(progress.mPendingEvent.has_value());
     REQUIRE(progress.mObservedBottom);
 

@@ -28,6 +28,7 @@ class DporScpNode : public SCPDriver
   public:
     enum class BoundaryMode : std::uint8_t
     {
+        None,
         Prepare,
         Commit,
         NominationRound
@@ -56,13 +57,14 @@ class DporScpNode : public SCPDriver
         std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
             mCombineCandidates;
         uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
-        BoundaryMode mBoundaryMode{BoundaryMode::Prepare};
-        std::optional<uint32_t> mMaxNominationRounds;
+        BoundaryMode mBoundaryMode{BoundaryMode::None};
+        std::optional<uint32_t> mMaxNominationRound;
+        std::optional<uint32_t> mMaxBallotingRound;
         bool mAwaitTxSetDownloads{false};
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
             mTxSetDownloadWaitTimesByNode;
-        bool mNondeterministicTxSetDownloadWaitTimeAfterFirstCall{false};
+        bool mNondeterministicTxSetDownloadWaitTime{false};
         std::optional<uint32_t> mNominationTimerSetLimit;
         std::optional<uint32_t> mBallotingTimerSetLimit;
         uint32_t mInitialNominationTimeoutMS{1000};
@@ -341,6 +343,15 @@ class DporScpNode : public SCPDriver
     inferNominationRound(std::chrono::milliseconds timeout) const;
 
     uint32_t
+    inferBallotingRound(std::chrono::milliseconds timeout) const;
+
+    uint32_t
+    inferTimeoutRound(std::chrono::milliseconds timeout,
+                      uint32_t initialTimeoutMS,
+                      uint32_t incrementTimeoutMS,
+                      char const* timerName) const;
+
+    uint32_t
     getNominationRoundForEnvelope(SCPEnvelope const& envelope) const;
 
     SecretKey mSecretKey;
@@ -350,15 +361,16 @@ class DporScpNode : public SCPDriver
     std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
         mCombineCandidates;
     uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
-    BoundaryMode mBoundaryMode{BoundaryMode::Prepare};
-    std::optional<uint32_t> mMaxNominationRounds;
+    BoundaryMode mBoundaryMode{BoundaryMode::None};
+    std::optional<uint32_t> mMaxNominationRound;
+    std::optional<uint32_t> mMaxBallotingRound;
     bool mAwaitTxSetDownloads{false};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
     std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
-    bool mNondeterministicTxSetDownloadWaitTimeAfterFirstCall{false};
+    bool mNondeterministicTxSetDownloadWaitTime{false};
     mutable std::vector<std::chrono::milliseconds>
         mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};

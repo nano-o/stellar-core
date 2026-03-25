@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <string>
 
 namespace stellar
 {
@@ -580,8 +581,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const&) const
         return std::nullopt;
     }
 
-    if (mNondeterministicTxSetDownloadWaitTimeAfterFirstCall &&
-        mTxSetDownloadWaitTimeCallCount >= 1 &&
+    if (mNondeterministicTxSetDownloadWaitTime &&
         mTxSetDownloadWaitTimes.size() >= 2 &&
         mTxSetDownloadWaitTimes.front() != mTxSetDownloadWaitTimes.at(1))
     {
@@ -775,32 +775,50 @@ DporScpNode::getUpgradeNominationTimeoutLimit() const
 uint32_t
 DporScpNode::inferNominationRound(std::chrono::milliseconds timeout) const
 {
+    return inferTimeoutRound(timeout, mInitialNominationTimeoutMS,
+                             mIncrementNominationTimeoutMS, "nomination");
+}
+
+uint32_t
+DporScpNode::inferBallotingRound(std::chrono::milliseconds timeout) const
+{
+    return inferTimeoutRound(timeout, mInitialBallotTimeoutMS,
+                             mIncrementBallotTimeoutMS, "balloting");
+}
+
+uint32_t
+DporScpNode::inferTimeoutRound(std::chrono::milliseconds timeout,
+                               uint32_t initialTimeoutMS,
+                               uint32_t incrementTimeoutMS,
+                               char const* timerName) const
+{
     auto const timeoutMS = timeout.count();
-    if (timeoutMS < static_cast<int64_t>(mInitialNominationTimeoutMS))
+    if (timeoutMS < static_cast<int64_t>(initialTimeoutMS))
     {
-        throw std::logic_error(
-            "nomination timer timeout is below the configured initial value");
+        throw std::logic_error(std::string(timerName) +
+                               " timer timeout is below the configured "
+                               "initial value");
     }
 
-    if (mIncrementNominationTimeoutMS == 0)
+    if (incrementTimeoutMS == 0)
     {
-        if (timeoutMS != static_cast<int64_t>(mInitialNominationTimeoutMS))
+        if (timeoutMS != static_cast<int64_t>(initialTimeoutMS))
         {
             throw std::logic_error(
-                "nomination timer timeout does not match the configured "
-                "constant timeout");
+                std::string(timerName) +
+                " timer timeout does not match the configured constant "
+                "timeout");
         }
         return 1;
     }
 
-    auto const deltaMS =
-        timeoutMS - static_cast<int64_t>(mInitialNominationTimeoutMS);
-    auto const incrementMS = static_cast<int64_t>(mIncrementNominationTimeoutMS);
+    auto const deltaMS = timeoutMS - static_cast<int64_t>(initialTimeoutMS);
+    auto const incrementMS = static_cast<int64_t>(incrementTimeoutMS);
     if ((deltaMS % incrementMS) != 0)
     {
         throw std::logic_error(
-            "nomination timer timeout does not match the configured round "
-            "schedule");
+            std::string(timerName) +
+            " timer timeout does not match the configured round schedule");
     }
 
     return 1 + static_cast<uint32_t>(deltaMS / incrementMS);
@@ -821,8 +839,13 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
         return;
     }
 
-    if (timerID == Slot::NOMINATION_TIMER && mMaxNominationRounds &&
-        inferNominationRound(timeout) > *mMaxNominationRounds)
+    if (timerID == Slot::NOMINATION_TIMER && mMaxNominationRound &&
+        inferNominationRound(timeout) > *mMaxNominationRound)
+    {
+        mHasReachedBoundary = true;
+    }
+    if (timerID == Slot::BALLOT_PROTOCOL_TIMER && mMaxBallotingRound &&
+        inferBallotingRound(timeout) > *mMaxBallotingRound)
     {
         mHasReachedBoundary = true;
     }
@@ -902,7 +925,8 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mPrepareBoundaryCounter =
         std::max<uint32_t>(1, config.mPrepareBoundaryCounter);
     mBoundaryMode = config.mBoundaryMode;
-    mMaxNominationRounds = config.mMaxNominationRounds;
+    mMaxNominationRound = config.mMaxNominationRound;
+    mMaxBallotingRound = config.mMaxBallotingRound;
     mAwaitTxSetDownloads = config.mAwaitTxSetDownloads;
     mInitialNominationTimeoutMS = config.mInitialNominationTimeoutMS;
     mIncrementNominationTimeoutMS = config.mIncrementNominationTimeoutMS;
@@ -919,8 +943,8 @@ DporScpNode::applyConfiguration(Configuration const& config)
     {
         mTxSetDownloadWaitTimes = config.mTxSetDownloadWaitTimes;
     }
-    mNondeterministicTxSetDownloadWaitTimeAfterFirstCall =
-        config.mNondeterministicTxSetDownloadWaitTimeAfterFirstCall;
+    mNondeterministicTxSetDownloadWaitTime =
+        config.mNondeterministicTxSetDownloadWaitTime;
     mNominationTimerSetLimit = config.mNominationTimerSetLimit;
     mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 }
@@ -1016,6 +1040,8 @@ DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
     auto const type = envelope.statement.pledges.type();
     switch (mBoundaryMode)
     {
+    case BoundaryMode::None:
+        return false;
     case BoundaryMode::Prepare:
         return type == SCP_ST_PREPARE &&
                envelope.statement.pledges.prepare().ballot.counter >=
@@ -1027,12 +1053,12 @@ DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
         {
             return false;
         }
-        if (!mMaxNominationRounds)
+        if (!mMaxNominationRound)
         {
             throw std::logic_error(
                 "nomination-round boundary requires max nomination rounds");
         }
-        return getNominationRoundForEnvelope(envelope) > *mMaxNominationRounds;
+        return getNominationRoundForEnvelope(envelope) > *mMaxNominationRound;
     }
     throw std::logic_error("unknown replay boundary mode");
 }

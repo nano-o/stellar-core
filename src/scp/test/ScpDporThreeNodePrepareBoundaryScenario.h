@@ -9,6 +9,7 @@
 #include "scp/test/ScpDporReplaySupport.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -22,6 +23,13 @@ namespace stellar::scpdpor
 class ScpDporThreeNodePrepareBoundaryScenario
 {
   public:
+    enum class DownloadTimeMode : std::uint8_t
+    {
+        AlwaysValid,
+        AlwaysWaiting,
+        Nondeterministic
+    };
+
     struct Options
     {
         std::vector<SecretKey> mValidators;
@@ -29,15 +37,16 @@ class ScpDporThreeNodePrepareBoundaryScenario
         uint64_t mSlotIndex{0};
         Value mPreviousValue;
         std::vector<Value> mInitialValues;
-        DporScpNode::BoundaryMode mBoundaryMode{
-            DporScpNode::BoundaryMode::Prepare};
+        bool mStopOnPrepare{true};
+        bool mStopOnCommit{false};
         uint32_t mPrepareBoundaryCounter{
             DporScpNode::DEFAULT_PREPARE_BOUNDARY_COUNTER};
-        std::optional<uint32_t> mMaxNominationRounds;
+        std::optional<uint32_t> mMaxNominationRound;
+        std::optional<uint32_t> mMaxBallotingRound;
         std::optional<uint32_t> mNominationTimerSetLimit;
         bool mEnableNominationTimeouts{true};
         bool mEnableBallotingTimeouts{false};
-        bool mAwaitTxSetDownloads{false};
+        DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::AlwaysValid};
         uint32_t mInitialNominationTimeoutMS{1000};
         uint32_t mIncrementNominationTimeoutMS{1000};
         uint32_t mInitialBallotTimeoutMS{1000};
@@ -217,7 +226,13 @@ class ScpDporThreeNodePrepareBoundaryScenario
     BoundaryInspection
     inspectPrepareBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
-        return inspectBoundary(nodeIndex, trace);
+        auto prepareOptions = mOptions;
+        prepareOptions.mStopOnPrepare = true;
+        prepareOptions.mMaxNominationRound.reset();
+        prepareOptions.mMaxBallotingRound.reset();
+        return ScpDporThreeNodePrepareBoundaryScenario(
+                   std::move(prepareOptions))
+            .inspectBoundary(nodeIndex, trace);
     }
 
     bool
@@ -396,23 +411,59 @@ class ScpDporThreeNodePrepareBoundaryScenario
     buildNodeConfiguration(Options const& options)
     {
         DporScpNode::Configuration config;
+        if (options.mStopOnPrepare && options.mStopOnCommit)
+        {
+            throw std::invalid_argument(
+                "prepare and commit boundaries are mutually exclusive");
+        }
         for (std::size_t nodeIndex = 0; nodeIndex < options.mValidators.size();
              ++nodeIndex)
         {
             config.mNodeIndexMap[options.mValidators.at(nodeIndex).getPublicKey()] =
                 nodeIndex + 1;
         }
-        config.mBoundaryMode = options.mBoundaryMode;
+        if (options.mStopOnCommit)
+        {
+            config.mBoundaryMode = DporScpNode::BoundaryMode::Commit;
+        }
+        else if (options.mStopOnPrepare)
+        {
+            config.mBoundaryMode = DporScpNode::BoundaryMode::Prepare;
+        }
+        else
+        {
+            config.mBoundaryMode = DporScpNode::BoundaryMode::None;
+        }
         config.mPrepareBoundaryCounter = options.mPrepareBoundaryCounter;
-        config.mMaxNominationRounds = options.mMaxNominationRounds;
+        config.mMaxNominationRound = options.mMaxNominationRound;
+        config.mMaxBallotingRound = options.mMaxBallotingRound;
         config.mNominationTimerSetLimit = options.mNominationTimerSetLimit;
-        config.mAwaitTxSetDownloads = options.mAwaitTxSetDownloads;
         config.mInitialNominationTimeoutMS =
             options.mInitialNominationTimeoutMS;
         config.mIncrementNominationTimeoutMS =
             options.mIncrementNominationTimeoutMS;
         config.mInitialBallotTimeoutMS = options.mInitialBallotTimeoutMS;
         config.mIncrementBallotTimeoutMS = options.mIncrementBallotTimeoutMS;
+        switch (options.mDownloadTimeMode)
+        {
+        case DownloadTimeMode::AlwaysValid:
+            break;
+        case DownloadTimeMode::AlwaysWaiting:
+            config.mAwaitTxSetDownloads = true;
+            config.mTxSetDownloadWaitTimes = {
+                std::chrono::milliseconds(
+                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
+            break;
+        case DownloadTimeMode::Nondeterministic:
+            config.mAwaitTxSetDownloads = true;
+            config.mTxSetDownloadWaitTimes = {
+                std::chrono::milliseconds(
+                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
+                std::chrono::milliseconds(
+                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+            config.mNondeterministicTxSetDownloadWaitTime = true;
+            break;
+        }
         return config;
     }
 

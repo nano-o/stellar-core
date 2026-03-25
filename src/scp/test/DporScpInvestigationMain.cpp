@@ -23,17 +23,18 @@ namespace
 
 struct CommandLineOptions
 {
-    enum class Scenario : std::uint8_t
-    {
-        PrepareBoundary,
-        NominationTimers
-    };
-
-    Scenario mScenario{Scenario::PrepareBoundary};
     std::size_t mWorkers{1};
     std::size_t mDepth{12};
-    uint32_t mMaxNominationRounds{1};
-    bool mMaxNominationRoundsExplicit{false};
+    std::optional<uint32_t> mMaxNominationRound;
+    std::optional<uint32_t> mMaxBallotingRound;
+    bool mStopOnPrepare{false};
+    bool mStopOnCommit{false};
+    bool mWithNominationTimers{false};
+    bool mWithBallotingTimers{false};
+    stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::DownloadTimeMode
+        mDownloadTimeMode{
+            stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+                DownloadTimeMode::AlwaysValid};
     std::optional<std::size_t> mDumpInitialSteps;
     std::optional<std::chrono::seconds> mPrintStatsInterval;
     bool mDumpTerminalTrace{false};
@@ -46,9 +47,13 @@ void
 printUsage(char const* argv0)
 {
     std::cerr << "Usage: " << argv0
-              << " [--scenario prepare-boundary|nomination-timers]"
               << " [--workers N|--parallel] [--depth N]"
-              << " [--max-nomination-rounds N] [--fifo]"
+              << " [--max-nomination-round N]"
+              << " [--max-balloting-round N]"
+              << " [--stop-on-prepare] [--stop-on-commit]"
+              << " [--with-nomination-timers] [--with-balloting-timers]"
+              << " [--download-time nondet|always-waiting|always-valid]"
+              << " [--fifo]"
               << " [--print-stats N]"
               << " [--dump-initial-steps N] [--dump-terminal-trace]"
               << " [--dump-terminal-replay-trace]\n";
@@ -61,40 +66,85 @@ defaultParallelWorkers()
     return concurrency == 0 ? 2u : static_cast<std::size_t>(concurrency);
 }
 
-CommandLineOptions::Scenario
-parseScenario(std::string_view value)
+stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::DownloadTimeMode
+parseDownloadTimeMode(std::string_view value)
+{
+    using DownloadTimeMode =
+        stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
+            DownloadTimeMode;
+
+    if (value == "nondet")
+    {
+        return DownloadTimeMode::Nondeterministic;
+    }
+    if (value == "always-waiting")
+    {
+        return DownloadTimeMode::AlwaysWaiting;
+    }
+    if (value == "always-valid" || value == "alway-valid")
+    {
+        return DownloadTimeMode::AlwaysValid;
+    }
+    throw std::invalid_argument("unknown download-time mode: " +
+                                std::string(value));
+}
+
+void
+applyLegacyScenario(std::string_view value, CommandLineOptions& options)
 {
     if (value == "prepare-boundary")
     {
-        return CommandLineOptions::Scenario::PrepareBoundary;
+        options.mStopOnPrepare = true;
+        return;
+    }
+    if (value == "commit-boundary")
+    {
+        options.mStopOnCommit = true;
+        return;
     }
     if (value == "nomination-timers")
     {
-        return CommandLineOptions::Scenario::NominationTimers;
+        options.mWithNominationTimers = true;
+        if (!options.mMaxNominationRound)
+        {
+            options.mMaxNominationRound = 1;
+        }
+        return;
     }
     throw std::invalid_argument("unknown scenario: " + std::string(value));
+}
+
+uint32_t
+parseUint32Value(std::string_view arg, std::string_view value)
+{
+    auto const parsed = std::stoull(std::string(value));
+    if (parsed > static_cast<unsigned long long>(
+                     std::numeric_limits<uint32_t>::max()))
+    {
+        throw std::invalid_argument(std::string(arg) + " value out of range");
+    }
+    return static_cast<uint32_t>(parsed);
 }
 
 stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario
 makeScenario(CommandLineOptions const& options)
 {
+    if (options.mStopOnPrepare && options.mStopOnCommit)
+    {
+        throw std::invalid_argument(
+            "--stop-on-prepare and --stop-on-commit are mutually exclusive");
+    }
+
     auto scenarioOptions =
         stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario::
             makeDefaultOptions();
-    switch (options.mScenario)
-    {
-    case CommandLineOptions::Scenario::PrepareBoundary:
-        if (options.mMaxNominationRoundsExplicit)
-        {
-            throw std::invalid_argument(
-                "--max-nomination-rounds requires --scenario nomination-timers");
-        }
-        break;
-    case CommandLineOptions::Scenario::NominationTimers:
-        scenarioOptions.mEnableNominationTimeouts = true;
-        scenarioOptions.mMaxNominationRounds = options.mMaxNominationRounds;
-        break;
-    }
+    scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
+    scenarioOptions.mStopOnCommit = options.mStopOnCommit;
+    scenarioOptions.mMaxNominationRound = options.mMaxNominationRound;
+    scenarioOptions.mMaxBallotingRound = options.mMaxBallotingRound;
+    scenarioOptions.mEnableNominationTimeouts = options.mWithNominationTimers;
+    scenarioOptions.mEnableBallotingTimeouts = options.mWithBallotingTimers;
+    scenarioOptions.mDownloadTimeMode = options.mDownloadTimeMode;
     return stellar::scpdpor::ScpDporThreeNodePrepareBoundaryScenario(
         std::move(scenarioOptions));
 }
@@ -322,11 +372,6 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mWorkers = defaultParallelWorkers();
             continue;
         }
-        if (arg == "--scenario" && i + 1 < argc)
-        {
-            options.mScenario = parseScenario(argv[++i]);
-            continue;
-        }
         if (arg == "--workers" && i + 1 < argc)
         {
             options.mWorkers =
@@ -339,11 +384,50 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
-        if (arg == "--max-nomination-rounds" && i + 1 < argc)
+        if ((arg == "--max-nomination-round" ||
+             arg == "--max-nomination-rounds") &&
+            i + 1 < argc)
         {
-            options.mMaxNominationRounds =
-                static_cast<uint32_t>(std::stoul(argv[++i]));
-            options.mMaxNominationRoundsExplicit = true;
+            options.mMaxNominationRound =
+                parseUint32Value(arg, argv[++i]);
+            continue;
+        }
+        if ((arg == "--max-balloting-round" ||
+             arg == "--max-balloting-rounds") &&
+            i + 1 < argc)
+        {
+            options.mMaxBallotingRound =
+                parseUint32Value(arg, argv[++i]);
+            continue;
+        }
+        if (arg == "--stop-on-prepare")
+        {
+            options.mStopOnPrepare = true;
+            continue;
+        }
+        if (arg == "--stop-on-commit")
+        {
+            options.mStopOnCommit = true;
+            continue;
+        }
+        if (arg == "--with-nomination-timers")
+        {
+            options.mWithNominationTimers = true;
+            continue;
+        }
+        if (arg == "--with-balloting-timers")
+        {
+            options.mWithBallotingTimers = true;
+            continue;
+        }
+        if (arg == "--download-time" && i + 1 < argc)
+        {
+            options.mDownloadTimeMode = parseDownloadTimeMode(argv[++i]);
+            continue;
+        }
+        if (arg == "--scenario" && i + 1 < argc)
+        {
+            applyLegacyScenario(argv[++i], options);
             continue;
         }
         if (arg == "--dump-initial-steps" && i + 1 < argc)
