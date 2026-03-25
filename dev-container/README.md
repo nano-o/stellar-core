@@ -198,11 +198,21 @@ isolation:
 |---|---|---|
 | Drop capabilities | `--cap-drop=ALL` | Removes default Linux capabilities |
 | No new privileges | `--security-opt=no-new-privileges` | Blocks setuid/setgid escalation |
-| PID limit | `--pids-limit=1024` | Prevents runaway process trees |
-| Memory limit | `--memory=32g` | Caps memory usage during builds/tests |
+| PID limit | `--pids-limit=4096` | Prevents runaway process trees without constraining build tooling as aggressively |
+| Shared memory | `--shm-size=2g` | Gives tools a larger `/dev/shm` workspace than Docker's default |
+| Open files | `--ulimit nofile=1048576:1048576` | Avoids file descriptor starvation during larger builds |
 
 `--profile`, `--debug`, and `--debug-full` selectively relax these
 restrictions.
+
+Resource-heavy tools such as `bear` can also override the defaults through the
+environment before launching the container, for example:
+
+```bash
+DEV_CONTAINER_MEMORY_LIMIT=48g \
+DEV_CONTAINER_MEMORY_SWAP_LIMIT=64g \
+dev-container/run-container.sh
+```
 
 ## Options
 

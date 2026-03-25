@@ -168,8 +168,9 @@ RUN su - "${USER}" -c 'set -eux; \
     cargo install --locked cargo-sweep --version 0.7.0'
 
 RUN su - "${USER}" -c 'set -eux; \
+    curl -fsSL https://claude.ai/install.sh | bash; \
     export NPM_CONFIG_PREFIX="/home/'"${USER}"'/.npm-global"; \
-    npm install -g @anthropic-ai/claude-code @openai/codex; \
+    npm install -g @openai/codex; \
     npm cache clean --force'
 
 RUN rm -rf /tmp/stellar-core

@@ -8,6 +8,11 @@ profile_mode=""
 mode_flag=""
 persist=""
 mount_claude=""
+container_memory_limit="${DEV_CONTAINER_MEMORY_LIMIT:-}"
+container_memory_swap_limit="${DEV_CONTAINER_MEMORY_SWAP_LIMIT:-}"
+container_pids_limit="${DEV_CONTAINER_PIDS_LIMIT:-4096}"
+container_shm_size="${DEV_CONTAINER_SHM_SIZE:-2g}"
+container_nofile_limit="${DEV_CONTAINER_NOFILE_LIMIT:-1048576:1048576}"
 
 set_mode() {
   local requested_flag="$1"
@@ -97,9 +102,21 @@ docker_args=(
   -v "${PWD}:/home/dev/stellar-core"
   -v "${codex_state_dir}:/home/dev/.codex"
   --cap-drop=ALL
-  --pids-limit=1024
-  --memory=32g
+  --shm-size="${container_shm_size}"
+  --ulimit "nofile=${container_nofile_limit}"
 )
+
+if [[ -n "${container_pids_limit}" ]]; then
+  docker_args+=(--pids-limit="${container_pids_limit}")
+fi
+
+if [[ -n "${container_memory_limit}" ]]; then
+  docker_args+=(--memory="${container_memory_limit}")
+fi
+
+if [[ -n "${container_memory_swap_limit}" ]]; then
+  docker_args+=(--memory-swap="${container_memory_swap_limit}")
+fi
 
 if [[ -z "${debug_mode}" ]]; then
   docker_args+=(--security-opt=no-new-privileges)
