@@ -63,9 +63,20 @@ SCP_DPOR_TEST_MAIN = scp/test/SCPDporTestMain.cpp
 SCP_DPOR_INVESTIGATION_MAIN = scp/test/DporScpInvestigationMain.cpp
 SCP_DPOR_GENERATED_FILES = rust/RustBridge.h
 SCP_DPOR_SHARED_SOURCES = $(SRC_DPOR_SUPPORT_H_FILES) $(SRC_DPOR_SUPPORT_CXX_FILES) $(SCP_DPOR_GENERATED_FILES)
-STELLAR_CORE_DPOR_LINK_OBJECTS = $(filter-out main/main.$(OBJEXT),$(stellar_core_OBJECTS))
+SCP_DPOR_REBUILT_SCP_SOURCES = \
+	scp/BallotProtocol.cpp \
+	scp/LocalNode.cpp \
+	scp/NominationProtocol.cpp \
+	scp/QuorumSetUtils.cpp \
+	scp/SCP.cpp \
+	scp/SCPDriver.cpp \
+	scp/Slot.cpp
+SCP_DPOR_REPLACED_OBJECTS = $(SCP_DPOR_REBUILT_SCP_SOURCES:.cpp=.$(OBJEXT))
+STELLAR_CORE_DPOR_LINK_OBJECTS = \
+	$(filter-out main/main.$(OBJEXT) $(SCP_DPOR_REPLACED_OBJECTS),$(stellar_core_OBJECTS))
 
 stellar_core_dpor_tests_SOURCES = \
+	$(SCP_DPOR_REBUILT_SCP_SOURCES) \
 	$(SCP_DPOR_SHARED_SOURCES) \
 	$(SRC_DPOR_TEST_CXX_FILES) \
 	$(SCP_DPOR_TEST_MAIN)
@@ -78,6 +89,7 @@ stellar_core_dpor_tests_LDADD = \
 $(stellar_core_dpor_tests_OBJECTS): $(SCP_DPOR_GENERATED_FILES)
 
 scp_dpor_investigation_SOURCES = \
+	$(SCP_DPOR_REBUILT_SCP_SOURCES) \
 	$(SCP_DPOR_SHARED_SOURCES) \
 	$(SCP_DPOR_INVESTIGATION_MAIN)
 scp_dpor_investigation_CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)

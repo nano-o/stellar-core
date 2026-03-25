@@ -406,7 +406,7 @@ AS_IF([test "x$enable_dpor" = "xyes"], [
     DPOR_CPPFLAGS="-I$DPOR_DIR/include"
   ])
   AS_IF([test -z "$DPOR_CXXFLAGS"], [
-    DPOR_CXXFLAGS="-std=c++20 -DFMT_CONSTEVAL="
+    DPOR_CXXFLAGS="-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING"
   ])
 
   AC_MSG_CHECKING([whether DPOR headers compile with configured target flags])
