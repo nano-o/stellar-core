@@ -9,16 +9,35 @@ and the ledger-closing pipeline for the Stellar network.
 
 Branch: `skip-ledgers-p25-dpor-2`
 
-Goal: integrate the DPOR (Dynamic Partial Order Reduction) model checker as an
-opt-in, test-only build island for SCP. The full plan is in
-[docs/dpor-integration-plan.md](docs/dpor-integration-plan.md). Read it before
-starting implementation work.
+Status: the first DPOR (Dynamic Partial Order Reduction) integration for SCP
+has already landed. `stellar-core` now has an opt-in, test-only DPOR build
+island with dedicated binaries, a split support layer, and an initial scenario
+surface.
+
+The DPOR investigation feature is part of that landed integration. The
+`scp-dpor-investigation` binary is the manual exploration and debugging tool
+for scenario work: use it to inspect executions, replay traces, boundary
+behavior, and performance characteristics while iterating on scenarios or
+build-shape changes.
+
+Current phase: optimize DPOR performance and iterate on scenario coverage.
+Prioritize work that:
+- improves replay/exploration throughput or investigation ergonomics
+- expands or hardens scenario coverage for SCP behaviors already modeled
+- tightens smoke tests and investigation workflows around the checked-in
+  integration
+- reduces compile cost or exploration cost without weakening the build island
+
+Before starting DPOR implementation work, read
+[docs/dpor-integration-status.md](docs/dpor-integration-status.md). Use it as
+the source of truth for what is already integrated and what limitations remain.
 
 Previous attempt: branch `dpor-skip-ledgers-p25` (accessible via
 `git log dpor-skip-ledgers-p25` in this repo). That branch has 64 commits of
 working DPOR/SCP integration code. Use it as a reference for what worked, but
-follow the new plan's decomposition (types / bridge / scenario), not the old
-monolithic adapter.
+prefer extending the current in-tree decomposition (`types` / `bridge` /
+`node` / `replay` / `scenario`) rather than reviving the old monolithic
+adapter.
 
 ## Build system
 
@@ -43,12 +62,30 @@ Normal build:
 ```bash
 git submodule update --init --recursive
 ./autogen.sh
-./configure --enable-tests CC=clang-20 CXX=clang++-20
+./configure CC=clang-20 CXX=clang++-20
 make -j"$(nproc)"
 ```
 
 Tests are compiled into the main `stellar-core` binary and run via
 `./src/stellar-core test`. DPOR code must NOT be compiled into this binary.
+
+Current DPOR build workflow:
+```bash
+git submodule update --init --recursive
+git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
+./autogen.sh
+./configure --enable-dpor CC=clang-20 CXX=clang++-20
+make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
+```
+
+Notes:
+- Tests are enabled by default, but DPOR still currently depends on
+  `BUILD_TESTS`; `--disable-tests --enable-dpor` is not supported.
+- The practical DPOR build entry point is `make -C src ...`, not a repo-root
+  `make stellar-core-dpor-tests`.
+- Useful verification commands:
+  - `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"`
+  - `./src/scp-dpor-investigation --depth 12`
 
 ## DPOR dependency
 
@@ -59,8 +96,8 @@ DPOR is header-only C++20. Clone it before configuring:
 git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
 ```
 
-`external/dpor` is gitignored. The plan's configure integration will look for
-it there by default.
+`external/dpor` is gitignored. The current configure integration looks for it
+there by default.
 
 The 2PC timeout example at `external/dpor/examples/two_phase_commit_timeout/`
 (once cloned) is the reference pattern for the types / bridge / scenario split.
@@ -84,31 +121,26 @@ Existing SCP tests:
 
 DPOR harness files go in `src/scp/test/`, but must be excluded from
 `SRC_TEST_CXX_FILES` via `make-mks`. This includes both the historical
-`Dpor*` / `SCPDpor*` names and the newer `ScpDpor*` files from the current
-plan.
+`Dpor*` / `SCPDpor*` names and the newer `ScpDpor*` files used by the current
+integration.
 
-## Implementation order (from the plan)
+## Current priorities
 
-1. `configure.ac`: add `--enable-dpor`, `--with-dpor-dir`, `DPOR_CPPFLAGS`,
-   `DPOR_CXXFLAGS`, `ENABLE_DPOR` conditional, compile probe
-2. `make-mks`: carve `Dpor*`, `SCPDpor*`, and `ScpDpor*` files out of
-   `SRC_TEST_*`
-3. `src/Makefile.am`: add the shared DPOR/SCP support target with target-local
-   C++20 flags; use a convenience library only if you are comfortable with
-   `--enable-dpor` making `make` build that support
-4. `src/Makefile.am`: add `EXTRA_PROGRAMS` for test binary and investigation
-   runner behind `ENABLE_DPOR`
-5. `ScpDporTypes.h`, `ScpDporBridge.h` — value type and encoding layer
-6. `DporScpNode.h/.cpp`, `ScpDporReplaySupport.h/.cpp` — deterministic SCP
-   driver + DPOR-facing replay support
-7. `ScpDporThreeNodePrepareBoundaryScenario.h` — first scenario
-8. `SCPDporSmokeTests.cpp`, `DporScpInvestigationMain.cpp` — test + runner
-9. Verify emitted compile/link commands
-10. Expand replay model; add SCP-header testability hooks only if needed
-
-This is dependency order, not literal commit order. In practice, steps 2-8 will
-be interleaved, starting with stub files so the build skeleton has concrete
-sources to classify and compile.
+1. Keep the build island isolated: no DPOR code in `stellar-core`, no DPOR
+   routing through `stellar-core test`, and no leakage of DPOR flags into
+   global build settings.
+2. Improve performance: pay attention to compile surface, relink behavior,
+   exploration depth/cost tradeoffs, and investigation-runner throughput.
+3. Expand scenario coverage: use the existing `types` / `bridge` / `node` /
+   `replay` / `scenario` split to add and exercise more SCP behaviors.
+4. Strengthen validation: keep smoke tests and manual investigation flows in
+   sync with the current integration, and verify emitted compile/link commands
+   when build wiring changes.
+5. Keep production SCP hooks minimal. Add new testability hooks only when the
+   replay/scenario work cannot be expressed cleanly with the existing seams.
+6. Keep [docs/dpor-integration-status.md](docs/dpor-integration-status.md)
+   aligned with reality when the DPOR build shape, runtime surface, or verified
+   behavior changes.
 
 ## Container environment
 
