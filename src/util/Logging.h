@@ -54,13 +54,8 @@ typedef void* LogPtr;
 #define LOG_WARNING(lg, fmt, ...) (void)0
 #define LOG_ERROR(lg, fmt, ...) (void)0
 #define LOG_FATAL(lg, fmt, ...) (void)0
-#if defined(USE_SPDLOG)
-#define GET_LOG(name) spdlog::get(name)
-#define DEFAULT_LOG spdlog::default_logger()
-#else
 #define GET_LOG(name) nullptr
 #define DEFAULT_LOG nullptr
-#endif
 
 #elif defined(USE_SPDLOG)
 

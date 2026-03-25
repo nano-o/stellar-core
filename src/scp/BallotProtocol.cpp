@@ -1193,8 +1193,10 @@ BallotProtocol::setConfirmPrepared(SCPBallot const& newC, SCPBallot const& newH)
                     mSlot.getSlotIndex(), newC.value);
 
                 // Check how long we've been waiting for the transaction set
+#if !defined(STELLAR_DISABLE_LOGGING)
                 auto waitingTime =
                     mSlot.getSCPDriver().getTxSetDownloadWaitTime(newC.value);
+#endif
 
                 // TODO(26): Need to think more about what to do if waitingTime
                 // is nullopt (e.g., transaction set not being fetched, or some
