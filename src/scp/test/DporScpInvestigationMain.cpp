@@ -5,12 +5,14 @@
 #include "scp/test/ScpDporDefaultScenario.h"
 #include "util/Logging.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
@@ -34,6 +36,7 @@ struct CommandLineOptions
     bool mStopOnExternalize{false};
     bool mWithNominationTimers{false};
     bool mWithBallotingTimers{false};
+    bool mMustExternalize{false};
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
         mDownloadTimeMode{
             stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode::
@@ -160,6 +163,11 @@ printUsage(char const* argv0)
               << " (CONFIRM or EXTERNALIZE; default: off)\n"
               << "  --stop-on-externalize\n"
               << "      Stop at the externalize boundary (default: off)\n"
+              << "  --must-externalize\n"
+              << "      Require every full execution to include an"
+              << " EXTERNALIZE envelope from every node;"
+              << " dumps replay trace on failure"
+              << " (default: off)\n"
               << "  --with-nomination-timers\n"
               << "      Enable nomination timers (default: "
               << (defaults.mWithNominationTimers ? "on" : "off") << ")\n"
@@ -487,6 +495,103 @@ printThreadReplayTrace(
     }
 }
 
+bool
+isExternalizeEnvelope(stellar::SCPEnvelope const& envelope)
+{
+    return envelope.statement.pledges.type() == stellar::SCP_ST_EXTERNALIZE;
+}
+
+std::optional<std::size_t>
+findNodeMissingExternalize(
+    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
+        execution)
+{
+    if (!execution.is_full_execution())
+    {
+        return std::nullopt;
+    }
+
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const trace =
+            execution.graph.thread_trace(
+                stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
+        auto const inspection =
+            scenario.inspectEmittedEnvelopes(nodeIndex, trace);
+        auto const hasExternalize = std::any_of(
+            inspection.mEmittedEnvelopes.begin(),
+            inspection.mEmittedEnvelopes.end(),
+            [](stellar::SCPEnvelope const& envelope) {
+                return isExternalizeEnvelope(envelope);
+            });
+        if (!hasExternalize)
+        {
+            return nodeIndex;
+        }
+    }
+    return std::nullopt;
+}
+
+void
+dumpTerminalExecution(
+    std::ostream& out, CommandLineOptions const& options,
+    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
+        execution)
+{
+    auto const leaderTrace =
+        execution.graph.thread_trace(stellar::scpdpor::threadIdForNodeIndex(0));
+    auto const boundary = scenario.inspectBoundary(0, leaderTrace);
+
+    out << "terminal-kind="
+        << (execution.is_full_execution()
+                ? "full"
+                : execution.is_error_execution() ? "error" : "depth-limit")
+        << " leader-boundary="
+        << (boundary.mReachedBoundary ? "true" : "false") << "\n";
+
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const tid = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
+        if (options.mDumpTerminalTrace)
+        {
+            auto const trace = execution.graph.thread_trace(tid);
+            out << "thread=" << tid << "\n";
+            for (std::size_t i = 0; i < trace.size(); ++i)
+            {
+                out << "  obs=" << i << " ";
+                if (trace.at(i).is_bottom())
+                {
+                    out << "<bottom>";
+                }
+                else
+                {
+                    out << trace.at(i).value();
+                }
+                out << "\n";
+            }
+        }
+        if (options.mDumpTerminalReplayTrace)
+        {
+            auto const trace = execution.graph.thread_trace(tid);
+            auto inspection = scenario.inspectThreadReplayTrace(nodeIndex, trace);
+            out << "thread=" << tid << " replay\n";
+            printThreadReplayTrace(out, scenario.options().mSlotIndex,
+                                   inspection);
+        }
+    }
+}
+
+CommandLineOptions
+mustExternalizeFailureDumpOptions(CommandLineOptions options)
+{
+    options.mDumpTerminalReplayTrace = true;
+    return options;
+}
+
 CommandLineOptions
 parseOptions(char const* argv0, int argc, char* argv[])
 {
@@ -567,6 +672,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--stop-on-externalize")
         {
             options.mStopOnExternalize = true;
+            continue;
+        }
+        if (arg == "--must-externalize")
+        {
+            options.mMustExternalize = true;
             continue;
         }
         if (arg == "--with-nomination-timers")
@@ -685,63 +795,66 @@ main(int argc, char* argv[])
                     }
                 };
         }
-        if (options.mDumpTerminalTrace || options.mDumpTerminalReplayTrace)
+        std::mutex terminalExecutionMutex;
+        bool dumpedTerminalExecution = false;
+        std::optional<std::string> mustExternalizeFailure;
+        if (options.mDumpTerminalTrace || options.mDumpTerminalReplayTrace ||
+            options.mMustExternalize)
         {
             config.on_terminal_execution =
                 [&](dpor::algo::TerminalExecutionT<
                         stellar::scpdpor::ScpDporValue> const& execution) {
-                    auto const leaderTrace = execution.graph.thread_trace(
-                        stellar::scpdpor::threadIdForNodeIndex(0));
-                    auto const boundary =
-                        scenario.inspectBoundary(0, leaderTrace);
-
-                    std::cout << "terminal-kind="
-                              << (execution.is_full_execution()
-                                      ? "full"
-                                      : execution.is_error_execution()
-                                            ? "error"
-                                            : "depth-limit")
-                              << " leader-boundary="
-                              << (boundary.mReachedBoundary ? "true" : "false")
-                              << "\n";
-
-                    for (std::size_t nodeIndex = 0;
-                         nodeIndex < scenario.options().mValidators.size();
-                         ++nodeIndex)
+                    if (options.mMustExternalize)
                     {
-                        auto const tid =
-                            stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-                        if (options.mDumpTerminalTrace)
+                        auto const missingNodeIndex =
+                            findNodeMissingExternalize(scenario, execution);
+                        if (missingNodeIndex)
                         {
-                            auto const trace = execution.graph.thread_trace(tid);
-                            std::cout << "thread=" << tid << "\n";
-                            for (std::size_t i = 0; i < trace.size(); ++i)
+                            std::lock_guard<std::mutex> guard(
+                                terminalExecutionMutex);
+                            if (!mustExternalizeFailure)
                             {
-                                std::cout << "  obs=" << i << " ";
-                                if (trace.at(i).is_bottom())
-                                {
-                                    std::cout << "<bottom>";
-                                }
-                                else
-                                {
-                                    std::cout << trace.at(i).value();
-                                }
-                                std::cout << "\n";
+                                std::ostringstream message;
+                                message
+                                    << "full execution missing EXTERNALIZE"
+                                    << " envelope from node-index="
+                                    << *missingNodeIndex
+                                    << " thread="
+                                    << stellar::scpdpor::threadIdForNodeIndex(
+                                           *missingNodeIndex);
+                                mustExternalizeFailure = message.str();
                             }
-                        }
-                        if (options.mDumpTerminalReplayTrace)
-                        {
-                            auto const trace = execution.graph.thread_trace(tid);
-                            auto inspection =
-                                scenario.inspectThreadReplayTrace(nodeIndex,
-                                                                  trace);
-                            std::cout << "thread=" << tid << " replay\n";
-                            printThreadReplayTrace(std::cout,
-                                                   scenario.options().mSlotIndex,
-                                                   inspection);
+                            if (!dumpedTerminalExecution)
+                            {
+                                dumpTerminalExecution(
+                                    std::cout,
+                                    mustExternalizeFailureDumpOptions(options),
+                                    scenario, execution);
+                                dumpedTerminalExecution = true;
+                            }
+                            return dpor::algo::TerminalExecutionAction::Stop;
                         }
                     }
-                    return dpor::algo::TerminalExecutionAction::Stop;
+
+                    if (!options.mMustExternalize &&
+                        (options.mDumpTerminalTrace ||
+                         options.mDumpTerminalReplayTrace))
+                    {
+                        std::lock_guard<std::mutex> guard(
+                            terminalExecutionMutex);
+                        if (!dumpedTerminalExecution)
+                        {
+                            dumpTerminalExecution(std::cout, options, scenario,
+                                                  execution);
+                            dumpedTerminalExecution = true;
+                            if (!options.mMustExternalize)
+                            {
+                                return dpor::algo::TerminalExecutionAction::Stop;
+                            }
+                        }
+                    }
+
+                    return dpor::algo::TerminalExecutionAction::Continue;
                 };
         }
 
@@ -757,7 +870,13 @@ main(int argc, char* argv[])
                   << " full=" << result.full_executions_explored
                   << " error=" << result.error_executions_explored
                   << " depth-limit=" << result.depth_limit_executions_explored
-                  << "\n";
+                  << "\n"
+                  << std::flush;
+        if (mustExternalizeFailure)
+        {
+            std::cerr << "error: " << *mustExternalizeFailure << "\n";
+            return 1;
+        }
         return 0;
     }
     catch (std::exception const& ex)

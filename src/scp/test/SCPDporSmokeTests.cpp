@@ -83,6 +83,16 @@ requireReceiveLabel(std::optional<EventLabel> const& event)
     return *receive;
 }
 
+bool
+hasExternalizeEnvelope(std::vector<SCPEnvelope> const& envelopes)
+{
+    return std::any_of(envelopes.begin(), envelopes.end(),
+                       [](SCPEnvelope const& envelope) {
+                           return envelope.statement.pledges.type() ==
+                                  SCP_ST_EXTERNALIZE;
+                       });
+}
+
 } // namespace
 
 TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
@@ -353,6 +363,48 @@ TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
 
     REQUIRE(sawFollowerEmitNominate);
     REQUIRE(sawBoundaryPrepare);
+}
+
+TEST_CASE("scp dpor emitted envelopes expose missing externalize",
+          "[scp][dpor][smoke]")
+{
+    ScpDporDefaultScenario scenario;
+    std::size_t fullExecutionsChecked = 0;
+    bool foundMissingExternalize = false;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 12;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            if (!execution.is_full_execution())
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+
+            ++fullExecutionsChecked;
+            for (std::size_t nodeIndex = 0;
+                 nodeIndex < scenario.options().mValidators.size();
+                 ++nodeIndex)
+            {
+                auto const trace = execution.graph.thread_trace(
+                    threadIdForNodeIndex(nodeIndex));
+                auto const inspection =
+                    scenario.inspectEmittedEnvelopes(nodeIndex, trace);
+                if (!hasExternalizeEnvelope(inspection.mEmittedEnvelopes))
+                {
+                    foundMissingExternalize = true;
+                    return dpor::algo::TerminalExecutionAction::Stop;
+                }
+            }
+
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    static_cast<void>(dpor::algo::verify(config));
+
+    REQUIRE(fullExecutionsChecked > 0);
+    REQUIRE(foundMissingExternalize);
 }
 
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",

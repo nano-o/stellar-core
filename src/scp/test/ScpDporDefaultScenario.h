@@ -71,6 +71,11 @@ class ScpDporDefaultScenario
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
 
+    struct EmittedEnvelopeInspection
+    {
+        std::vector<SCPEnvelope> mEmittedEnvelopes;
+    };
+
     struct ThreadReplayTraceStep
     {
         enum class Kind : std::uint8_t
@@ -178,60 +183,10 @@ class ScpDporDefaultScenario
     BoundaryInspection
     inspectBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
-        ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
-
-        auto& node = mReplaySupport.acquireNode(nodeIndex);
-        mReplaySupport.restoreBaseline(node, nodeIndex);
-
-        std::optional<int> selectedTimerID;
-        for (std::size_t observedIndex = 0; observedIndex < trace.size();)
-        {
-            if (node.hasReachedBoundary())
-            {
-                break;
-            }
-
-            auto const& observed = trace.at(observedIndex);
-            if (!observed.is_bottom() && isTimerChoiceValue(observed.value()))
-            {
-                auto const activeTimers = enabledTimerIDs(node);
-                auto const timerID = decodeTimerChoice(observed.value());
-                if (std::find(activeTimers.begin(), activeTimers.end(),
-                              timerID) == activeTimers.end())
-                {
-                    throw std::logic_error(
-                        "trace selected a timer that is not active");
-                }
-                selectedTimerID = timerID;
-                ++observedIndex;
-                continue;
-            }
-
-            auto const activeTimers = enabledTimerIDs(node);
-            auto timerToFire = selectedTimerID;
-            if (!timerToFire && activeTimers.size() == 1)
-            {
-                timerToFire = activeTimers.front();
-            }
-
-            auto replayed = mReplaySupport.replayObservation(
-                node, nodeIndex, trace, observedIndex, timerToFire);
-            if (replayed.mPendingEvent)
-            {
-                break;
-            }
-
-            observedIndex += replayed.mConsumedTraceEntries;
-            static_cast<void>(node.takePendingEnvelopes());
-            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
-        }
-
+        auto const replayInspection = replayTrace(nodeIndex, trace, true, true);
         BoundaryInspection inspection;
-        inspection.mReachedBoundary = node.hasReachedBoundary();
-        if (auto const* envelope = node.getBoundaryEnvelope())
-        {
-            inspection.mBoundaryEnvelope = *envelope;
-        }
+        inspection.mReachedBoundary = replayInspection.mReachedBoundary;
+        inspection.mBoundaryEnvelope = replayInspection.mBoundaryEnvelope;
         return inspection;
     }
 
@@ -257,6 +212,23 @@ class ScpDporDefaultScenario
     getBoundaryEnvelope(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
         return inspectBoundary(nodeIndex, trace).mBoundaryEnvelope;
+    }
+
+    std::vector<SCPEnvelope>
+    getEmittedEnvelopes(std::size_t nodeIndex, ThreadTrace const& trace) const
+    {
+        return inspectEmittedEnvelopes(nodeIndex, trace).mEmittedEnvelopes;
+    }
+
+    EmittedEnvelopeInspection
+    inspectEmittedEnvelopes(std::size_t nodeIndex,
+                            ThreadTrace const& trace) const
+    {
+        auto replayInspection = replayTrace(nodeIndex, trace, false, false);
+        EmittedEnvelopeInspection inspection;
+        inspection.mEmittedEnvelopes =
+            std::move(replayInspection.mEmittedEnvelopes);
+        return inspection;
     }
 
     bool
@@ -406,6 +378,13 @@ class ScpDporDefaultScenario
     }
 
   private:
+    struct ReplayInspection
+    {
+        bool mReachedBoundary{false};
+        std::optional<SCPEnvelope> mBoundaryEnvelope;
+        std::vector<SCPEnvelope> mEmittedEnvelopes;
+    };
+
     struct ScenarioBaseline
     {
         std::vector<SendLabel> mInitialPendingSends;
@@ -620,6 +599,73 @@ class ScpDporDefaultScenario
         {
             selectedTimerID.reset();
         }
+    }
+
+    ReplayInspection
+    replayTrace(std::size_t nodeIndex, ThreadTrace const& trace,
+                bool stopAtBoundary, bool allowPendingEvent) const
+    {
+        ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
+
+        auto& node = mReplaySupport.acquireNode(nodeIndex);
+        mReplaySupport.restoreBaseline(node, nodeIndex);
+
+        std::optional<int> selectedTimerID;
+        for (std::size_t observedIndex = 0; observedIndex < trace.size();)
+        {
+            if (stopAtBoundary && node.hasReachedBoundary())
+            {
+                break;
+            }
+
+            auto const& observed = trace.at(observedIndex);
+            if (!observed.is_bottom() && isTimerChoiceValue(observed.value()))
+            {
+                auto const activeTimers = enabledTimerIDs(node);
+                auto const timerID = decodeTimerChoice(observed.value());
+                if (std::find(activeTimers.begin(), activeTimers.end(),
+                              timerID) == activeTimers.end())
+                {
+                    throw std::logic_error(
+                        "trace selected a timer that is not active");
+                }
+                selectedTimerID = timerID;
+                ++observedIndex;
+                continue;
+            }
+
+            auto const activeTimers = enabledTimerIDs(node);
+            auto timerToFire = selectedTimerID;
+            if (!timerToFire && activeTimers.size() == 1)
+            {
+                timerToFire = activeTimers.front();
+            }
+
+            auto replayed = mReplaySupport.replayObservation(
+                node, nodeIndex, trace, observedIndex, timerToFire);
+            if (replayed.mPendingEvent)
+            {
+                if (allowPendingEvent)
+                {
+                    break;
+                }
+                throw std::logic_error(
+                    "trace replay ended before resolving a pending event");
+            }
+
+            observedIndex += replayed.mConsumedTraceEntries;
+            static_cast<void>(node.takePendingEnvelopes());
+            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
+        }
+
+        ReplayInspection inspection;
+        inspection.mReachedBoundary = node.hasReachedBoundary();
+        if (auto const* envelope = node.getBoundaryEnvelope())
+        {
+            inspection.mBoundaryEnvelope = *envelope;
+        }
+        inspection.mEmittedEnvelopes = node.getEmittedEnvelopes();
+        return inspection;
     }
 
     std::optional<EventLabel>

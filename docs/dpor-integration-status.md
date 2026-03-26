@@ -102,6 +102,9 @@ large SCP property suite.
   - `--stop-on-prepare`
   - `--stop-on-commit`
   - `--stop-on-externalize`
+  - `--must-externalize`
+    - full executions require an `EXTERNALIZE` envelope from every node, and a
+      failing execution dumps its replay trace
   - `--with-nomination-timers`
   - `--with-balloting-timers`
   - `--max-nomination-round`
@@ -117,7 +120,7 @@ large SCP property suite.
   - `--dump-terminal-trace`
   - `--dump-terminal-replay-trace`
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 15 smoke tests. The checked-in coverage exercises:
+  currently contains 16 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -126,6 +129,7 @@ large SCP property suite.
   - nomination-timer firing caps and round boundaries
   - balloting-round boundaries
   - replay-trace inspection
+  - emitted-envelope inspection for missing externalize
   - follower timer-before-delivery behavior
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
@@ -156,12 +160,17 @@ I verified the current state directly in this tree:
 - `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
   --depth 12` reported
   `kind=all-explored executions=67 full=1 error=0 depth-limit=66`.
+- `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
+  --depth 12` exited with
+  `error: full execution missing EXTERNALIZE envelope from node-index=0
+  thread=0`, dumped the failing replay trace, and reported
+  `kind=stopped executions=4 full=1 error=0 depth-limit=3`.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 61
+  assertions in 16 test cases.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
   passed after increasing that test's exploration depth to 60.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize
   boundary"` passed.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 59
-  assertions in 15 test cases.
 
 ## Current limitations
 
