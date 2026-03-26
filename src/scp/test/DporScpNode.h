@@ -23,6 +23,13 @@
 namespace stellar
 {
 
+enum class DporScpTxSetStatus : std::uint8_t
+{
+    Valid,
+    Waiting,
+    Invalid
+};
+
 class DporScpNode : public SCPDriver
 {
   public:
@@ -31,6 +38,7 @@ class DporScpNode : public SCPDriver
         None,
         Prepare,
         Commit,
+        Externalize,
         NominationRound
     };
 
@@ -47,6 +55,19 @@ class DporScpNode : public SCPDriver
         std::vector<std::chrono::milliseconds> mChoices;
     };
 
+    class TxSetStatusChoiceRequired : public std::runtime_error
+    {
+      public:
+        explicit TxSetStatusChoiceRequired(
+            std::vector<DporScpTxSetStatus> choices);
+
+        std::vector<DporScpTxSetStatus> const&
+        getChoices() const;
+
+      private:
+        std::vector<DporScpTxSetStatus> mChoices;
+    };
+
     static constexpr uint32_t DEFAULT_PREPARE_BOUNDARY_COUNTER = 1;
     static constexpr uint32_t DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS = 1000;
 
@@ -60,7 +81,8 @@ class DporScpNode : public SCPDriver
         BoundaryMode mBoundaryMode{BoundaryMode::None};
         std::optional<uint32_t> mMaxNominationRound;
         std::optional<uint32_t> mMaxBallotingRound;
-        bool mAwaitTxSetDownloads{false};
+        DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
+        bool mNondeterministicTxSetStatus{false};
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
             mTxSetDownloadWaitTimesByNode;
@@ -225,6 +247,9 @@ class DporScpNode : public SCPDriver
     fireTimer(uint64 slotIndex, int timerID);
 
     void
+    enqueueTxSetStatusChoice(DporScpTxSetStatus status);
+
+    void
     enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
 
     void
@@ -248,6 +273,12 @@ class DporScpNode : public SCPDriver
     void
     installBallotingReplayTimer(uint64 slotIndex,
                                 std::chrono::milliseconds timeout);
+
+    uint32_t
+    inferNominationRound(std::chrono::milliseconds timeout) const;
+
+    uint32_t
+    inferBallotingRound(std::chrono::milliseconds timeout) const;
 
     bool
     hasReachedBoundary() const;
@@ -340,12 +371,6 @@ class DporScpNode : public SCPDriver
     isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
 
     uint32_t
-    inferNominationRound(std::chrono::milliseconds timeout) const;
-
-    uint32_t
-    inferBallotingRound(std::chrono::milliseconds timeout) const;
-
-    uint32_t
     inferTimeoutRound(std::chrono::milliseconds timeout,
                       uint32_t initialTimeoutMS,
                       uint32_t incrementTimeoutMS,
@@ -364,13 +389,17 @@ class DporScpNode : public SCPDriver
     BoundaryMode mBoundaryMode{BoundaryMode::None};
     std::optional<uint32_t> mMaxNominationRound;
     std::optional<uint32_t> mMaxBallotingRound;
-    bool mAwaitTxSetDownloads{false};
+    DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
+    bool mNondeterministicTxSetStatus{false};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
     uint32_t mIncrementBallotTimeoutMS{1000};
     std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
     bool mNondeterministicTxSetDownloadWaitTime{false};
+    mutable std::vector<DporScpTxSetStatus> mPendingTxSetStatusChoices;
+    mutable std::size_t mNextPendingTxSetStatusChoice{0};
+    mutable std::map<Value, std::size_t> mPendingTxSetDownloadStatusCounts;
     mutable std::vector<std::chrono::milliseconds>
         mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};

@@ -24,7 +24,8 @@ struct ScpDporValue
     {
         EnvelopeDelivery = 0,
         TimerChoice = 1,
-        TxSetDownloadWaitTimeChoice = 2
+        TxSetDownloadWaitTimeChoice = 2,
+        TxSetStatusChoice = 3
     };
 
     Kind mKind{Kind::EnvelopeDelivery};
@@ -32,6 +33,7 @@ struct ScpDporValue
     SCPEnvelope mEnvelope{};
     int mTimerID{};
     int64_t mDurationMilliseconds{};
+    std::uint8_t mTxSetStatus{};
 
     bool
     operator==(ScpDporValue const& other) const
@@ -49,6 +51,8 @@ struct ScpDporValue
             return mTimerID == other.mTimerID;
         case Kind::TxSetDownloadWaitTimeChoice:
             return mDurationMilliseconds == other.mDurationMilliseconds;
+        case Kind::TxSetStatusChoice:
+            return mTxSetStatus == other.mTxSetStatus;
         }
         return false;
     }
@@ -73,6 +77,8 @@ struct ScpDporValue
             return mTimerID < other.mTimerID;
         case Kind::TxSetDownloadWaitTimeChoice:
             return mDurationMilliseconds < other.mDurationMilliseconds;
+        case Kind::TxSetStatusChoice:
+            return mTxSetStatus < other.mTxSetStatus;
         }
         return false;
     }
@@ -124,6 +130,10 @@ struct hash<stellar::scpdpor::ScpDporValue>
             break;
         case stellar::scpdpor::ScpDporValue::Kind::TxSetDownloadWaitTimeChoice:
             result ^= std::hash<int64_t>{}(value.mDurationMilliseconds) +
+                      0x9e3779b9 + (result << 6) + (result >> 2);
+            break;
+        case stellar::scpdpor::ScpDporValue::Kind::TxSetStatusChoice:
+            result ^= std::hash<std::uint8_t>{}(value.mTxSetStatus) +
                       0x9e3779b9 + (result << 6) + (result >> 2);
             break;
         }

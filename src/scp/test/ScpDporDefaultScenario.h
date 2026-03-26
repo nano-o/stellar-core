@@ -25,8 +25,16 @@ class ScpDporDefaultScenario
   public:
     enum class DownloadTimeMode : std::uint8_t
     {
-        AlwaysValid,
-        AlwaysWaiting,
+        BelowThreshold,
+        AboveThreshold,
+        Nondeterministic
+    };
+
+    enum class TxSetStatusMode : std::uint8_t
+    {
+        Valid,
+        Waiting,
+        Invalid,
         Nondeterministic
     };
 
@@ -39,14 +47,18 @@ class ScpDporDefaultScenario
         std::vector<Value> mInitialValues;
         bool mStopOnPrepare{true};
         bool mStopOnCommit{false};
+        bool mStopOnExternalize{false};
         uint32_t mPrepareBoundaryCounter{
             DporScpNode::DEFAULT_PREPARE_BOUNDARY_COUNTER};
         std::optional<uint32_t> mMaxNominationRound;
         std::optional<uint32_t> mMaxBallotingRound;
+        std::optional<uint32_t> mMaxNominationTimersRound;
+        std::optional<uint32_t> mMaxBallotingTimersRound;
         std::optional<uint32_t> mNominationTimerSetLimit;
         bool mEnableNominationTimeouts{true};
         bool mEnableBallotingTimeouts{false};
-        DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::AlwaysValid};
+        DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::BelowThreshold};
+        TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::Valid};
         uint32_t mInitialNominationTimeoutMS{1000};
         uint32_t mIncrementNominationTimeoutMS{1000};
         uint32_t mInitialBallotTimeoutMS{1000};
@@ -411,10 +423,15 @@ class ScpDporDefaultScenario
     buildNodeConfiguration(Options const& options)
     {
         DporScpNode::Configuration config;
-        if (options.mStopOnPrepare && options.mStopOnCommit)
+        auto const envelopeBoundaryModes =
+            static_cast<int>(options.mStopOnPrepare) +
+            static_cast<int>(options.mStopOnCommit) +
+            static_cast<int>(options.mStopOnExternalize);
+        if (envelopeBoundaryModes > 1)
         {
             throw std::invalid_argument(
-                "prepare and commit boundaries are mutually exclusive");
+                "prepare, commit, and externalize boundaries are mutually "
+                "exclusive");
         }
         for (std::size_t nodeIndex = 0; nodeIndex < options.mValidators.size();
              ++nodeIndex)
@@ -422,7 +439,11 @@ class ScpDporDefaultScenario
             config.mNodeIndexMap[options.mValidators.at(nodeIndex).getPublicKey()] =
                 nodeIndex + 1;
         }
-        if (options.mStopOnCommit)
+        if (options.mStopOnExternalize)
+        {
+            config.mBoundaryMode = DporScpNode::BoundaryMode::Externalize;
+        }
+        else if (options.mStopOnCommit)
         {
             config.mBoundaryMode = DporScpNode::BoundaryMode::Commit;
         }
@@ -444,18 +465,35 @@ class ScpDporDefaultScenario
             options.mIncrementNominationTimeoutMS;
         config.mInitialBallotTimeoutMS = options.mInitialBallotTimeoutMS;
         config.mIncrementBallotTimeoutMS = options.mIncrementBallotTimeoutMS;
+        switch (options.mTxSetStatusMode)
+        {
+        case TxSetStatusMode::Valid:
+            config.mTxSetStatus = DporScpTxSetStatus::Valid;
+            break;
+        case TxSetStatusMode::Waiting:
+            config.mTxSetStatus = DporScpTxSetStatus::Waiting;
+            break;
+        case TxSetStatusMode::Invalid:
+            config.mTxSetStatus = DporScpTxSetStatus::Invalid;
+            break;
+        case TxSetStatusMode::Nondeterministic:
+            config.mTxSetStatus = DporScpTxSetStatus::Valid;
+            config.mNondeterministicTxSetStatus = true;
+            break;
+        }
         switch (options.mDownloadTimeMode)
         {
-        case DownloadTimeMode::AlwaysValid:
-            break;
-        case DownloadTimeMode::AlwaysWaiting:
-            config.mAwaitTxSetDownloads = true;
+        case DownloadTimeMode::BelowThreshold:
             config.mTxSetDownloadWaitTimes = {
                 std::chrono::milliseconds(
                     DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
             break;
+        case DownloadTimeMode::AboveThreshold:
+            config.mTxSetDownloadWaitTimes = {
+                std::chrono::milliseconds(
+                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+            break;
         case DownloadTimeMode::Nondeterministic:
-            config.mAwaitTxSetDownloads = true;
             config.mTxSetDownloadWaitTimes = {
                 std::chrono::milliseconds(
                     DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
@@ -473,7 +511,8 @@ class ScpDporDefaultScenario
         std::vector<int> timers;
         auto const hasFirableTimer = [&](int timerID) {
             auto const timer = node.getTimer(mOptions.mSlotIndex, timerID);
-            return timer && static_cast<bool>(timer->mCallback);
+            return timer && static_cast<bool>(timer->mCallback) &&
+                   isTimerEnabledForExploration(node, *timer);
         };
 
         if (mOptions.mEnableNominationTimeouts &&
@@ -540,6 +579,25 @@ class ScpDporDefaultScenario
         }
     }
 
+    bool
+    isTimerEnabledForExploration(DporScpNode const& node,
+                                 DporScpNode::TimerState const& timer) const
+    {
+        switch (timer.mTimerID)
+        {
+        case Slot::NOMINATION_TIMER:
+            return !mOptions.mMaxNominationTimersRound ||
+                   node.inferNominationRound(timer.mTimeout) <=
+                       *mOptions.mMaxNominationTimersRound;
+        case Slot::BALLOT_PROTOCOL_TIMER:
+            return !mOptions.mMaxBallotingTimersRound ||
+                   node.inferBallotingRound(timer.mTimeout) <=
+                       *mOptions.mMaxBallotingTimersRound;
+        default:
+            return true;
+        }
+    }
+
     void
     updateSelectedTimerAfterObservation(
         DporScpNode const& node,
@@ -557,7 +615,8 @@ class ScpDporDefaultScenario
         }
 
         auto const timer = node.getTimer(mOptions.mSlotIndex, *selectedTimerID);
-        if (!timer || !timer->mCallback)
+        if (!timer || !timer->mCallback ||
+            !isTimerEnabledForExploration(node, *timer))
         {
             selectedTimerID.reset();
         }

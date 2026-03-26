@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "scp/test/DporScpNode.h"
 #include "scp/Slot.h"
 #include "scp/test/ScpDporTypes.h"
 
@@ -57,6 +58,16 @@ makeTxSetDownloadWaitTimeChoiceValue(uint64_t slotIndex,
     return value;
 }
 
+inline ScpDporValue
+makeTxSetStatusChoiceValue(uint64_t slotIndex, DporScpTxSetStatus status)
+{
+    ScpDporValue value;
+    value.mKind = ScpDporValue::Kind::TxSetStatusChoice;
+    value.mSlotIndex = slotIndex;
+    value.mTxSetStatus = static_cast<std::uint8_t>(status);
+    return value;
+}
+
 inline bool
 isEnvelopeValue(ScpDporValue const& value)
 {
@@ -73,6 +84,12 @@ inline bool
 isTxSetDownloadWaitTimeChoiceValue(ScpDporValue const& value)
 {
     return value.mKind == ScpDporValue::Kind::TxSetDownloadWaitTimeChoice;
+}
+
+inline bool
+isTxSetStatusChoiceValue(ScpDporValue const& value)
+{
+    return value.mKind == ScpDporValue::Kind::TxSetStatusChoice;
 }
 
 inline SCPEnvelope const&
@@ -106,6 +123,24 @@ decodeTxSetDownloadWaitTimeChoice(ScpDporValue const& value)
     return std::chrono::milliseconds(value.mDurationMilliseconds);
 }
 
+inline DporScpTxSetStatus
+decodeTxSetStatusChoice(ScpDporValue const& value)
+{
+    if (!isTxSetStatusChoiceValue(value))
+    {
+        throw std::logic_error("value does not encode a txset status choice");
+    }
+
+    switch (static_cast<DporScpTxSetStatus>(value.mTxSetStatus))
+    {
+    case DporScpTxSetStatus::Valid:
+    case DporScpTxSetStatus::Waiting:
+    case DporScpTxSetStatus::Invalid:
+        return static_cast<DporScpTxSetStatus>(value.mTxSetStatus);
+    }
+    throw std::logic_error("value does not encode a supported txset status");
+}
+
 inline char const*
 timerName(int timerID)
 {
@@ -118,6 +153,21 @@ timerName(int timerID)
     default:
         return "unknown";
     }
+}
+
+inline char const*
+txSetStatusName(DporScpTxSetStatus status)
+{
+    switch (status)
+    {
+    case DporScpTxSetStatus::Valid:
+        return "valid";
+    case DporScpTxSetStatus::Waiting:
+        return "waiting";
+    case DporScpTxSetStatus::Invalid:
+        return "invalid";
+    }
+    return "unknown";
 }
 
 inline std::ostream&
@@ -135,6 +185,12 @@ operator<<(std::ostream& out, ScpDporValue const& value)
     case ScpDporValue::Kind::TxSetDownloadWaitTimeChoice:
         return out << "txset-wait(slot=" << value.mSlotIndex
                    << ", ms=" << value.mDurationMilliseconds << ")";
+    case ScpDporValue::Kind::TxSetStatusChoice:
+        return out << "txset-status(slot=" << value.mSlotIndex
+                   << ", value="
+                   << txSetStatusName(
+                          static_cast<DporScpTxSetStatus>(value.mTxSetStatus))
+                   << ")";
     }
     return out << "<unknown>";
 }

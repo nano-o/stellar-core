@@ -119,6 +119,30 @@ TEST_CASE("scp dpor leader initially sends to both followers then waits",
     REQUIRE(receive.is_blocking());
 }
 
+TEST_CASE("scp dpor nomination timer round cap disables later timer firings",
+          "[scp][dpor][smoke]")
+{
+    auto enabledOptions = ScpDporDefaultScenario::makeDefaultOptions();
+    enabledOptions.mEnableNominationTimeouts = true;
+    ScpDporDefaultScenario enabledScenario(std::move(enabledOptions));
+    auto enabledProgram = enabledScenario.makeProgram();
+    auto const& enabledLeader =
+        enabledProgram.threads.at(threadIdForNodeIndex(0));
+
+    auto const enabledReceive = requireReceiveLabel(enabledLeader({}, 2));
+    REQUIRE(enabledReceive.is_nonblocking());
+
+    auto cappedOptions = ScpDporDefaultScenario::makeDefaultOptions();
+    cappedOptions.mEnableNominationTimeouts = true;
+    cappedOptions.mMaxNominationTimersRound = 0;
+    ScpDporDefaultScenario cappedScenario(std::move(cappedOptions));
+    auto cappedProgram = cappedScenario.makeProgram();
+    auto const& cappedLeader = cappedProgram.threads.at(threadIdForNodeIndex(0));
+
+    auto const cappedReceive = requireReceiveLabel(cappedLeader({}, 2));
+    REQUIRE(cappedReceive.is_blocking());
+}
+
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",
           "[scp][dpor][smoke]")
 {
@@ -197,6 +221,37 @@ TEST_CASE("scp dpor exploration finds a commit boundary",
 
     static_cast<void>(dpor::algo::verify(config));
     REQUIRE(foundCommitBoundary);
+}
+
+TEST_CASE("scp dpor exploration finds an externalize boundary",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mStopOnExternalize = true;
+    ScpDporDefaultScenario scenario(std::move(options));
+    bool foundExternalizeBoundary = false;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 60;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto const leaderTrace =
+                execution.graph.thread_trace(threadIdForNodeIndex(0));
+            auto inspection = scenario.inspectBoundary(0, leaderTrace);
+            if (inspection.mReachedBoundary && inspection.mBoundaryEnvelope &&
+                inspection.mBoundaryEnvelope->statement.pledges.type() ==
+                    SCP_ST_EXTERNALIZE)
+            {
+                foundExternalizeBoundary = true;
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    static_cast<void>(dpor::algo::verify(config));
+    REQUIRE(foundExternalizeBoundary);
 }
 
 TEST_CASE("scp dpor replay detects the timer-driven round boundary",
@@ -341,7 +396,7 @@ TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
     auto const options = ScpDporDefaultScenario::makeDefaultOptions();
 
     DporScpNode::Configuration config;
-    config.mAwaitTxSetDownloads = true;
+    config.mTxSetStatus = DporScpTxSetStatus::Waiting;
     config.mTxSetDownloadWaitTimes = {
         std::chrono::milliseconds(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
@@ -390,7 +445,7 @@ TEST_CASE(
     initialValue.push_back('x');
 
     DporScpNode::Configuration config;
-    config.mAwaitTxSetDownloads = true;
+    config.mTxSetStatus = DporScpTxSetStatus::Waiting;
     config.mTxSetDownloadWaitTimes = {
         std::chrono::milliseconds(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
@@ -445,6 +500,95 @@ TEST_CASE(
     std::vector<std::chrono::milliseconds> const expectedWaitTimes{
         belowTimeout, aboveTimeout};
     REQUIRE(seenWaitTimes == expectedWaitTimes);
+}
+
+TEST_CASE("scp dpor node restores txset status choices from the first call",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kInvalidValue);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kAwaitingDownload);
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+}
+
+TEST_CASE(
+    "scp dpor replay preloads known txset status choices from the first query",
+    "[scp][dpor][smoke]")
+{
+    auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2001);
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 1;
+    qSet.validators.push_back(validator.getPublicKey());
+
+    Value previousValue;
+    previousValue.push_back('p');
+    Value initialValue;
+    initialValue.push_back('x');
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    std::vector<SecretKey> validators{validator};
+    std::vector<Value> initialValues{initialValue};
+    ScpDporReplaySupport replaySupport(validators, qSet, 0, previousValue,
+                                       initialValues, config);
+    DporScpNode node(validator, qSet, config);
+
+    std::vector<SCPDriver::ValidationLevel> seenStatuses;
+    node.setupTimer(0, Slot::NOMINATION_TIMER, std::chrono::milliseconds(10),
+                    [&node, &seenStatuses, initialValue]() {
+                        seenStatuses.push_back(
+                            node.validateValue(0, initialValue, false));
+                        seenStatuses.push_back(
+                            node.validateValue(0, initialValue, false));
+                    });
+
+    ThreadTrace trace;
+    trace.emplace_back(ObservedValue::bottom());
+    trace.emplace_back(
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Waiting));
+    trace.emplace_back(
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Invalid));
+    trace.emplace_back(ObservedValue::bottom());
+
+    auto const progress =
+        replaySupport.replayObservation(node, 0, trace, 0,
+                                        std::optional<int>{
+                                            Slot::NOMINATION_TIMER});
+
+    REQUIRE(progress.mConsumedTraceEntries == 3);
+    REQUIRE(progress.mConsumedStepCount == 2);
+    REQUIRE_FALSE(progress.mPendingEvent.has_value());
+    REQUIRE(progress.mObservedBottom);
+
+    std::vector<SCPDriver::ValidationLevel> const expectedStatuses{
+        SCPDriver::kAwaitingDownload, SCPDriver::kInvalidValue};
+    REQUIRE(seenStatuses == expectedStatuses);
 }
 
 } // namespace stellar::scpdpor

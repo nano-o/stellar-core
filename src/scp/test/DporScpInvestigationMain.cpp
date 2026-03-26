@@ -27,14 +27,20 @@ struct CommandLineOptions
     std::size_t mDepth{12};
     std::optional<uint32_t> mMaxNominationRound;
     std::optional<uint32_t> mMaxBallotingRound;
+    std::optional<uint32_t> mMaxNominationTimersRound;
+    std::optional<uint32_t> mMaxBallotingTimersRound;
     bool mStopOnPrepare{false};
     bool mStopOnCommit{false};
+    bool mStopOnExternalize{false};
     bool mWithNominationTimers{false};
     bool mWithBallotingTimers{false};
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
         mDownloadTimeMode{
-            stellar::scpdpor::ScpDporDefaultScenario::
-                DownloadTimeMode::AlwaysValid};
+            stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode::
+                BelowThreshold};
+    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode
+        mTxSetStatusMode{
+            stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::Valid};
     std::optional<std::size_t> mDumpInitialSteps;
     std::optional<std::chrono::seconds> mPrintStatsInterval;
     bool mDumpTerminalTrace{false};
@@ -49,6 +55,10 @@ defaultParallelWorkers();
 std::string_view
 downloadTimeModeName(
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode);
+
+std::string_view
+txSetStatusModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mode);
 
 std::string_view
 communicationModelName(dpor::model::CommunicationModel model);
@@ -68,14 +78,34 @@ downloadTimeModeName(
         stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode;
     switch (mode)
     {
-    case DownloadTimeMode::AlwaysValid:
-        return "always-valid";
-    case DownloadTimeMode::AlwaysWaiting:
-        return "always-waiting";
+    case DownloadTimeMode::BelowThreshold:
+        return "below";
+    case DownloadTimeMode::AboveThreshold:
+        return "above";
     case DownloadTimeMode::Nondeterministic:
         return "nondet";
     }
     throw std::logic_error("unknown download-time mode");
+}
+
+std::string_view
+txSetStatusModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mode)
+{
+    using TxSetStatusMode =
+        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
+    switch (mode)
+    {
+    case TxSetStatusMode::Valid:
+        return "valid";
+    case TxSetStatusMode::Waiting:
+        return "waiting";
+    case TxSetStatusMode::Invalid:
+        return "invalid";
+    case TxSetStatusMode::Nondeterministic:
+        return "nondet";
+    }
+    throw std::logic_error("unknown txset-status mode");
 }
 
 std::string_view
@@ -115,19 +145,34 @@ printUsage(char const* argv0)
               << " | --max-balloting-rounds N\n"
               << "      Stop when balloting round reaches N"
               << " (default: disabled)\n"
+              << "  --max-nomination-timers-round N"
+              << " | --max-nomination-timers-rounds N\n"
+              << "      Only fire nomination timers in rounds <= N"
+              << " (default: disabled)\n"
+              << "  --max-balloting-timers-round N"
+              << " | --max-balloting-timers-rounds N\n"
+              << "      Only fire balloting timers for ballot numbers <= N"
+              << " (default: disabled)\n"
               << "  --stop-on-prepare\n"
               << "      Stop at the prepare boundary (default: off)\n"
               << "  --stop-on-commit\n"
-              << "      Stop at the commit boundary (default: off)\n"
+              << "      Stop at the commit-phase boundary"
+              << " (CONFIRM or EXTERNALIZE; default: off)\n"
+              << "  --stop-on-externalize\n"
+              << "      Stop at the externalize boundary (default: off)\n"
               << "  --with-nomination-timers\n"
               << "      Enable nomination timers (default: "
               << (defaults.mWithNominationTimers ? "on" : "off") << ")\n"
               << "  --with-balloting-timers\n"
               << "      Enable balloting timers (default: "
               << (defaults.mWithBallotingTimers ? "on" : "off") << ")\n"
-              << "  --download-time nondet|always-waiting|always-valid\n"
-              << "      Tx-set download wait-time mode (default: "
+              << "  --download-time below|above|nondet\n"
+              << "      Tx-set download wait-time mode relative to the"
+              << " skip threshold (default: "
               << downloadTimeModeName(defaults.mDownloadTimeMode) << ")\n"
+              << "  --txset-status valid|waiting|invalid|nondet\n"
+              << "      Tx-set validation status mode (default: "
+              << txSetStatusModeName(defaults.mTxSetStatusMode) << ")\n"
               << "  --fifo\n"
               << "      Use FIFO point-to-point delivery"
               << " (default communication model: "
@@ -145,9 +190,6 @@ printUsage(char const* argv0)
               << "  --dump-terminal-replay-trace\n"
               << "      Dump replay traces for the dumped terminal execution"
               << " (default: off)\n"
-              << "  --scenario prepare-boundary|commit-boundary|"
-                 "nomination-timers\n"
-              << "      Legacy compatibility shim (default: disabled)\n"
               << "  --help, -h\n"
               << "      Show this help message\n";
 }
@@ -162,41 +204,42 @@ parseDownloadTimeMode(std::string_view value)
     {
         return DownloadTimeMode::Nondeterministic;
     }
-    if (value == "always-waiting")
+    if (value == "below")
     {
-        return DownloadTimeMode::AlwaysWaiting;
+        return DownloadTimeMode::BelowThreshold;
     }
-    if (value == "always-valid" || value == "alway-valid")
+    if (value == "above")
     {
-        return DownloadTimeMode::AlwaysValid;
+        return DownloadTimeMode::AboveThreshold;
     }
     throw std::invalid_argument("unknown download-time mode: " +
                                 std::string(value));
 }
 
-void
-applyLegacyScenario(std::string_view value, CommandLineOptions& options)
+stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode
+parseTxSetStatusMode(std::string_view value)
 {
-    if (value == "prepare-boundary")
+    using TxSetStatusMode =
+        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
+
+    if (value == "valid")
     {
-        options.mStopOnPrepare = true;
-        return;
+        return TxSetStatusMode::Valid;
     }
-    if (value == "commit-boundary")
+    if (value == "waiting")
     {
-        options.mStopOnCommit = true;
-        return;
+        return TxSetStatusMode::Waiting;
     }
-    if (value == "nomination-timers")
+    if (value == "invalid")
     {
-        options.mWithNominationTimers = true;
-        if (!options.mMaxNominationRound)
-        {
-            options.mMaxNominationRound = 1;
-        }
-        return;
+        return TxSetStatusMode::Invalid;
     }
-    throw std::invalid_argument("unknown scenario: " + std::string(value));
+    if (value == "nondet")
+    {
+        return TxSetStatusMode::Nondeterministic;
+    }
+    throw std::invalid_argument("unknown txset-status mode: " +
+                                std::string(value));
 }
 
 uint32_t
@@ -214,21 +257,32 @@ parseUint32Value(std::string_view arg, std::string_view value)
 stellar::scpdpor::ScpDporDefaultScenario
 makeScenario(CommandLineOptions const& options)
 {
-    if (options.mStopOnPrepare && options.mStopOnCommit)
+    auto const envelopeBoundaryModes =
+        static_cast<int>(options.mStopOnPrepare) +
+        static_cast<int>(options.mStopOnCommit) +
+        static_cast<int>(options.mStopOnExternalize);
+    if (envelopeBoundaryModes > 1)
     {
         throw std::invalid_argument(
-            "--stop-on-prepare and --stop-on-commit are mutually exclusive");
+            "--stop-on-prepare, --stop-on-commit, and "
+            "--stop-on-externalize are mutually exclusive");
     }
 
     auto scenarioOptions =
         stellar::scpdpor::ScpDporDefaultScenario::makeDefaultOptions();
     scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
     scenarioOptions.mStopOnCommit = options.mStopOnCommit;
+    scenarioOptions.mStopOnExternalize = options.mStopOnExternalize;
     scenarioOptions.mMaxNominationRound = options.mMaxNominationRound;
     scenarioOptions.mMaxBallotingRound = options.mMaxBallotingRound;
+    scenarioOptions.mMaxNominationTimersRound =
+        options.mMaxNominationTimersRound;
+    scenarioOptions.mMaxBallotingTimersRound =
+        options.mMaxBallotingTimersRound;
     scenarioOptions.mEnableNominationTimeouts = options.mWithNominationTimers;
     scenarioOptions.mEnableBallotingTimeouts = options.mWithBallotingTimers;
     scenarioOptions.mDownloadTimeMode = options.mDownloadTimeMode;
+    scenarioOptions.mTxSetStatusMode = options.mTxSetStatusMode;
     return stellar::scpdpor::ScpDporDefaultScenario(
         std::move(scenarioOptions));
 }
@@ -484,6 +538,22 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 parseUint32Value(arg, argv[++i]);
             continue;
         }
+        if ((arg == "--max-nomination-timers-round" ||
+             arg == "--max-nomination-timers-rounds") &&
+            i + 1 < argc)
+        {
+            options.mMaxNominationTimersRound =
+                parseUint32Value(arg, argv[++i]);
+            continue;
+        }
+        if ((arg == "--max-balloting-timers-round" ||
+             arg == "--max-balloting-timers-rounds") &&
+            i + 1 < argc)
+        {
+            options.mMaxBallotingTimersRound =
+                parseUint32Value(arg, argv[++i]);
+            continue;
+        }
         if (arg == "--stop-on-prepare")
         {
             options.mStopOnPrepare = true;
@@ -492,6 +562,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--stop-on-commit")
         {
             options.mStopOnCommit = true;
+            continue;
+        }
+        if (arg == "--stop-on-externalize")
+        {
+            options.mStopOnExternalize = true;
             continue;
         }
         if (arg == "--with-nomination-timers")
@@ -509,9 +584,9 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mDownloadTimeMode = parseDownloadTimeMode(argv[++i]);
             continue;
         }
-        if (arg == "--scenario" && i + 1 < argc)
+        if (arg == "--txset-status" && i + 1 < argc)
         {
-            applyLegacyScenario(argv[++i], options);
+            options.mTxSetStatusMode = parseTxSetStatusMode(argv[++i]);
             continue;
         }
         if (arg == "--dump-initial-steps" && i + 1 < argc)

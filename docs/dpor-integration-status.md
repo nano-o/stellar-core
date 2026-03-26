@@ -1,6 +1,6 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-03-25 for branch `skip-ledgers-p25-dpor-2`.
+Status snapshot as of 2026-03-26 for branch `skip-ledgers-p25-dpor-2`.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -51,6 +51,7 @@ large SCP property suite.
   `ScpDporValue` and the DPOR aliases. The value kinds are:
   - envelope delivery
   - timer choice
+  - txset validation-status choice
   - txset download wait-time choice
 - `ScpDporValue` provides `operator==`, `operator<`, and `std::hash`, and it
   remains payload-only.
@@ -61,14 +62,14 @@ large SCP property suite.
   [`src/scp/test/DporScpNode.cpp`](../src/scp/test/DporScpNode.cpp) implement
   the deterministic `SCPDriver` used by DPOR. The node snapshots and restores
   slot state, tracks emitted envelopes, tracks timers and timer-set counts,
-  exposes boundary detection, and surfaces txset wait-time nondeterminism to
-  the scenario layer.
+  exposes boundary detection, and surfaces txset validation-status and
+  wait-time nondeterminism to the scenario layer.
 - [`src/scp/test/ScpDporReplaySupport.h`](../src/scp/test/ScpDporReplaySupport.h)
   and
   [`src/scp/test/ScpDporReplaySupport.cpp`](../src/scp/test/ScpDporReplaySupport.cpp)
   provide stored baselines, thread-local cached nodes, and replay helpers for
-  observed traces, including hidden txset wait-time choices. Replay semantics
-  are also described in
+  observed traces, including hidden txset status and wait-time choices. Replay
+  semantics are also described in
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
 - [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
   is the current default scenario layer. It currently builds a three-validator,
@@ -87,39 +88,46 @@ large SCP property suite.
   that scenario is configurable rather than fixed.
 - [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
   currently supports:
-  - stopping at prepare boundaries or commit boundaries
+  - stopping at prepare boundaries, commit-phase boundaries, or
+    externalize boundaries
   - nomination and balloting timer enablement
   - nomination and balloting round caps
+  - nomination-timer and balloting-timer firing caps
   - timer-set limits
-  - txset download wait-time modes: `always-valid`, `always-waiting`, and
-    `nondet`
+  - txset download wait-time modes: `below`, `above`, and `nondet`
+  - txset validation-status modes: `valid`, `waiting`, `invalid`, and `nondet`
   - custom timeout parameters for nomination and balloting
 - [`src/scp/test/DporScpInvestigationMain.cpp`](../src/scp/test/DporScpInvestigationMain.cpp)
   exposes that surface through flags such as:
   - `--stop-on-prepare`
   - `--stop-on-commit`
+  - `--stop-on-externalize`
   - `--with-nomination-timers`
   - `--with-balloting-timers`
   - `--max-nomination-round`
   - `--max-balloting-round`
+  - `--max-nomination-timers-round`
+  - `--max-balloting-timers-round`
   - `--download-time`
+  - `--txset-status`
   - `--fifo`
   - `--parallel` / `--workers`
   - `--print-stats`
   - `--dump-initial-steps`
   - `--dump-terminal-trace`
   - `--dump-terminal-replay-trace`
-- `--scenario prepare-boundary|commit-boundary|nomination-timers` still exists
-  as a compatibility shim, but the runner is now primarily flag-driven.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 11 smoke tests. The checked-in coverage exercises:
+  currently contains 15 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
   - commit-boundary exploration
-  - nomination-timer and balloting-round boundaries
+  - externalize-boundary exploration
+  - nomination-timer firing caps and round boundaries
+  - balloting-round boundaries
   - replay-trace inspection
   - follower timer-before-delivery behavior
+  - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
 
 ## Verification in this workspace
@@ -133,10 +141,27 @@ I verified the current state directly in this tree:
   `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --stop-on-commit --depth 16` reported
   `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+- `./src/scp-dpor-investigation --stop-on-externalize --depth 16` reported
+  `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+- `./src/scp-dpor-investigation --with-nomination-timers --dump-initial-steps
+  3` shows the leader's step 2 as `receive(nonblocking=true)`, while adding
+  `--max-nomination-timers-round 0` changes that same step to
+  `receive(nonblocking=false)`.
+- `./src/scp-dpor-investigation --stop-on-commit --with-balloting-timers
+  --max-balloting-timers-round 0 --depth 16` reported
+  `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+- `./src/scp-dpor-investigation --txset-status waiting --download-time below
+  --depth 12` reported
+  `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
+- `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
+  --depth 12` reported
+  `kind=all-explored executions=67 full=1 error=0 depth-limit=66`.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
   passed after increasing that test's exploration depth to 60.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 42
-  assertions in 11 test cases.
+- `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize
+  boundary"` passed.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 59
+  assertions in 15 test cases.
 
 ## Current limitations
 

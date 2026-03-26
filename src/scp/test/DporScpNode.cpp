@@ -37,6 +37,49 @@ defaultValueHash(Value const& value)
     return hash;
 }
 
+DporScpTxSetStatus
+resolveTxSetStatusChoice(DporScpTxSetStatus configuredStatus,
+                         bool nondeterministicStatus,
+                         std::vector<DporScpTxSetStatus> const& pendingChoices,
+                         std::size_t& nextChoice)
+{
+    if (!nondeterministicStatus)
+    {
+        return configuredStatus;
+    }
+
+    std::vector<DporScpTxSetStatus> const supportedChoices{
+        DporScpTxSetStatus::Valid, DporScpTxSetStatus::Waiting,
+        DporScpTxSetStatus::Invalid};
+    if (nextChoice >= pendingChoices.size())
+    {
+        throw DporScpNode::TxSetStatusChoiceRequired(supportedChoices);
+    }
+
+    auto const status = pendingChoices.at(nextChoice++);
+    if (std::find(supportedChoices.begin(), supportedChoices.end(), status) ==
+        supportedChoices.end())
+    {
+        throw std::logic_error("preloaded txset status choice is not supported");
+    }
+    return status;
+}
+
+SCPDriver::ValidationLevel
+validationLevelForTxSetStatus(DporScpTxSetStatus status)
+{
+    switch (status)
+    {
+    case DporScpTxSetStatus::Valid:
+        return SCPDriver::kFullyValidatedValue;
+    case DporScpTxSetStatus::Waiting:
+        return SCPDriver::kAwaitingDownload;
+    case DporScpTxSetStatus::Invalid:
+        return SCPDriver::kInvalidValue;
+    }
+    throw std::logic_error("unknown txset status");
+}
+
 } // namespace
 
 DporScpNode::TxSetDownloadWaitTimeChoiceRequired::
@@ -49,6 +92,19 @@ DporScpNode::TxSetDownloadWaitTimeChoiceRequired::
 
 std::vector<std::chrono::milliseconds> const&
 DporScpNode::TxSetDownloadWaitTimeChoiceRequired::getChoices() const
+{
+    return mChoices;
+}
+
+DporScpNode::TxSetStatusChoiceRequired::TxSetStatusChoiceRequired(
+    std::vector<DporScpTxSetStatus> choices)
+    : std::runtime_error("txset status choice is required")
+    , mChoices(std::move(choices))
+{
+}
+
+std::vector<DporScpTxSetStatus> const&
+DporScpNode::TxSetStatusChoiceRequired::getChoices() const
 {
     return mChoices;
 }
@@ -188,6 +244,12 @@ DporScpNode::fireTimer(uint64 slotIndex, int timerID)
         cb();
     }
     return true;
+}
+
+void
+DporScpNode::enqueueTxSetStatusChoice(DporScpTxSetStatus status)
+{
+    mPendingTxSetStatusChoices.push_back(status);
 }
 
 void
@@ -574,9 +636,25 @@ DporScpNode::getQSet(Hash const& qSetHash)
 }
 
 std::optional<std::chrono::milliseconds>
-DporScpNode::getTxSetDownloadWaitTime(Value const&) const
+DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
 {
-    if (!mAwaitTxSetDownloads)
+    if (mNondeterministicTxSetStatus)
+    {
+        auto const it = mPendingTxSetDownloadStatusCounts.find(value);
+        if (it == mPendingTxSetDownloadStatusCounts.end())
+        {
+            return std::nullopt;
+        }
+        if (it->second <= 1)
+        {
+            mPendingTxSetDownloadStatusCounts.erase(it);
+        }
+        else
+        {
+            --mPendingTxSetDownloadStatusCounts[value];
+        }
+    }
+    else if (mTxSetStatus != DporScpTxSetStatus::Waiting)
     {
         return std::nullopt;
     }
@@ -666,11 +744,18 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
 SCPDriver::ValidationLevel
 DporScpNode::validateValue(uint64, Value const& value, bool)
 {
-    if (!mAwaitTxSetDownloads || isSkipLedgerValue(value))
+    if (isSkipLedgerValue(value))
     {
         return SCPDriver::kFullyValidatedValue;
     }
-    return SCPDriver::kAwaitingDownload;
+    auto const status = resolveTxSetStatusChoice(
+        mTxSetStatus, mNondeterministicTxSetStatus, mPendingTxSetStatusChoices,
+        mNextPendingTxSetStatusChoice);
+    if (status == DporScpTxSetStatus::Waiting)
+    {
+        ++mPendingTxSetDownloadStatusCounts[value];
+    }
+    return validationLevelForTxSetStatus(status);
 }
 
 Value
@@ -927,7 +1012,8 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mBoundaryMode = config.mBoundaryMode;
     mMaxNominationRound = config.mMaxNominationRound;
     mMaxBallotingRound = config.mMaxBallotingRound;
-    mAwaitTxSetDownloads = config.mAwaitTxSetDownloads;
+    mTxSetStatus = config.mTxSetStatus;
+    mNondeterministicTxSetStatus = config.mNondeterministicTxSetStatus;
     mInitialNominationTimeoutMS = config.mInitialNominationTimeoutMS;
     mIncrementNominationTimeoutMS = config.mIncrementNominationTimeoutMS;
     mInitialBallotTimeoutMS = config.mInitialBallotTimeoutMS;
@@ -1026,6 +1112,9 @@ DporScpNode::clearReplayState()
     mPendingEnvelopes.clear();
     mTimers.clear();
     mTimerSetCounts.clear();
+    mPendingTxSetStatusChoices.clear();
+    mNextPendingTxSetStatusChoice = 0;
+    mPendingTxSetDownloadStatusCounts.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
     mTxSetDownloadWaitTimeCallCount = 0;
@@ -1048,6 +1137,8 @@ DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
                    mPrepareBoundaryCounter;
     case BoundaryMode::Commit:
         return type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE;
+    case BoundaryMode::Externalize:
+        return type == SCP_ST_EXTERNALIZE;
     case BoundaryMode::NominationRound:
         if (type != SCP_ST_NOMINATE)
         {

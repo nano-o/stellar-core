@@ -27,6 +27,16 @@ threadLocalReplayStateCache()
 }
 
 void
+enqueueTxSetStatusChoices(DporScpNode& node,
+                          std::vector<DporScpTxSetStatus> const& statuses)
+{
+    for (auto const status : statuses)
+    {
+        node.enqueueTxSetStatusChoice(status);
+    }
+}
+
+void
 enqueueTxSetDownloadWaitTimeChoices(
     DporScpNode& node,
     std::vector<std::chrono::milliseconds> const& waitTimes)
@@ -37,11 +47,17 @@ enqueueTxSetDownloadWaitTimeChoices(
     }
 }
 
-std::vector<std::chrono::milliseconds>
-decodeKnownTxSetDownloadWaitTimeChoices(ThreadTrace const& trace,
-                                        std::size_t observedIndex)
+struct KnownTxSetChoices
 {
-    std::vector<std::chrono::milliseconds> waitTimes;
+    std::vector<DporScpTxSetStatus> mStatuses;
+    std::vector<std::chrono::milliseconds> mWaitTimes;
+    std::size_t mTraceEntries{};
+};
+
+KnownTxSetChoices
+decodeKnownTxSetChoices(ThreadTrace const& trace, std::size_t observedIndex)
+{
+    KnownTxSetChoices decoded;
     for (std::size_t choiceIndex = observedIndex + 1; choiceIndex < trace.size();
          ++choiceIndex)
     {
@@ -52,14 +68,26 @@ decodeKnownTxSetDownloadWaitTimeChoices(ThreadTrace const& trace,
         }
 
         auto const& choiceValue = choiceObserved.value();
-        if (!isTxSetDownloadWaitTimeChoiceValue(choiceValue))
+        if (isTxSetStatusChoiceValue(choiceValue))
+        {
+            decoded.mStatuses.push_back(decodeTxSetStatusChoice(choiceValue));
+            ++decoded.mTraceEntries;
+            continue;
+        }
+        if (isTxSetDownloadWaitTimeChoiceValue(choiceValue))
+        {
+            decoded.mWaitTimes.push_back(
+                decodeTxSetDownloadWaitTimeChoice(choiceValue));
+            ++decoded.mTraceEntries;
+            continue;
+        }
+        if (!isTxSetStatusChoiceValue(choiceValue) &&
+            !isTxSetDownloadWaitTimeChoiceValue(choiceValue))
         {
             break;
         }
-
-        waitTimes.push_back(decodeTxSetDownloadWaitTimeChoice(choiceValue));
     }
-    return waitTimes;
+    return decoded;
 }
 
 } // namespace
@@ -147,22 +175,41 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
 
     auto const& observed = trace.at(observedIndex);
     auto const observedBottom = observed.is_bottom();
-    auto const chosenWaitTimes =
-        decodeKnownTxSetDownloadWaitTimeChoices(trace, observedIndex);
+    auto const chosenTxSetChoices =
+        decodeKnownTxSetChoices(trace, observedIndex);
 
-    enqueueTxSetDownloadWaitTimeChoices(node, chosenWaitTimes);
+    enqueueTxSetStatusChoices(node, chosenTxSetChoices.mStatuses);
+    enqueueTxSetDownloadWaitTimeChoices(node, chosenTxSetChoices.mWaitTimes);
     try
     {
         replayOneObservedValue(node, observed, selectedTimerID);
         return ReplayObservationProgress{
-            .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
-            .mConsumedStepCount = chosenWaitTimes.size(),
+            .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
+            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
+            .mObservedBottom = observedBottom,
+        };
+    }
+    catch (DporScpNode::TxSetStatusChoiceRequired const& e)
+    {
+        auto const choiceIndex =
+            observedIndex + 1 + chosenTxSetChoices.mTraceEntries;
+        if (choiceIndex < trace.size())
+        {
+            throw std::logic_error(
+                "trace omits a txset status choice before the next observed event");
+        }
+
+        return ReplayObservationProgress{
+            .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
+            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
+            .mPendingEvent = makeTxSetStatusChoiceEvent(e.getChoices()),
             .mObservedBottom = observedBottom,
         };
     }
     catch (DporScpNode::TxSetDownloadWaitTimeChoiceRequired const& e)
     {
-        auto const choiceIndex = observedIndex + 1 + chosenWaitTimes.size();
+        auto const choiceIndex =
+            observedIndex + 1 + chosenTxSetChoices.mTraceEntries;
         if (choiceIndex < trace.size())
         {
             throw std::logic_error(
@@ -170,8 +217,8 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
         }
 
         return ReplayObservationProgress{
-            .mConsumedTraceEntries = 1 + chosenWaitTimes.size(),
-            .mConsumedStepCount = chosenWaitTimes.size(),
+            .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
+            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
             .mPendingEvent = makeTxSetDownloadWaitTimeChoiceEvent(e.getChoices()),
             .mObservedBottom = observedBottom,
         };
@@ -243,6 +290,25 @@ ScpDporReplaySupport::replayOneObservedValue(
 }
 
 EventLabel
+ScpDporReplaySupport::makeTxSetStatusChoiceEvent(
+    std::vector<DporScpTxSetStatus> const& statuses) const
+{
+    std::vector<ScpDporValue> choices;
+    choices.reserve(statuses.size());
+    for (auto const status : statuses)
+    {
+        choices.push_back(makeTxSetStatusChoiceValue(mSlotIndex, status));
+    }
+    if (choices.empty())
+    {
+        throw std::logic_error("txset status choices must not be empty");
+    }
+
+    return EventLabel{NondeterministicChoiceLabel{.value = choices.front(),
+                                                  .choices = std::move(choices)}};
+}
+
+EventLabel
 ScpDporReplaySupport::makeTxSetDownloadWaitTimeChoiceEvent(
     std::vector<std::chrono::milliseconds> const& waitTimes) const
 {
@@ -271,7 +337,13 @@ ScpDporReplaySupport::rebuildBaselines()
     for (std::size_t nodeIndex = 0; nodeIndex < mValidators.size();
          ++nodeIndex)
     {
-        DporScpNode node(mValidators.at(nodeIndex), mQSet, mConfig);
+        auto baselineConfig = mConfig;
+        // Keep the replay baseline stable; hidden txset choices are exposed
+        // during trace replay rather than while constructing the baseline.
+        baselineConfig.mNondeterministicTxSetStatus = false;
+        baselineConfig.mNondeterministicTxSetDownloadWaitTime = false;
+
+        DporScpNode node(mValidators.at(nodeIndex), mQSet, baselineConfig);
         initializeNode(node, nodeIndex);
 
         NodeBaseline baseline;

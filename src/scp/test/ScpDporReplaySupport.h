@@ -69,6 +69,10 @@ class ScpDporReplaySupport
                            std::optional<int> selectedTimerID) const;
 
     EventLabel
+    makeTxSetStatusChoiceEvent(
+        std::vector<DporScpTxSetStatus> const& statuses) const;
+
+    EventLabel
     makeTxSetDownloadWaitTimeChoiceEvent(
         std::vector<std::chrono::milliseconds> const& waitTimes) const;
 
