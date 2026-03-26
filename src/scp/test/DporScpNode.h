@@ -83,6 +83,7 @@ class DporScpNode : public SCPDriver
         std::optional<uint32_t> mMaxBallotingRound;
         DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
         bool mNondeterministicTxSetStatus{false};
+        std::optional<uint32_t> mDownloadSucceedsInBallotRound;
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
             mTxSetDownloadWaitTimesByNode;
@@ -173,6 +174,7 @@ class DporScpNode : public SCPDriver
         std::vector<ReplayTimerSnapshot> mTimers;
         std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
         std::size_t mTxSetDownloadWaitTimeCallCount{};
+        bool mTxSetDownloadSucceeded{};
         bool mHasReachedBoundary{};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
@@ -367,6 +369,12 @@ class DporScpNode : public SCPDriver
     void
     clearReplayState();
 
+    void
+    markTxSetDownloadSucceeded();
+
+    bool
+    shouldMarkTxSetDownloadSucceeded(SCPEnvelope const& envelope) const;
+
     bool
     isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
 
@@ -391,6 +399,8 @@ class DporScpNode : public SCPDriver
     std::optional<uint32_t> mMaxBallotingRound;
     DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
     bool mNondeterministicTxSetStatus{false};
+    std::optional<uint32_t> mDownloadSucceedsInBallotRound;
+    bool mTxSetDownloadSucceeded{false};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};

@@ -59,6 +59,7 @@ class ScpDporDefaultScenario
         bool mEnableBallotingTimeouts{false};
         DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::BelowThreshold};
         TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::Valid};
+        std::optional<uint32_t> mDownloadSucceedsInRound;
         uint32_t mInitialNominationTimeoutMS{1000};
         uint32_t mIncrementNominationTimeoutMS{1000};
         uint32_t mInitialBallotTimeoutMS{1000};
@@ -460,6 +461,8 @@ class ScpDporDefaultScenario
             config.mNondeterministicTxSetStatus = true;
             break;
         }
+        config.mDownloadSucceedsInBallotRound =
+            options.mDownloadSucceedsInRound;
         switch (options.mDownloadTimeMode)
         {
         case DownloadTimeMode::BelowThreshold:

@@ -44,6 +44,7 @@ struct CommandLineOptions
     stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode
         mTxSetStatusMode{
             stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::Valid};
+    std::optional<uint32_t> mDownloadSucceedsInRound;
     std::optional<std::size_t> mDumpInitialSteps;
     std::optional<std::chrono::seconds> mPrintStatsInterval;
     bool mDumpTerminalTrace{false};
@@ -181,6 +182,10 @@ printUsage(char const* argv0)
               << "  --txset-status valid|waiting|invalid|nondet\n"
               << "      Tx-set validation status mode (default: "
               << txSetStatusModeName(defaults.mTxSetStatusMode) << ")\n"
+              << "  --download-succeeds-in-round N\n"
+              << "      Once a node emits its first PREPARE in ballot N,"
+              << " later tx-set validation returns valid"
+              << " (default: disabled)\n"
               << "  --fifo\n"
               << "      Use FIFO point-to-point delivery"
               << " (default communication model: "
@@ -262,6 +267,18 @@ parseUint32Value(std::string_view arg, std::string_view value)
     return static_cast<uint32_t>(parsed);
 }
 
+uint32_t
+parsePositiveUint32Value(std::string_view arg, std::string_view value)
+{
+    auto const parsed = parseUint32Value(arg, value);
+    if (parsed == 0)
+    {
+        throw std::invalid_argument(std::string(arg) +
+                                    " requires a value greater than 0");
+    }
+    return parsed;
+}
+
 stellar::scpdpor::ScpDporDefaultScenario
 makeScenario(CommandLineOptions const& options)
 {
@@ -291,6 +308,8 @@ makeScenario(CommandLineOptions const& options)
     scenarioOptions.mEnableBallotingTimeouts = options.mWithBallotingTimers;
     scenarioOptions.mDownloadTimeMode = options.mDownloadTimeMode;
     scenarioOptions.mTxSetStatusMode = options.mTxSetStatusMode;
+    scenarioOptions.mDownloadSucceedsInRound =
+        options.mDownloadSucceedsInRound;
     return stellar::scpdpor::ScpDporDefaultScenario(
         std::move(scenarioOptions));
 }
@@ -697,6 +716,12 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--txset-status" && i + 1 < argc)
         {
             options.mTxSetStatusMode = parseTxSetStatusMode(argv[++i]);
+            continue;
+        }
+        if (arg == "--download-succeeds-in-round" && i + 1 < argc)
+        {
+            options.mDownloadSucceedsInRound =
+                parsePositiveUint32Value(arg, argv[++i]);
             continue;
         }
         if (arg == "--dump-initial-steps" && i + 1 < argc)

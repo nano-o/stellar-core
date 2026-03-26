@@ -96,6 +96,8 @@ large SCP property suite.
   - timer-set limits
   - txset download wait-time modes: `below`, `above`, and `nondet`
   - txset validation-status modes: `valid`, `waiting`, `invalid`, and `nondet`
+  - forcing later txset validation calls to return `valid` after a node emits
+    its first `PREPARE` in a configured ballot round
   - custom timeout parameters for nomination and balloting
 - [`src/scp/test/DporScpInvestigationMain.cpp`](../src/scp/test/DporScpInvestigationMain.cpp)
   exposes that surface through flags such as:
@@ -113,6 +115,7 @@ large SCP property suite.
   - `--max-balloting-timers-round`
   - `--download-time`
   - `--txset-status`
+  - `--download-succeeds-in-round`
   - `--fifo`
   - `--parallel` / `--workers`
   - `--print-stats`
@@ -120,7 +123,7 @@ large SCP property suite.
   - `--dump-terminal-trace`
   - `--dump-terminal-replay-trace`
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 16 smoke tests. The checked-in coverage exercises:
+  currently contains 17 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -133,6 +136,8 @@ large SCP property suite.
   - follower timer-before-delivery behavior
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
+  - `download-succeeds-in-round` forcing later txset validation to `valid`
+    and surviving replay checkpoint restore
 
 ## Verification in this workspace
 
@@ -160,13 +165,15 @@ I verified the current state directly in this tree:
 - `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
   --depth 12` reported
   `kind=all-explored executions=67 full=1 error=0 depth-limit=66`.
+- `./src/scp-dpor-investigation --download-succeeds-in-round 1 --depth 12`
+  reported `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
   --depth 12` exited with
   `error: full execution missing EXTERNALIZE envelope from node-index=0
   thread=0`, dumped the failing replay trace, and reported
   `kind=stopped executions=4 full=1 error=0 depth-limit=3`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 61
-  assertions in 16 test cases.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 65
+  assertions in 17 test cases.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
   passed after increasing that test's exploration depth to 60.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize

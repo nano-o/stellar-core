@@ -416,6 +416,7 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
     }
     baseline.mTxSetDownloadWaitTimeCallCount =
         mTxSetDownloadWaitTimeCallCount;
+    baseline.mTxSetDownloadSucceeded = mTxSetDownloadSucceeded;
     baseline.mHasReachedBoundary = mHasReachedBoundary;
     baseline.mBoundaryEnvelope = mBoundaryEnvelope;
     return baseline;
@@ -566,6 +567,7 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
     }
     mTxSetDownloadWaitTimeCallCount =
         baseline.mTxSetDownloadWaitTimeCallCount;
+    mTxSetDownloadSucceeded = baseline.mTxSetDownloadSucceeded;
     mHasReachedBoundary = baseline.mHasReachedBoundary;
     mBoundaryEnvelope = baseline.mBoundaryEnvelope;
 }
@@ -638,6 +640,11 @@ DporScpNode::getQSet(Hash const& qSetHash)
 std::optional<std::chrono::milliseconds>
 DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
 {
+    if (mTxSetDownloadSucceeded)
+    {
+        return std::nullopt;
+    }
+
     if (mNondeterministicTxSetStatus)
     {
         auto const it = mPendingTxSetDownloadStatusCounts.find(value);
@@ -731,6 +738,10 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
     }
 
     mEmittedEnvelopes.push_back(envelope);
+    if (shouldMarkTxSetDownloadSucceeded(envelope))
+    {
+        markTxSetDownloadSucceeded();
+    }
     recordReplayDebugEvent(
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
                          .mEnvelope = envelope,
@@ -744,7 +755,7 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
 SCPDriver::ValidationLevel
 DporScpNode::validateValue(uint64, Value const& value, bool)
 {
-    if (isSkipLedgerValue(value))
+    if (isSkipLedgerValue(value) || mTxSetDownloadSucceeded)
     {
         return SCPDriver::kFullyValidatedValue;
     }
@@ -1014,6 +1025,7 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mMaxBallotingRound = config.mMaxBallotingRound;
     mTxSetStatus = config.mTxSetStatus;
     mNondeterministicTxSetStatus = config.mNondeterministicTxSetStatus;
+    mDownloadSucceedsInBallotRound = config.mDownloadSucceedsInBallotRound;
     mInitialNominationTimeoutMS = config.mInitialNominationTimeoutMS;
     mIncrementNominationTimeoutMS = config.mIncrementNominationTimeoutMS;
     mInitialBallotTimeoutMS = config.mInitialBallotTimeoutMS;
@@ -1119,8 +1131,35 @@ DporScpNode::clearReplayState()
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
     mTxSetDownloadWaitTimeCallCount = 0;
     mReplayDebugEvents.clear();
+    mTxSetDownloadSucceeded = false;
     mHasReachedBoundary = false;
     mBoundaryEnvelope.reset();
+}
+
+void
+DporScpNode::markTxSetDownloadSucceeded()
+{
+    if (mTxSetDownloadSucceeded)
+    {
+        return;
+    }
+
+    mTxSetDownloadSucceeded = true;
+    mPendingTxSetStatusChoices.clear();
+    mNextPendingTxSetStatusChoice = 0;
+    mPendingTxSetDownloadStatusCounts.clear();
+    mPendingTxSetDownloadWaitTimeChoices.clear();
+    mNextPendingTxSetDownloadWaitTimeChoice = 0;
+}
+
+bool
+DporScpNode::shouldMarkTxSetDownloadSucceeded(
+    SCPEnvelope const& envelope) const
+{
+    return !mTxSetDownloadSucceeded && mDownloadSucceedsInBallotRound &&
+           envelope.statement.pledges.type() == SCP_ST_PREPARE &&
+           envelope.statement.pledges.prepare().ballot.counter ==
+               *mDownloadSucceedsInBallotRound;
 }
 
 bool

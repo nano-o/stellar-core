@@ -588,6 +588,45 @@ TEST_CASE("scp dpor node restores txset status choices from the first call",
 }
 
 TEST_CASE(
+    "scp dpor download-succeeds-in-round forces later txset validation valid",
+    "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    config.mDownloadSucceedsInBallotRound = 1;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    SCPEnvelope prepareEnvelope;
+    prepareEnvelope.statement.slotIndex = options.mSlotIndex;
+    prepareEnvelope.statement.nodeID =
+        options.mValidators.at(0).getPublicKey();
+    prepareEnvelope.statement.pledges.type(SCP_ST_PREPARE);
+    prepareEnvelope.statement.pledges.prepare().ballot.counter = 1;
+    prepareEnvelope.statement.pledges.prepare().ballot.value = value;
+    node.emitEnvelope(prepareEnvelope);
+
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+    node.restoreReplayBaseline(checkpoint);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+}
+
+TEST_CASE(
     "scp dpor replay preloads known txset status choices from the first query",
     "[scp][dpor][smoke]")
 {
