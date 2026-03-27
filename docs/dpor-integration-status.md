@@ -39,6 +39,10 @@ large SCP property suite.
   the rest of their object graph through `STELLAR_CORE_DPOR_LINK_OBJECTS`.
   This keeps DPOR opt-in, but it still reuses a large portion of the normal
   `stellar-core` object graph.
+- The DPOR targets also force the generated XDR / xdrquery / Rust bridge
+  sources and the sibling `lib` build artifacts they rely on (`xdrc`,
+  `libxdrpp`, `libsodium`, and the local static archives), so a clean
+  `make -C src ...` build does not depend on a prior top-level `make`.
 - The practical build entry point in this tree is:
 
   ```bash
