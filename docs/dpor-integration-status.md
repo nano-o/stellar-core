@@ -129,8 +129,11 @@ large SCP property suite.
   - `--dump-initial-steps`
   - `--dump-terminal-trace`
   - `--dump-terminal-replay-trace`
+- The investigation runner now wraps thread-step exceptions as DPOR error
+  executions, dumps replay lead-ins for all scenario threads with the failing
+  thread first, and exits nonzero with the original exception message.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 17 smoke tests. The checked-in coverage exercises:
+  currently contains 20 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -145,6 +148,10 @@ large SCP property suite.
   - txset wait-time restore and preload behavior
   - `download-succeeds-in-round` forcing later txset validation to `valid`
     and surviving replay checkpoint restore
+  - investigation-style wrapping of thread exceptions into inspectable DPOR
+    error executions
+  - replay-trace inspection preserving the lead-in when SCP throws during
+    replay
 
 ## Verification in this workspace
 

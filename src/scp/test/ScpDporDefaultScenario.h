@@ -100,6 +100,7 @@ class ScpDporDefaultScenario
         std::vector<ThreadReplayTraceStep> mSteps;
         bool mReachedBoundary{false};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
+        std::optional<std::string> mReplayErrorMessage;
     };
 
     explicit ScpDporDefaultScenario(
@@ -339,14 +340,27 @@ class ScpDporDefaultScenario
                 timerToFire = activeTimers.front();
             }
 
-            auto replayed = mReplaySupport.replayObservation(
-                node, nodeIndex, trace, observedCount, timerToFire);
-
             ThreadReplayTraceStep step;
             step.mKind = ThreadReplayTraceStep::Kind::Receive;
             step.mReceive = nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
                                         : makeReceiveLabel(nodeIndex);
             step.mObservedValue = trace.at(observedCount);
+
+            ScpDporReplaySupport::ReplayObservationProgress replayed;
+            try
+            {
+                replayed = mReplaySupport.replayObservation(
+                    node, nodeIndex, trace, observedCount, timerToFire);
+            }
+            catch (std::exception const& ex)
+            {
+                appendNestedChoiceObservations(step, trace, observedCount);
+                step.mSideEffects = node.takeReplayDebugEvents();
+                inspection.mSteps.push_back(std::move(step));
+                inspection.mReplayErrorMessage = ex.what();
+                break;
+            }
+
             for (std::size_t i = 1; i < replayed.mConsumedTraceEntries; ++i)
             {
                 step.mNestedChoices.push_back(trace.at(observedCount + i));
@@ -577,6 +591,30 @@ class ScpDporDefaultScenario
                        *mOptions.mMaxBallotingTimersRound;
         default:
             return true;
+        }
+    }
+
+    static void
+    appendNestedChoiceObservations(ThreadReplayTraceStep& step,
+                                   ThreadTrace const& trace,
+                                   std::size_t observedIndex)
+    {
+        for (std::size_t choiceIndex = observedIndex + 1;
+             choiceIndex < trace.size(); ++choiceIndex)
+        {
+            auto const& observed = trace.at(choiceIndex);
+            if (observed.is_bottom())
+            {
+                break;
+            }
+
+            auto const& value = observed.value();
+            if (!isTxSetStatusChoiceValue(value) &&
+                !isTxSetDownloadWaitTimeChoiceValue(value))
+            {
+                break;
+            }
+            step.mNestedChoices.push_back(observed);
         }
     }
 

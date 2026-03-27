@@ -3,9 +3,11 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/ScpDporDefaultScenario.h"
+#include "scp/test/ScpDporInvestigationUtils.h"
 #include "test/Catch2.h"
 
 #include <algorithm>
+#include <stdexcept>
 
 namespace stellar::scpdpor
 {
@@ -167,6 +169,91 @@ TEST_CASE("scp dpor smoke explore reaches a terminal execution",
     auto const result = dpor::algo::verify(config);
 
     REQUIRE(result.executions_explored == 1);
+}
+
+TEST_CASE("scp dpor investigation wraps thread throws as error executions",
+          "[scp][dpor][smoke]")
+{
+    Program program;
+    auto const tid = threadIdForNodeIndex(0);
+    program.threads[tid] = [](ThreadTrace const&, std::size_t)
+        -> std::optional<EventLabel> {
+        throw std::runtime_error("boom");
+    };
+    program = wrapProgramExceptionsAsErrorExecutions(std::move(program));
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = std::move(program);
+    config.max_depth = 1;
+
+    std::optional<InvestigationErrorExecution> errorExecution;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            errorExecution = findErrorExecution(1, execution);
+            REQUIRE(errorExecution.has_value());
+            return dpor::algo::TerminalExecutionAction::Stop;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(errorExecution.has_value());
+    REQUIRE(errorExecution->mNodeIndex == 0);
+    REQUIRE(errorExecution->mThreadID == tid);
+    REQUIRE(errorExecution->mMessage.find("step=0") != std::string::npos);
+    REQUIRE(errorExecution->mMessage.find("boom") != std::string::npos);
+}
+
+TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+    ScpDporDefaultScenario scenario(std::move(options));
+
+    std::optional<InvestigationErrorExecution> errorExecution;
+    std::optional<ScpDporDefaultScenario::ThreadReplayTraceInspection>
+        replayInspection;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = wrapProgramExceptionsAsErrorExecutions(
+        scenario.makeProgram());
+    config.max_depth = 13;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            errorExecution = findErrorExecution(
+                scenario.options().mValidators.size(), execution);
+            if (!errorExecution)
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+
+            auto const trace =
+                execution.graph.thread_trace(errorExecution->mThreadID);
+            replayInspection = scenario.inspectThreadReplayTrace(
+                errorExecution->mNodeIndex, trace);
+            return dpor::algo::TerminalExecutionAction::Stop;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(errorExecution.has_value());
+    REQUIRE(replayInspection.has_value());
+    REQUIRE(!replayInspection->mSteps.empty());
+    auto const& failingStep = replayInspection->mSteps.back();
+    REQUIRE(failingStep.mNestedChoices.size() == 2);
+    REQUIRE(failingStep.mNestedChoices.at(0) ==
+            ObservedValue{makeTxSetStatusChoiceValue(
+                scenario.options().mSlotIndex, DporScpTxSetStatus::Waiting)});
+    REQUIRE(failingStep.mNestedChoices.at(1) ==
+            ObservedValue{makeTxSetStatusChoiceValue(
+                scenario.options().mSlotIndex, DporScpTxSetStatus::Invalid)});
+    REQUIRE(replayInspection->mReplayErrorMessage.has_value());
+    REQUIRE(replayInspection->mReplayErrorMessage->find(
+                "moved to a bad state") != std::string::npos);
 }
 
 TEST_CASE("scp dpor exploration finds a prepare boundary",

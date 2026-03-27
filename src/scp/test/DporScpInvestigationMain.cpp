@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "scp/test/ScpDporDefaultScenario.h"
+#include "scp/test/ScpDporInvestigationUtils.h"
 #include "util/Logging.h"
 
 #include <algorithm>
@@ -508,6 +509,10 @@ printThreadReplayTrace(
 
     out << "  reached-boundary="
         << (inspection.mReachedBoundary ? "true" : "false") << "\n";
+    if (inspection.mReplayErrorMessage)
+    {
+        out << "  replay-error=" << *inspection.mReplayErrorMessage << "\n";
+    }
     if (inspection.mBoundaryEnvelope)
     {
         out << "  boundary="
@@ -604,6 +609,47 @@ dumpTerminalExecution(
             printThreadReplayTrace(out, scenario.options().mSlotIndex,
                                    inspection);
         }
+    }
+}
+
+void
+dumpErrorExecution(
+    std::ostream& out,
+    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
+        execution,
+    stellar::scpdpor::InvestigationErrorExecution const& error)
+{
+    out << "terminal-kind=error"
+        << " node-index=" << error.mNodeIndex
+        << " thread=" << error.mThreadID << "\n";
+
+    auto dumpThreadReplay = [&](std::size_t nodeIndex) {
+        auto const threadID = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
+        auto const trace = execution.graph.thread_trace(threadID);
+        out << "thread=" << threadID << " replay\n";
+        try
+        {
+            auto const inspection =
+                scenario.inspectThreadReplayTrace(nodeIndex, trace);
+            printThreadReplayTrace(out, scenario.options().mSlotIndex,
+                                   inspection);
+        }
+        catch (std::exception const& ex)
+        {
+            out << "  replay-dump-error=" << ex.what() << "\n";
+        }
+    };
+
+    dumpThreadReplay(error.mNodeIndex);
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        if (nodeIndex == error.mNodeIndex)
+        {
+            continue;
+        }
+        dumpThreadReplay(nodeIndex);
     }
 }
 
@@ -770,7 +816,9 @@ main(int argc, char* argv[])
         auto scenario = makeScenario(options);
         if (options.mDumpInitialSteps)
         {
-            auto const program = scenario.makeProgram();
+            auto const program =
+                stellar::scpdpor::wrapProgramExceptionsAsErrorExecutions(
+                    scenario.makeProgram());
             for (std::size_t nodeIndex = 0; nodeIndex < scenario.options().mValidators.size();
                  ++nodeIndex)
             {
@@ -807,7 +855,8 @@ main(int argc, char* argv[])
         }
 
         dpor::algo::DporConfigT<stellar::scpdpor::ScpDporValue> config;
-        config.program = scenario.makeProgram();
+        config.program = stellar::scpdpor::wrapProgramExceptionsAsErrorExecutions(
+            scenario.makeProgram());
         config.max_depth = options.mDepth;
         config.communication_model = options.mCommunicationModel;
         if (options.mPrintStatsInterval)
@@ -825,66 +874,76 @@ main(int argc, char* argv[])
         }
         std::mutex terminalExecutionMutex;
         bool dumpedTerminalExecution = false;
-        std::optional<std::string> mustExternalizeFailure;
-        if (options.mDumpTerminalTrace || options.mDumpTerminalReplayTrace ||
-            options.mMustExternalize)
-        {
-            config.on_terminal_execution =
-                [&](dpor::algo::TerminalExecutionT<
-                        stellar::scpdpor::ScpDporValue> const& execution) {
-                    if (options.mMustExternalize)
+        std::optional<std::string> failureMessage;
+        config.on_terminal_execution =
+            [&](dpor::algo::TerminalExecutionT<
+                    stellar::scpdpor::ScpDporValue> const& execution) {
+                auto const errorExecution =
+                    stellar::scpdpor::findErrorExecution(
+                        scenario.options().mValidators.size(), execution);
+                if (errorExecution)
+                {
+                    std::lock_guard<std::mutex> guard(terminalExecutionMutex);
+                    if (!failureMessage)
                     {
-                        auto const missingNodeIndex =
-                            findNodeMissingExternalize(scenario, execution);
-                        if (missingNodeIndex)
+                        failureMessage = errorExecution->mMessage;
+                    }
+                    if (!dumpedTerminalExecution)
+                    {
+                        dumpErrorExecution(std::cout, scenario, execution,
+                                           *errorExecution);
+                        dumpedTerminalExecution = true;
+                    }
+                    return dpor::algo::TerminalExecutionAction::Stop;
+                }
+
+                if (options.mMustExternalize)
+                {
+                    auto const missingNodeIndex =
+                        findNodeMissingExternalize(scenario, execution);
+                    if (missingNodeIndex)
+                    {
+                        std::lock_guard<std::mutex> guard(
+                            terminalExecutionMutex);
+                        if (!failureMessage)
                         {
-                            std::lock_guard<std::mutex> guard(
-                                terminalExecutionMutex);
-                            if (!mustExternalizeFailure)
-                            {
-                                std::ostringstream message;
-                                message
-                                    << "full execution missing EXTERNALIZE"
+                            std::ostringstream message;
+                            message << "full execution missing EXTERNALIZE"
                                     << " envelope from node-index="
                                     << *missingNodeIndex
                                     << " thread="
                                     << stellar::scpdpor::threadIdForNodeIndex(
                                            *missingNodeIndex);
-                                mustExternalizeFailure = message.str();
-                            }
-                            if (!dumpedTerminalExecution)
-                            {
-                                dumpTerminalExecution(
-                                    std::cout,
-                                    mustExternalizeFailureDumpOptions(options),
-                                    scenario, execution);
-                                dumpedTerminalExecution = true;
-                            }
-                            return dpor::algo::TerminalExecutionAction::Stop;
+                            failureMessage = message.str();
                         }
-                    }
-
-                    if (!options.mMustExternalize &&
-                        (options.mDumpTerminalTrace ||
-                         options.mDumpTerminalReplayTrace))
-                    {
-                        std::lock_guard<std::mutex> guard(
-                            terminalExecutionMutex);
                         if (!dumpedTerminalExecution)
                         {
-                            dumpTerminalExecution(std::cout, options, scenario,
-                                                  execution);
+                            dumpTerminalExecution(
+                                std::cout,
+                                mustExternalizeFailureDumpOptions(options),
+                                scenario, execution);
                             dumpedTerminalExecution = true;
-                            if (!options.mMustExternalize)
-                            {
-                                return dpor::algo::TerminalExecutionAction::Stop;
-                            }
                         }
+                        return dpor::algo::TerminalExecutionAction::Stop;
                     }
+                }
 
-                    return dpor::algo::TerminalExecutionAction::Continue;
-                };
-        }
+                if (!options.mMustExternalize &&
+                    (options.mDumpTerminalTrace ||
+                     options.mDumpTerminalReplayTrace))
+                {
+                    std::lock_guard<std::mutex> guard(terminalExecutionMutex);
+                    if (!dumpedTerminalExecution)
+                    {
+                        dumpTerminalExecution(std::cout, options, scenario,
+                                              execution);
+                        dumpedTerminalExecution = true;
+                        return dpor::algo::TerminalExecutionAction::Stop;
+                    }
+                }
+
+                return dpor::algo::TerminalExecutionAction::Continue;
+            };
 
         auto const result = options.mWorkers > 1
                                 ? dpor::algo::verify_parallel(
@@ -900,9 +959,9 @@ main(int argc, char* argv[])
                   << " depth-limit=" << result.depth_limit_executions_explored
                   << "\n"
                   << std::flush;
-        if (mustExternalizeFailure)
+        if (failureMessage)
         {
-            std::cerr << "error: " << *mustExternalizeFailure << "\n";
+            std::cout << "error: " << *failureMessage << "\n" << std::flush;
             return 1;
         }
         return 0;
