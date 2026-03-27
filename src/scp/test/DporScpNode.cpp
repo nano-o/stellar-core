@@ -37,20 +37,21 @@ defaultValueHash(Value const& value)
     return hash;
 }
 
-DporScpTxSetStatus
-resolveTxSetStatusChoice(DporScpTxSetStatus configuredStatus,
-                         bool nondeterministicStatus,
-                         std::vector<DporScpTxSetStatus> const& pendingChoices,
-                         std::size_t& nextChoice)
+std::vector<DporScpTxSetStatus> const&
+supportedTxSetStatusChoices()
 {
-    if (!nondeterministicStatus)
-    {
-        return configuredStatus;
-    }
-
-    std::vector<DporScpTxSetStatus> const supportedChoices{
+    static std::vector<DporScpTxSetStatus> const supportedChoices{
         DporScpTxSetStatus::Valid, DporScpTxSetStatus::Waiting,
         DporScpTxSetStatus::Invalid};
+    return supportedChoices;
+}
+
+DporScpTxSetStatus
+consumeTxSetStatusChoice(
+    std::vector<DporScpTxSetStatus> const& pendingChoices,
+    std::size_t& nextChoice)
+{
+    auto const& supportedChoices = supportedTxSetStatusChoices();
     if (nextChoice >= pendingChoices.size())
     {
         throw DporScpNode::TxSetStatusChoiceRequired(supportedChoices);
@@ -63,6 +64,17 @@ resolveTxSetStatusChoice(DporScpTxSetStatus configuredStatus,
         throw std::logic_error("preloaded txset status choice is not supported");
     }
     return status;
+}
+
+std::vector<std::chrono::milliseconds>
+supportedTxSetDownloadWaitTimeChoices(
+    std::vector<std::chrono::milliseconds> const& waitTimes)
+{
+    if (waitTimes.size() < 2 || waitTimes.front() == waitTimes.at(1))
+    {
+        return {};
+    }
+    return {waitTimes.front(), waitTimes.at(1)};
 }
 
 SCPDriver::ValidationLevel
@@ -414,8 +426,11 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
                                         .mTimerID = count.mTimerID,
                                         .mCount = count.mCount});
     }
+    baseline.mLastTxSetStatusByValue = mLastTxSetStatusByValue;
     baseline.mPendingTxSetDownloadStatusCounts =
         mPendingTxSetDownloadStatusCounts;
+    baseline.mLastTxSetDownloadWaitTimeByValue =
+        mLastTxSetDownloadWaitTimeByValue;
     baseline.mTxSetDownloadWaitTimeCallCount =
         mTxSetDownloadWaitTimeCallCount;
     baseline.mTxSetDownloadSucceeded = mTxSetDownloadSucceeded;
@@ -567,8 +582,11 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
             .mTimerID = timerSetCount.mTimerID,
             .mCount = timerSetCount.mCount});
     }
+    mLastTxSetStatusByValue = baseline.mLastTxSetStatusByValue;
     mPendingTxSetDownloadStatusCounts =
         baseline.mPendingTxSetDownloadStatusCounts;
+    mLastTxSetDownloadWaitTimeByValue =
+        baseline.mLastTxSetDownloadWaitTimeByValue;
     mTxSetDownloadWaitTimeCallCount =
         baseline.mTxSetDownloadWaitTimeCallCount;
     mTxSetDownloadSucceeded = baseline.mTxSetDownloadSucceeded;
@@ -670,40 +688,49 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
         return std::nullopt;
     }
 
-    if (mNondeterministicTxSetDownloadWaitTime &&
-        mTxSetDownloadWaitTimes.size() >= 2 &&
-        mTxSetDownloadWaitTimes.front() != mTxSetDownloadWaitTimes.at(1))
-    {
-        if (mNextPendingTxSetDownloadWaitTimeChoice >=
-            mPendingTxSetDownloadWaitTimeChoices.size())
-        {
-            throw TxSetDownloadWaitTimeChoiceRequired(
-                {mTxSetDownloadWaitTimes.front(),
-                 mTxSetDownloadWaitTimes.at(1)});
-        }
-
-        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
-            mNextPendingTxSetDownloadWaitTimeChoice++);
-        if (waitTime != mTxSetDownloadWaitTimes.front() &&
-            waitTime != mTxSetDownloadWaitTimes.at(1))
-        {
-            throw std::logic_error(
-                "preloaded txset wait-time choice is not supported");
-        }
+    auto const recordWaitTime = [this, &value](
+                                    std::chrono::milliseconds waitTime) {
+        mLastTxSetDownloadWaitTimeByValue[value] = waitTime;
         ++mTxSetDownloadWaitTimeCallCount;
         recordReplayDebugEvent(ReplayDebugEvent{
             .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
             .mWaitTime = waitTime});
         return waitTime;
+    };
+
+    auto const timeout = getTxSetDownloadTimeout();
+    auto const supportedChoices =
+        supportedTxSetDownloadWaitTimeChoices(mTxSetDownloadWaitTimes);
+    if (mNondeterministicTxSetDownloadWaitTime && !supportedChoices.empty())
+    {
+        auto const lastWaitTimeIt =
+            mLastTxSetDownloadWaitTimeByValue.find(value);
+        if (lastWaitTimeIt != mLastTxSetDownloadWaitTimeByValue.end() &&
+            lastWaitTimeIt->second >= timeout)
+        {
+            return recordWaitTime(lastWaitTimeIt->second);
+        }
+
+        if (mNextPendingTxSetDownloadWaitTimeChoice >=
+            mPendingTxSetDownloadWaitTimeChoices.size())
+        {
+            throw TxSetDownloadWaitTimeChoiceRequired(supportedChoices);
+        }
+
+        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
+            mNextPendingTxSetDownloadWaitTimeChoice++);
+        if (std::find(supportedChoices.begin(), supportedChoices.end(),
+                      waitTime) == supportedChoices.end())
+        {
+            throw std::logic_error(
+                "preloaded txset wait-time choice is not supported");
+        }
+        return recordWaitTime(waitTime);
     }
 
     if (mTxSetDownloadWaitTimes.empty())
     {
-        auto const waitTime = getTxSetDownloadTimeout();
-        recordReplayDebugEvent(ReplayDebugEvent{
-            .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
-            .mWaitTime = waitTime});
-        return waitTime;
+        return recordWaitTime(timeout);
     }
 
     auto index = mTxSetDownloadWaitTimeCallCount;
@@ -711,12 +738,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
     {
         index = mTxSetDownloadWaitTimes.size() - 1;
     }
-    auto const waitTime = mTxSetDownloadWaitTimes[index];
-    ++mTxSetDownloadWaitTimeCallCount;
-    recordReplayDebugEvent(ReplayDebugEvent{
-        .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
-        .mWaitTime = waitTime});
-    return waitTime;
+    return recordWaitTime(mTxSetDownloadWaitTimes[index]);
 }
 
 std::chrono::milliseconds
@@ -763,12 +785,30 @@ DporScpNode::validateValue(uint64, Value const& value, bool)
     {
         return SCPDriver::kFullyValidatedValue;
     }
-    auto const status = resolveTxSetStatusChoice(
-        mTxSetStatus, mNondeterministicTxSetStatus, mPendingTxSetStatusChoices,
-        mNextPendingTxSetStatusChoice);
+    DporScpTxSetStatus status = mTxSetStatus;
+    if (mNondeterministicTxSetStatus)
+    {
+        auto const lastStatusIt = mLastTxSetStatusByValue.find(value);
+        if (lastStatusIt != mLastTxSetStatusByValue.end() &&
+            lastStatusIt->second != DporScpTxSetStatus::Waiting)
+        {
+            status = lastStatusIt->second;
+        }
+        else
+        {
+            status = consumeTxSetStatusChoice(mPendingTxSetStatusChoices,
+                                              mNextPendingTxSetStatusChoice);
+        }
+    }
+
+    mLastTxSetStatusByValue[value] = status;
     if (status == DporScpTxSetStatus::Waiting)
     {
         ++mPendingTxSetDownloadStatusCounts[value];
+    }
+    else
+    {
+        mPendingTxSetDownloadStatusCounts.erase(value);
     }
     return validationLevelForTxSetStatus(status);
 }
@@ -1130,7 +1170,9 @@ DporScpNode::clearReplayState()
     mTimerSetCounts.clear();
     mPendingTxSetStatusChoices.clear();
     mNextPendingTxSetStatusChoice = 0;
+    mLastTxSetStatusByValue.clear();
     mPendingTxSetDownloadStatusCounts.clear();
+    mLastTxSetDownloadWaitTimeByValue.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
     mTxSetDownloadWaitTimeCallCount = 0;
@@ -1151,7 +1193,9 @@ DporScpNode::markTxSetDownloadSucceeded()
     mTxSetDownloadSucceeded = true;
     mPendingTxSetStatusChoices.clear();
     mNextPendingTxSetStatusChoice = 0;
+    mLastTxSetStatusByValue.clear();
     mPendingTxSetDownloadStatusCounts.clear();
+    mLastTxSetDownloadWaitTimeByValue.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
 }

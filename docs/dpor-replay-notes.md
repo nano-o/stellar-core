@@ -102,7 +102,9 @@ Each `NodeBaseline` contains:
 - emitted envelopes
 - installed timers
 - timer set counts
+- per-value txset status history
 - pending txset wait-time eligibility from prior `waiting` results
+- per-value txset wait-time history
 - txset wait-time call count
 - replay-boundary state
 

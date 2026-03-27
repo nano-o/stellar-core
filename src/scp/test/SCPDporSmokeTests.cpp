@@ -442,7 +442,7 @@ TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
     REQUIRE(foundFollowerTimeout);
 }
 
-TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
+TEST_CASE("scp dpor node latches txset wait-time once a value times out",
           "[scp][dpor][smoke]")
 {
     auto const options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -459,6 +459,8 @@ TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
     DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
     Value value;
     value.push_back('x');
+    Value otherValue;
+    otherValue.push_back('y');
 
     auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
     auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
@@ -469,14 +471,24 @@ TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
                       DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
 
     node.restoreReplayBaseline(checkpoint);
-    node.enqueueTxSetDownloadWaitTimeChoice(belowTimeout);
     node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    auto const aboveCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
 
-    node.restoreReplayBaseline(checkpoint);
-    node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
+    node.restoreReplayBaseline(aboveCheckpoint);
     REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(otherValue),
+                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetDownloadWaitTimeChoice(belowTimeout);
+    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    auto const belowCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+
+    node.restoreReplayBaseline(belowCheckpoint);
     REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
                       DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
 }
@@ -509,7 +521,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "scp dpor replay preloads known txset wait-time choices from the first query",
+    "scp dpor replay reuses a latched txset wait-time once a value times out",
     "[scp][dpor][smoke]")
 {
     auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2000);
@@ -532,7 +544,6 @@ TEST_CASE(
             DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
     config.mNondeterministicTxSetDownloadWaitTime = true;
 
-    auto const belowTimeout = config.mTxSetDownloadWaitTimes.at(0);
     auto const aboveTimeout = config.mTxSetDownloadWaitTimes.at(1);
 
     auto replayConfig = config;
@@ -560,10 +571,7 @@ TEST_CASE(
 
     ThreadTrace trace;
     trace.emplace_back(ObservedValue::bottom());
-    trace.emplace_back(
-        makeTxSetDownloadWaitTimeChoiceValue(0, belowTimeout));
-    trace.emplace_back(
-        makeTxSetDownloadWaitTimeChoiceValue(0, aboveTimeout));
+    trace.emplace_back(makeTxSetDownloadWaitTimeChoiceValue(0, aboveTimeout));
     trace.emplace_back(ObservedValue::bottom());
 
     auto const progress =
@@ -571,17 +579,17 @@ TEST_CASE(
                                         std::optional<int>{
                                             Slot::NOMINATION_TIMER});
 
-    REQUIRE(progress.mConsumedTraceEntries == 3);
-    REQUIRE(progress.mConsumedStepCount == 2);
+    REQUIRE(progress.mConsumedTraceEntries == 2);
+    REQUIRE(progress.mConsumedStepCount == 1);
     REQUIRE_FALSE(progress.mPendingEvent.has_value());
     REQUIRE(progress.mObservedBottom);
 
     std::vector<std::chrono::milliseconds> const expectedWaitTimes{
-        belowTimeout, aboveTimeout};
+        aboveTimeout, aboveTimeout};
     REQUIRE(seenWaitTimes == expectedWaitTimes);
 }
 
-TEST_CASE("scp dpor node restores txset status choices from the first call",
+TEST_CASE("scp dpor node latches txset status once a value is resolved",
           "[scp][dpor][smoke]")
 {
     auto const options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -592,6 +600,8 @@ TEST_CASE("scp dpor node restores txset status choices from the first call",
     DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
     Value value;
     value.push_back('x');
+    Value otherValue;
+    otherValue.push_back('y');
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
@@ -600,16 +610,35 @@ TEST_CASE("scp dpor node restores txset status choices from the first call",
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
     REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
             SCPDriver::kFullyValidatedValue);
+    auto const validCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+
+    node.restoreReplayBaseline(validCheckpoint);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
+    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
+            SCPDriver::kInvalidValue);
+    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
             SCPDriver::kInvalidValue);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
     REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
             SCPDriver::kAwaitingDownload);
+    auto const waitingCheckpoint =
+        node.snapshotReplayBaseline(options.mSlotIndex);
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    node.restoreReplayBaseline(waitingCheckpoint);
     REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
                       DporScpNode::TxSetStatusChoiceRequired);
 }
@@ -654,7 +683,7 @@ TEST_CASE(
 }
 
 TEST_CASE(
-    "scp dpor replay preloads known txset status choices from the first query",
+    "scp dpor replay reuses a latched txset status once a value is resolved",
     "[scp][dpor][smoke]")
 {
     auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2001);
@@ -689,8 +718,6 @@ TEST_CASE(
     ThreadTrace trace;
     trace.emplace_back(ObservedValue::bottom());
     trace.emplace_back(
-        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Waiting));
-    trace.emplace_back(
         makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Invalid));
     trace.emplace_back(ObservedValue::bottom());
 
@@ -699,13 +726,13 @@ TEST_CASE(
                                         std::optional<int>{
                                             Slot::NOMINATION_TIMER});
 
-    REQUIRE(progress.mConsumedTraceEntries == 3);
-    REQUIRE(progress.mConsumedStepCount == 2);
+    REQUIRE(progress.mConsumedTraceEntries == 2);
+    REQUIRE(progress.mConsumedStepCount == 1);
     REQUIRE_FALSE(progress.mPendingEvent.has_value());
     REQUIRE(progress.mObservedBottom);
 
     std::vector<SCPDriver::ValidationLevel> const expectedStatuses{
-        SCPDriver::kAwaitingDownload, SCPDriver::kInvalidValue};
+        SCPDriver::kInvalidValue, SCPDriver::kInvalidValue};
     REQUIRE(seenStatuses == expectedStatuses);
 }
 

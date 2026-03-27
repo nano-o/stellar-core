@@ -96,6 +96,13 @@ large SCP property suite.
   - timer-set limits
   - txset download wait-time modes: `below`, `above`, and `nondet`
   - txset validation-status modes: `valid`, `waiting`, `invalid`, and `nondet`
+    - in `nondet` mode, status choices reoccur only while the last result for a
+      value is `waiting`; once a value resolves to `valid` or `invalid`, later
+      queries on that node reuse the same result without another DPOR choice
+    - in `nondet` wait-time mode, choices reoccur only while the last wait-time
+      result for a value is still below the skip threshold; once a value times
+      out, later queries on that node reuse the timed-out result without
+      another DPOR choice
   - forcing later txset validation calls to return `valid` after a node emits
     its first `PREPARE` in a configured ballot round
   - custom timeout parameters for nomination and balloting
