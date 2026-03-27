@@ -414,6 +414,8 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
                                         .mTimerID = count.mTimerID,
                                         .mCount = count.mCount});
     }
+    baseline.mPendingTxSetDownloadStatusCounts =
+        mPendingTxSetDownloadStatusCounts;
     baseline.mTxSetDownloadWaitTimeCallCount =
         mTxSetDownloadWaitTimeCallCount;
     baseline.mTxSetDownloadSucceeded = mTxSetDownloadSucceeded;
@@ -565,6 +567,8 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
             .mTimerID = timerSetCount.mTimerID,
             .mCount = timerSetCount.mCount});
     }
+    mPendingTxSetDownloadStatusCounts =
+        baseline.mPendingTxSetDownloadStatusCounts;
     mTxSetDownloadWaitTimeCallCount =
         baseline.mTxSetDownloadWaitTimeCallCount;
     mTxSetDownloadSucceeded = baseline.mTxSetDownloadSucceeded;

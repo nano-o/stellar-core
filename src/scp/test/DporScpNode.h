@@ -173,6 +173,7 @@ class DporScpNode : public SCPDriver
         std::vector<SCPEnvelope> mEmittedEnvelopes;
         std::vector<ReplayTimerSnapshot> mTimers;
         std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
+        std::map<Value, std::size_t> mPendingTxSetDownloadStatusCounts;
         std::size_t mTxSetDownloadWaitTimeCallCount{};
         bool mTxSetDownloadSucceeded{};
         bool mHasReachedBoundary{};

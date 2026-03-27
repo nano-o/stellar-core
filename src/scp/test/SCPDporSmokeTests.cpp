@@ -482,6 +482,33 @@ TEST_CASE("scp dpor node restores txset wait-time choices from the first call",
 }
 
 TEST_CASE(
+    "scp dpor replay restores pending txset wait-time eligibility",
+    "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    config.mTxSetDownloadWaitTimes = {std::chrono::milliseconds(
+        DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kAwaitingDownload);
+
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+    node.restoreReplayBaseline(checkpoint);
+
+    auto const waitTime = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(waitTime.has_value());
+    REQUIRE(*waitTime == config.mTxSetDownloadWaitTimes.at(0));
+}
+
+TEST_CASE(
     "scp dpor replay preloads known txset wait-time choices from the first query",
     "[scp][dpor][smoke]")
 {
