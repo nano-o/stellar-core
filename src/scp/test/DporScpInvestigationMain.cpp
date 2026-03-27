@@ -38,6 +38,7 @@ struct CommandLineOptions
     bool mWithNominationTimers{false};
     bool mWithBallotingTimers{false};
     bool mMustExternalize{false};
+    bool mCheckAgreement{false};
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
         mDownloadTimeMode{
             stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode::
@@ -168,6 +169,11 @@ printUsage(char const* argv0)
               << "  --must-externalize\n"
               << "      Require every full execution to include an"
               << " EXTERNALIZE envelope from every node;"
+              << " dumps replay trace on failure"
+              << " (default: off)\n"
+              << "  --check-agreement\n"
+              << "      Require every full execution's EXTERNALIZE"
+              << " envelopes to agree on the externalized value;"
               << " dumps replay trace on failure"
               << " (default: off)\n"
               << "  --with-nomination-timers\n"
@@ -528,6 +534,31 @@ isExternalizeEnvelope(stellar::SCPEnvelope const& envelope)
     return envelope.statement.pledges.type() == stellar::SCP_ST_EXTERNALIZE;
 }
 
+struct ExternalizedValueRecord
+{
+    std::size_t mNodeIndex{};
+    stellar::Value mValue;
+};
+
+struct AgreementFailure
+{
+    ExternalizedValueRecord mReference;
+    ExternalizedValueRecord mConflicting;
+};
+
+std::optional<stellar::Value>
+findExternalizedValue(std::vector<stellar::SCPEnvelope> const& envelopes)
+{
+    for (auto const& envelope : envelopes)
+    {
+        if (isExternalizeEnvelope(envelope))
+        {
+            return envelope.statement.pledges.externalize().commit.value;
+        }
+    }
+    return std::nullopt;
+}
+
 std::optional<std::size_t>
 findNodeMissingExternalize(
     stellar::scpdpor::ScpDporDefaultScenario const& scenario,
@@ -558,6 +589,49 @@ findNodeMissingExternalize(
             return nodeIndex;
         }
     }
+    return std::nullopt;
+}
+
+std::optional<AgreementFailure>
+findAgreementFailure(
+    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
+        execution)
+{
+    if (!execution.is_full_execution())
+    {
+        return std::nullopt;
+    }
+
+    std::optional<ExternalizedValueRecord> reference;
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const trace =
+            execution.graph.thread_trace(
+                stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
+        auto const inspection =
+            scenario.inspectEmittedEnvelopes(nodeIndex, trace);
+        auto const externalizedValue =
+            findExternalizedValue(inspection.mEmittedEnvelopes);
+        if (!externalizedValue)
+        {
+            continue;
+        }
+
+        ExternalizedValueRecord current{nodeIndex, *externalizedValue};
+        if (!reference)
+        {
+            reference = std::move(current);
+            continue;
+        }
+
+        if (current.mValue != reference->mValue)
+        {
+            return AgreementFailure{*reference, std::move(current)};
+        }
+    }
+
     return std::nullopt;
 }
 
@@ -654,7 +728,7 @@ dumpErrorExecution(
 }
 
 CommandLineOptions
-mustExternalizeFailureDumpOptions(CommandLineOptions options)
+fullExecutionFailureDumpOptions(CommandLineOptions options)
 {
     options.mDumpTerminalReplayTrace = true;
     return options;
@@ -745,6 +819,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--must-externalize")
         {
             options.mMustExternalize = true;
+            continue;
+        }
+        if (arg == "--check-agreement")
+        {
+            options.mCheckAgreement = true;
             continue;
         }
         if (arg == "--with-nomination-timers")
@@ -919,8 +998,7 @@ main(int argc, char* argv[])
                         if (!dumpedTerminalExecution)
                         {
                             dumpTerminalExecution(
-                                std::cout,
-                                mustExternalizeFailureDumpOptions(options),
+                                std::cout, fullExecutionFailureDumpOptions(options),
                                 scenario, execution);
                             dumpedTerminalExecution = true;
                         }
@@ -928,7 +1006,45 @@ main(int argc, char* argv[])
                     }
                 }
 
-                if (!options.mMustExternalize &&
+                if (options.mCheckAgreement)
+                {
+                    auto const agreementFailure =
+                        findAgreementFailure(scenario, execution);
+                    if (agreementFailure)
+                    {
+                        std::lock_guard<std::mutex> guard(
+                            terminalExecutionMutex);
+                        if (!failureMessage)
+                        {
+                            std::ostringstream message;
+                            message << "full execution has conflicting"
+                                    << " EXTERNALIZE values between"
+                                    << " node-index="
+                                    << agreementFailure->mReference.mNodeIndex
+                                    << " thread="
+                                    << stellar::scpdpor::threadIdForNodeIndex(
+                                           agreementFailure
+                                               ->mReference.mNodeIndex)
+                                    << " and node-index="
+                                    << agreementFailure->mConflicting.mNodeIndex
+                                    << " thread="
+                                    << stellar::scpdpor::threadIdForNodeIndex(
+                                           agreementFailure
+                                               ->mConflicting.mNodeIndex);
+                            failureMessage = message.str();
+                        }
+                        if (!dumpedTerminalExecution)
+                        {
+                            dumpTerminalExecution(
+                                std::cout, fullExecutionFailureDumpOptions(options),
+                                scenario, execution);
+                            dumpedTerminalExecution = true;
+                        }
+                        return dpor::algo::TerminalExecutionAction::Stop;
+                    }
+                }
+
+                if (!options.mMustExternalize && !options.mCheckAgreement &&
                     (options.mDumpTerminalTrace ||
                      options.mDumpTerminalReplayTrace))
                 {

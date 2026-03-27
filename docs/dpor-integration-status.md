@@ -1,6 +1,6 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-03-26 for branch `skip-ledgers-p25-dpor-2`.
+Status snapshot as of 2026-03-27 for branch `skip-ledgers-p25-dpor-2`.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -118,6 +118,9 @@ large SCP property suite.
   - `--must-externalize`
     - full executions require an `EXTERNALIZE` envelope from every node, and a
       failing execution dumps its replay trace
+  - `--check-agreement`
+    - full executions require all observed `EXTERNALIZE` envelopes to agree on
+      the externalized value, and a failing execution dumps its replay trace
   - `--with-nomination-timers`
   - `--with-balloting-timers`
   - `--max-nomination-round`
@@ -137,7 +140,7 @@ large SCP property suite.
   executions, dumps replay lead-ins for all scenario threads with the failing
   thread first, and exits nonzero with the original exception message.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 20 smoke tests. The checked-in coverage exercises:
+  currently contains 21 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -147,6 +150,7 @@ large SCP property suite.
   - balloting-round boundaries
   - replay-trace inspection
   - emitted-envelope inspection for missing externalize
+  - full-execution externalization agreement checks
   - follower timer-before-delivery behavior
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
@@ -182,7 +186,10 @@ I verified the current state directly in this tree:
   `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
   --depth 12` reported
-  `kind=all-explored executions=67 full=1 error=0 depth-limit=66`.
+  `kind=all-explored executions=40 full=1 error=0 depth-limit=39`.
+- `./src/scp-dpor-investigation --check-agreement --txset-status nondet
+  --download-time nondet --depth 12` reported
+  `kind=all-explored executions=40 full=1 error=0 depth-limit=39`.
 - `./src/scp-dpor-investigation --download-succeeds-in-round 1 --depth 12`
   reported `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
@@ -190,8 +197,8 @@ I verified the current state directly in this tree:
   `error: full execution missing EXTERNALIZE envelope from node-index=0
   thread=0`, dumped the failing replay trace, and reported
   `kind=stopped executions=4 full=1 error=0 depth-limit=3`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 65
-  assertions in 17 test cases.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 95
+  assertions in 21 test cases.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
   passed after increasing that test's exploration depth to 60.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize

@@ -7,6 +7,7 @@
 #include "test/Catch2.h"
 
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 
 namespace stellar::scpdpor
@@ -93,6 +94,55 @@ hasExternalizeEnvelope(std::vector<SCPEnvelope> const& envelopes)
                            return envelope.statement.pledges.type() ==
                                   SCP_ST_EXTERNALIZE;
                        });
+}
+
+std::optional<Value>
+findExternalizedValue(std::vector<SCPEnvelope> const& envelopes)
+{
+    for (auto const& envelope : envelopes)
+    {
+        if (envelope.statement.pledges.type() == SCP_ST_EXTERNALIZE)
+        {
+            return envelope.statement.pledges.externalize().commit.value;
+        }
+    }
+    return std::nullopt;
+}
+
+bool
+fullExecutionExternalizedValuesAgree(
+    ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
+{
+    if (!execution.is_full_execution())
+    {
+        return true;
+    }
+
+    std::optional<Value> referenceValue;
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const trace =
+            execution.graph.thread_trace(threadIdForNodeIndex(nodeIndex));
+        auto const inspection = scenario.inspectEmittedEnvelopes(nodeIndex, trace);
+        auto const externalizedValue =
+            findExternalizedValue(inspection.mEmittedEnvelopes);
+        if (!externalizedValue)
+        {
+            continue;
+        }
+        if (!referenceValue)
+        {
+            referenceValue = *externalizedValue;
+            continue;
+        }
+        if (*externalizedValue != *referenceValue)
+        {
+            return false;
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -492,6 +542,39 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
 
     REQUIRE(fullExecutionsChecked > 0);
     REQUIRE(foundMissingExternalize);
+}
+
+TEST_CASE("scp dpor full executions keep externalized values in agreement",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+    options.mDownloadTimeMode =
+        ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
+    ScpDporDefaultScenario scenario(std::move(options));
+    std::size_t fullExecutionsChecked = 0;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 12;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            if (!execution.is_full_execution())
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+
+            ++fullExecutionsChecked;
+            REQUIRE(fullExecutionExternalizedValuesAgree(scenario, execution));
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.full_executions_explored > 0);
+    REQUIRE(fullExecutionsChecked == result.full_executions_explored);
 }
 
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
