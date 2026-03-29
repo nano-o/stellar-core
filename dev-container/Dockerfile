@@ -142,6 +142,8 @@ RUN set -eux; \
 RUN install -d -o "${UID}" -g "${GID}" \
     "/home/${USER}/.cargo" \
     "/home/${USER}/.local/bin" \
+    "/home/${USER}/.local/share" \
+    "/home/${USER}/.local/state" \
     "/home/${USER}/.npm-global" \
     "/home/${USER}/.rustup"
 
