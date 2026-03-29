@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-tag="stellar-core-dev"
+image="stellar-core-dev"
 container_name=""
 debug_mode=""
 profile_mode=""
@@ -38,13 +38,28 @@ set_mode() {
   esac
 }
 
+set_image() {
+  local requested_image="$1"
+
+  if [[ -z "${requested_image}" ]]; then
+    echo "Missing value for --image" >&2
+    exit 2
+  fi
+
+  image="${requested_image}"
+}
+
 if [[ $# -gt 0 && "$1" != -* ]]; then
-  tag="$1"
+  image="$1"
   shift
 fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --image)
+      set_image "${2:-}"
+      shift 2
+      ;;
     --name)
       container_name="${2:-}"
       if [[ -z "${container_name}" ]]; then
@@ -171,14 +186,14 @@ fi
 if [[ "${debug_mode}" == "full" ]]; then
   sysctl_init="sudo sysctl -w kernel.randomize_va_space=0 kernel.yama.ptrace_scope=0 >/dev/null;"
   if [[ $# -gt 0 ]]; then
-    docker run "${docker_args[@]}" "${tag}" bash -lc "${sysctl_init} ${git_init} exec \"\$@\"" -- "$@"
+    docker run "${docker_args[@]}" "${image}" bash -lc "${sysctl_init} ${git_init} exec \"\$@\"" -- "$@"
   else
-    docker run "${docker_args[@]}" "${tag}" bash -lc "${sysctl_init} ${git_init} exec bash -l"
+    docker run "${docker_args[@]}" "${image}" bash -lc "${sysctl_init} ${git_init} exec bash -l"
   fi
 else
   if [[ $# -gt 0 ]]; then
-    docker run "${docker_args[@]}" "${tag}" bash -lc "${git_init} exec \"\$@\"" -- "$@"
+    docker run "${docker_args[@]}" "${image}" bash -lc "${git_init} exec \"\$@\"" -- "$@"
   else
-    docker run "${docker_args[@]}" "${tag}" bash -lc "${git_init} exec bash -l"
+    docker run "${docker_args[@]}" "${image}" bash -lc "${git_init} exec bash -l"
   fi
 fi

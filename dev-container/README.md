@@ -218,11 +218,13 @@ dev-container/run-container.sh
 
 ```text
 dev-container/run-container.sh [tag] [options] [-- command...]
+dev-container/run-container.sh [options] [--image IMAGE] [-- command...]
 ```
 
 | Option | Description |
 |---|---|
-| `tag` | Docker image tag (default: `stellar-core-dev`) |
+| `tag` | Legacy positional Docker image/tag (default: `stellar-core-dev`) |
+| `--image IMAGE` | Docker image to run; useful when the image is selected after other options |
 | `--name NAME` | Custom container name (default: `dev-<project>`) |
 | `--profile` | Enable `perf`-friendly profiling mode with `CAP_PERFMON` and relaxed seccomp/apparmor |
 | `--debug` | Add `SYS_PTRACE` and disable seccomp/apparmor |
