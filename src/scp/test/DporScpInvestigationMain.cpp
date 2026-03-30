@@ -26,6 +26,8 @@ namespace
 
 struct CommandLineOptions
 {
+    std::optional<stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode>
+        mInitMode;
     std::size_t mWorkers{1};
     std::size_t mDepth{12};
     std::optional<uint32_t> mMaxNominationRound;
@@ -59,6 +61,10 @@ std::size_t
 defaultParallelWorkers();
 
 std::string_view
+initModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode);
+
+std::string_view
 downloadTimeModeName(
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode);
 
@@ -74,6 +80,22 @@ defaultParallelWorkers()
 {
     auto const concurrency = std::thread::hardware_concurrency();
     return concurrency == 0 ? 2u : static_cast<std::size_t>(concurrency);
+}
+
+std::string_view
+initModeName(
+    stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode)
+{
+    using InitialValueMode =
+        stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode;
+    switch (mode)
+    {
+    case InitialValueMode::Same:
+        return "same";
+    case InitialValueMode::Unique:
+        return "unique";
+    }
+    throw std::logic_error("unknown init mode");
 }
 
 std::string_view
@@ -182,6 +204,10 @@ printUsage(char const* argv0)
               << "  --with-balloting-timers\n"
               << "      Enable balloting timers (default: "
               << (defaults.mWithBallotingTimers ? "on" : "off") << ")\n"
+              << "  --init same|unique\n"
+              << "      Override initial nomination values across validators;"
+              << " omitting the flag preserves the scenario default"
+              << " (default override: disabled)\n"
               << "  --download-time below|above|nondet\n"
               << "      Tx-set download wait-time mode relative to the"
               << " skip threshold; nondet re-chooses while below-threshold"
@@ -265,6 +291,23 @@ parseTxSetStatusMode(std::string_view value)
                                 std::string(value));
 }
 
+stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode
+parseInitMode(std::string_view value)
+{
+    using InitialValueMode =
+        stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode;
+
+    if (value == initModeName(InitialValueMode::Same))
+    {
+        return InitialValueMode::Same;
+    }
+    if (value == initModeName(InitialValueMode::Unique))
+    {
+        return InitialValueMode::Unique;
+    }
+    throw std::invalid_argument("unknown init mode: " + std::string(value));
+}
+
 uint32_t
 parseUint32Value(std::string_view arg, std::string_view value)
 {
@@ -305,6 +348,12 @@ makeScenario(CommandLineOptions const& options)
 
     auto scenarioOptions =
         stellar::scpdpor::ScpDporDefaultScenario::makeDefaultOptions();
+    if (options.mInitMode)
+    {
+        scenarioOptions.mInitialValues =
+            stellar::scpdpor::ScpDporDefaultScenario::makeInitialValues(
+                *options.mInitMode, scenarioOptions.mValidators.size());
+    }
     scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
     scenarioOptions.mStopOnCommit = options.mStopOnCommit;
     scenarioOptions.mStopOnExternalize = options.mStopOnExternalize;
@@ -834,6 +883,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--with-balloting-timers")
         {
             options.mWithBallotingTimers = true;
+            continue;
+        }
+        if (arg == "--init" && i + 1 < argc)
+        {
+            options.mInitMode = parseInitMode(argv[++i]);
             continue;
         }
         if (arg == "--download-time" && i + 1 < argc)

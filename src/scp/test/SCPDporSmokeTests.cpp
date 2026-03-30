@@ -86,6 +86,17 @@ requireReceiveLabel(std::optional<EventLabel> const& event)
     return *receive;
 }
 
+std::vector<Value>
+requireNominateVotes(std::optional<EventLabel> const& event)
+{
+    auto const send = requireSendLabel(event);
+    auto const envelope = decodeEnvelope(send.value);
+    REQUIRE(envelope.statement.pledges.type() == SCP_ST_NOMINATE);
+
+    auto const& nominate = envelope.statement.pledges.nominate();
+    return std::vector<Value>(nominate.votes.begin(), nominate.votes.end());
+}
+
 bool
 hasExternalizeEnvelope(std::vector<SCPEnvelope> const& envelopes)
 {
@@ -203,6 +214,42 @@ TEST_CASE("scp dpor nomination timer round cap disables later timer firings",
 
     auto const cappedReceive = requireReceiveLabel(cappedLeader({}, 2));
     REQUIRE(cappedReceive.is_blocking());
+}
+
+TEST_CASE("scp dpor scenario supports same and unique initial value presets",
+          "[scp][dpor][smoke]")
+{
+    auto sameOptions = ScpDporDefaultScenario::makeDefaultOptions();
+    sameOptions.mInitialValues = ScpDporDefaultScenario::makeInitialValues(
+        ScpDporDefaultScenario::InitialValueMode::Same,
+        sameOptions.mValidators.size());
+    ScpDporDefaultScenario sameScenario(std::move(sameOptions));
+    auto sameProgram = sameScenario.makeProgram();
+    auto const& sameLeader = sameProgram.threads.at(threadIdForNodeIndex(0));
+    auto const sameVotes = requireNominateVotes(sameLeader({}, 0));
+    REQUIRE(sameVotes.size() == 1);
+    REQUIRE(sameVotes.front() == sameScenario.options().mInitialValues.at(0));
+    REQUIRE(sameScenario.options().mInitialValues.at(0) ==
+            sameScenario.options().mInitialValues.at(1));
+    REQUIRE(sameScenario.options().mInitialValues.at(1) ==
+            sameScenario.options().mInitialValues.at(2));
+
+    auto uniqueOptions = ScpDporDefaultScenario::makeDefaultOptions();
+    uniqueOptions.mInitialValues = ScpDporDefaultScenario::makeInitialValues(
+        ScpDporDefaultScenario::InitialValueMode::Unique,
+        uniqueOptions.mValidators.size());
+    ScpDporDefaultScenario uniqueScenario(std::move(uniqueOptions));
+    auto uniqueProgram = uniqueScenario.makeProgram();
+    auto const& uniqueLeader =
+        uniqueProgram.threads.at(threadIdForNodeIndex(0));
+    auto const uniqueVotes = requireNominateVotes(uniqueLeader({}, 0));
+    REQUIRE(uniqueVotes.size() == 1);
+    REQUIRE(uniqueVotes.front() == uniqueScenario.options().mInitialValues.at(0));
+    REQUIRE(uniqueScenario.options().mInitialValues.at(0) !=
+            uniqueScenario.options().mInitialValues.at(1));
+    REQUIRE(uniqueScenario.options().mInitialValues.at(1) !=
+            uniqueScenario.options().mInitialValues.at(2));
+    REQUIRE(uniqueVotes.front() != sameVotes.front());
 }
 
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",

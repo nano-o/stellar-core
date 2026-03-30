@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <stdexcept>
 #include <string_view>
 #include <vector>
@@ -36,6 +37,12 @@ class ScpDporDefaultScenario
         Waiting,
         Invalid,
         Nondeterministic
+    };
+
+    enum class InitialValueMode : std::uint8_t
+    {
+        Same,
+        Unique
     };
 
     struct Options
@@ -157,6 +164,33 @@ class ScpDporDefaultScenario
                                   makeValue("y")};
         options.mEnableNominationTimeouts = false;
         return options;
+    }
+
+    static std::vector<Value>
+    makeInitialValues(InitialValueMode mode, std::size_t validatorCount)
+    {
+        std::vector<Value> values;
+        values.reserve(validatorCount);
+        switch (mode)
+        {
+        case InitialValueMode::Same:
+            for (std::size_t nodeIndex = 0; nodeIndex < validatorCount;
+                 ++nodeIndex)
+            {
+                values.push_back(makeValue("x"));
+            }
+            return values;
+        case InitialValueMode::Unique:
+            for (std::size_t nodeIndex = 0; nodeIndex < validatorCount;
+                 ++nodeIndex)
+            {
+                auto const valueName = std::string("x") +
+                                       std::to_string(nodeIndex);
+                values.push_back(makeValue(std::string_view(valueName)));
+            }
+            return values;
+        }
+        throw std::logic_error("unknown initial value mode");
     }
 
     Program

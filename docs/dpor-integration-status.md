@@ -123,6 +123,7 @@ large SCP property suite.
       the externalized value, and a failing execution dumps its replay trace
   - `--with-nomination-timers`
   - `--with-balloting-timers`
+  - `--init same|unique`
   - `--max-nomination-round`
   - `--max-balloting-round`
   - `--max-nomination-timers-round`
