@@ -13,8 +13,9 @@ The callback in
 returns `TerminalExecutionAction::Stop`, so DPOR prints the first terminal
 execution it encounters and then stops exploring.
 
-Without `--dump-terminal-trace`, the default scenario currently explores four
-executions at sufficiently large depth.
+Without `--dump-terminal-trace`, the default scenario explores a small number
+of executions at sufficiently large depth (the exact count depends on DPOR
+dynamics and scenario configuration).
 
 The printed "trace" is not a full per-thread step log. It uses
 `execution.graph.thread_trace(...)`, which contains only:
@@ -82,9 +83,9 @@ Also, thread 0's single observed envelope in the default terminal trace is not
 the first nomination emitted by a peer. It is already a later peer `NOMINATE`
 that reflects earlier off-screen work.
 
-## Replay Support: Baselines, Cache, And Checkpoints
+## Replay Support: Baselines, Cache, And Choice Decoding
 
-`ScpDporReplaySupport` uses three different forms of saved state.
+`ScpDporReplaySupport` uses three mechanisms for managing replay state.
 
 ### 1. Stored Node Baselines
 
@@ -124,42 +125,51 @@ The cache is only a performance optimization. It avoids reconstructing a fresh
 The cached node is not trusted to hold the correct replay state between calls.
 Before use, callers restore it back to the appropriate stored baseline.
 
-### 3. Per-Call Replay Checkpoints
+### 3. Upfront Choice Decoding
 
-Inside `replayObservation()`, the code snapshots the node state immediately
-before replaying the current observed event.
+Before replaying an observed event, `replayObservation()` calls
+`decodeKnownTxSetChoices()` to scan the trace for any nondeterministic choice
+entries (txset status choices and txset download wait-time choices) that
+immediately follow the current observed event.
 
-That checkpoint is used only within the current call. It exists so the replay
-layer can retry the same observed event from the same starting state if replay
-discovers an additional hidden choice while executing that event.
+If known choices exist, they are preloaded into the node via
+`enqueueTxSetStatusChoices()` and `enqueueTxSetDownloadWaitTimeChoices()`
+before replay begins. This allows the event to be replayed in a single pass
+without checkpointing or retrying.
 
-This checkpoint is more local than the stored node baseline. Restoring from the
-stored baseline would also be correct, but it would require replaying the whole
-prefix again.
+If SCP discovers a choice that was not already in the trace (i.e. a new
+nondeterministic branch), the node throws an exception and
+`replayObservation()` returns a pending DPOR event without retrying. See
+below.
 
-## Why `getTxSetDownloadWaitTime()` Uses Exception + Retry
+## Why Txset Choices Use Exception + Pending Return
 
-`getTxSetDownloadWaitTime()` can be reached deep inside ordinary SCP handling
-of a receive or timer firing.
+`getTxSetDownloadWaitTime()` and the txset status callback can be reached deep
+inside ordinary SCP handling of a receive or timer firing.
 
 At that point, the replay layer is already in the middle of "execute this one
-observed event". The current `SCPDriver` interface returns only an
-`optional<milliseconds>` value, so there is no explicit "pause and request a
-DPOR choice" channel at that seam.
+observed event". The current `SCPDriver` interface returns only a value, so
+there is no explicit "pause and request a DPOR choice" channel at that seam.
 
 The current mechanism is:
 
-1. Start replaying one observed event.
-2. If SCP asks for a txset wait-time choice and none has been preloaded,
-   `DporScpNode` throws `TxSetDownloadWaitTimeChoiceRequired`.
-3. `replayObservation()` catches it.
-4. If the trace does not already contain the choice, replay returns a pending
-   DPOR nondeterministic choice event.
-5. Once a choice is available, replay restores the per-call checkpoint,
-   preloads the chosen wait time, and replays the same observed event again.
+1. Before replaying, `decodeKnownTxSetChoices()` scans the trace for choice
+   entries that follow the current observed event. Known choices are preloaded
+   into the node.
+2. Start replaying one observed event.
+3. If SCP asks for a txset choice (status or wait-time) and none has been
+   preloaded, `DporScpNode` throws `TxSetStatusChoiceRequired` or
+   `TxSetDownloadWaitTimeChoiceRequired`.
+4. `replayObservation()` catches the exception.
+5. If the trace does not already contain the choice, replay returns a pending
+   DPOR nondeterministic choice event (no retry, no checkpoint restore).
+6. On the next call, the choice will be present in the trace and preloaded
+   upfront, so replay succeeds in a single pass.
 
-The retry is necessary because the first attempt may already have partially
-mutated SCP state before discovering the hidden choice.
+Earlier versions of this code used a per-call checkpoint and retry loop:
+snapshot before replay, catch the exception, restore the checkpoint, preload
+the choice, and replay the same event again. That mechanism was replaced by
+upfront choice decoding, which avoids the snapshot/restore cost entirely.
 
 ## Relation To Timers And Emitted Envelopes
 
@@ -174,24 +184,21 @@ They are side effects of finishing the current SCP step:
   timers as future timer-choice / timer-firing behavior
 
 They do not require the current step to suspend and ask DPOR for a new choice.
-That is why they do not need the exception/checkpoint mechanism.
+That is why they do not need the exception mechanism.
 
-## On Modeling `getTxSetDownloadWaitTime()` As A DPOR Choice
+## On Modeling Txset Choices As DPOR Choices
 
-Yes, it is sensible to treat the return value of
-`getTxSetDownloadWaitTime()` as a DPOR nondeterministic choice.
+Both the txset download wait time and the txset status callback are modeled as
+DPOR nondeterministic choices.
 
-In practice, the current code already does that once the need for the choice is
-discovered. The awkward part is not whether it is a DPOR event; the awkward
-part is that SCP discovers it in the middle of executing another event.
+The awkward part is not whether they are DPOR events; the awkward part is that
+SCP discovers the need for a choice in the middle of executing another event.
 
-So:
-
-- making txset wait time a first-class DPOR choice is compatible with the
-  current replay model
-- it does not by itself remove the need for rollback/retry
-- removing rollback/retry would require a more explicit resumable/effectful
-  execution interface at the `SCPDriver` seam
+The upfront-decoding approach sidesteps this for known choices: if a choice is
+already in the trace, it is preloaded before replay begins, and SCP never
+needs to pause. The exception path only fires when a genuinely new choice is
+discovered, in which case replay returns a pending event and the next call
+replays the event with the choice preloaded.
 
 ## Working Mental Model
 
@@ -199,6 +206,8 @@ The simplest way to think about the current replay loop is:
 
 - stored baselines define the starting point for replay
 - cached nodes are reusable scratch objects
-- each observed event is replayed from a per-call checkpoint
-- if replay discovers a hidden txset choice mid-step, it rewinds to that
-  checkpoint and reruns the same step with the choice preloaded
+- before replaying an observed event, known txset choices from the trace are
+  decoded and preloaded into the node
+- if replay discovers a new txset choice mid-step, the node throws an
+  exception and replay returns a pending DPOR event; on the next call the
+  choice is in the trace and gets preloaded upfront
