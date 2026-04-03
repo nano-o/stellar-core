@@ -1,6 +1,6 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-03-27 for branch `skip-ledgers-p25-dpor-2`.
+Status snapshot as of 2026-04-02 for branch `skip-ledgers-p25-dpor-2`.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -19,10 +19,10 @@ large SCP property suite.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- Despite the current wording in [`DPOR.md`](../DPOR.md), the checked-in build
-  still requires tests to remain enabled. `--disable-tests --enable-dpor`
-  errors out in `configure.ac`, and the DPOR programs are declared under
-  `if BUILD_TESTS` in [`src/Makefile.am`](../src/Makefile.am).
+- The checked-in build still requires tests to remain enabled.
+  `--disable-tests --enable-dpor` errors out in `configure.ac`, and the DPOR
+  programs are declared under `if BUILD_TESTS` in
+  [`src/Makefile.am`](../src/Makefile.am).
 - [`make-mks`](../make-mks) excludes `Dpor*`, `SCPDpor*`, and `ScpDpor*` files
   from `SRC_TEST_*` and emits dedicated `SRC_DPOR_SUPPORT_*`,
   `SRC_DPOR_TEST_CXX_FILES`, and `SRC_DPOR_MAIN_CXX_FILES` buckets.
@@ -141,7 +141,7 @@ large SCP property suite.
   executions, dumps replay lead-ins for all scenario threads with the failing
   thread first, and exits nonzero with the original exception message.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 21 smoke tests. The checked-in coverage exercises:
+  currently contains 22 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -155,8 +155,8 @@ large SCP property suite.
   - follower timer-before-delivery behavior
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
+  - txset status latch-once-resolved replay behavior
   - `download-succeeds-in-round` forcing later txset validation to `valid`
-    and surviving replay checkpoint restore
   - investigation-style wrapping of thread exceptions into inspectable DPOR
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
@@ -198,8 +198,8 @@ I verified the current state directly in this tree:
   `error: full execution missing EXTERNALIZE envelope from node-index=0
   thread=0`, dumped the failing replay trace, and reported
   `kind=stopped executions=4 full=1 error=0 depth-limit=3`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 95
-  assertions in 21 test cases.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 97
+  assertions in 22 test cases.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
   passed after increasing that test's exploration depth to 60.
 - `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize
@@ -213,5 +213,5 @@ I verified the current state directly in this tree:
 - The checked-in exploration model is still a three-node, single-slot SCP
   harness. There is not yet a broader family of scenarios or a multi-slot /
   ledger-closing model.
-- [`DPOR.md`](../DPOR.md) says DPOR no longer depends on `BUILD_TESTS`, but the
-  actual build system still does.
+- DPOR still depends on `BUILD_TESTS`; `--disable-tests --enable-dpor` is not
+  supported.
