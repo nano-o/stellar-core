@@ -156,6 +156,33 @@ Inside the container:
 - User: `dev` (non-root, UID/GID matched to host)
 - DPOR clone target: `git clone https://github.com/nano-o/CPP-DPOR.git external/dpor`
 
+### Out-of-tree builds in containers
+
+When running inside a container (i.e. `/home/dev/stellar-core` is the source
+directory), prefer **out-of-tree builds** to keep the source tree clean and
+avoid polluting the bind-mounted volume with build artifacts. If the directory
+`/home/dev/stellar-core-build/` exists, use it as the build directory.
+
+Out-of-tree normal build:
+```bash
+cd /home/dev/stellar-core-build
+/home/dev/stellar-core/configure CC=clang-20 CXX=clang++-20
+make -j"$(nproc)"
+```
+
+Out-of-tree DPOR build:
+```bash
+cd /home/dev/stellar-core-build
+/home/dev/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
+make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
+```
+
+Detection: check whether `/home/dev/stellar-core-build/` exists before
+building. If it does, `cd` into it and invoke `configure` via its absolute
+source-tree path. If it does not exist, fall back to an in-tree build as
+documented above. Run `autogen.sh` from the source tree before the first
+configure in either case.
+
 ## Style and conventions
 
 - Follow existing stellar-core coding style (look at surrounding code)
