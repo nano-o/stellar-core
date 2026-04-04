@@ -24,8 +24,8 @@ the JSON trace flow described below.
 
 ## JSON Trace Capture And Replay
 
-`scp-dpor-investigation` can now persist a terminal execution as a structured
-JSON artifact with `--write-trace-json PATH` and reload it later with
+`scp-dpor-investigation` persists terminal executions as structured JSON
+artifacts into `--trace-dir` on error, and can reload them later with
 `--replay-trace-json PATH`.
 
 The persisted replay input is not a full schedule. It stores:

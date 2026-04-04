@@ -158,60 +158,6 @@ fullExecutionExternalizedValuesAgree(
     return true;
 }
 
-bool
-sameScenarioOptions(ScpDporDefaultScenario::Options const& lhs,
-                    ScpDporDefaultScenario::Options const& rhs)
-{
-    return lhs.mValidators == rhs.mValidators &&
-           lhs.mQuorumSet == rhs.mQuorumSet &&
-           lhs.mSlotIndex == rhs.mSlotIndex &&
-           lhs.mPreviousValue == rhs.mPreviousValue &&
-           lhs.mInitialValues == rhs.mInitialValues &&
-           lhs.mStopOnPrepare == rhs.mStopOnPrepare &&
-           lhs.mStopOnCommit == rhs.mStopOnCommit &&
-           lhs.mStopOnExternalize == rhs.mStopOnExternalize &&
-           lhs.mPrepareBoundaryCounter == rhs.mPrepareBoundaryCounter &&
-           lhs.mMaxNominationRound == rhs.mMaxNominationRound &&
-           lhs.mMaxBallotingRound == rhs.mMaxBallotingRound &&
-           lhs.mMaxNominationTimersRound == rhs.mMaxNominationTimersRound &&
-           lhs.mMaxBallotingTimersRound == rhs.mMaxBallotingTimersRound &&
-           lhs.mNominationTimerSetLimit == rhs.mNominationTimerSetLimit &&
-           lhs.mEnableNominationTimeouts == rhs.mEnableNominationTimeouts &&
-           lhs.mEnableBallotingTimeouts == rhs.mEnableBallotingTimeouts &&
-           lhs.mDownloadTimeMode == rhs.mDownloadTimeMode &&
-           lhs.mTxSetStatusMode == rhs.mTxSetStatusMode &&
-           lhs.mDownloadSucceedsInRound == rhs.mDownloadSucceedsInRound &&
-           lhs.mInitialNominationTimeoutMS == rhs.mInitialNominationTimeoutMS &&
-           lhs.mIncrementNominationTimeoutMS ==
-               rhs.mIncrementNominationTimeoutMS &&
-           lhs.mInitialBallotTimeoutMS == rhs.mInitialBallotTimeoutMS &&
-           lhs.mIncrementBallotTimeoutMS == rhs.mIncrementBallotTimeoutMS;
-}
-
-TraceBundle
-makeTraceBundleForExecution(
-    ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
-    dpor::model::CommunicationModel communicationModel,
-    TerminalMeta terminal)
-{
-    TraceBundle bundle;
-    bundle.mOptions = scenario.options();
-    bundle.mCommunicationModel = communicationModel;
-    bundle.mTerminal = std::move(terminal);
-    bundle.mThreadTraces.reserve(scenario.options().mValidators.size());
-    for (std::size_t nodeIndex = 0;
-         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
-    {
-        auto const threadID = threadIdForNodeIndex(nodeIndex);
-        bundle.mThreadTraces.push_back(
-            ThreadTraceRecord{
-                .mThreadID = threadID,
-                .mTrace = execution.graph.thread_trace(threadID)});
-    }
-    return bundle;
-}
-
 std::filesystem::path
 traceJsonTempPath(std::string_view name)
 {
@@ -340,7 +286,7 @@ TEST_CASE("scp dpor trace json round-trips scenario options",
 
     auto const roundTripped = optionsFromJson(toJson(options));
 
-    REQUIRE(sameScenarioOptions(roundTripped, options));
+    REQUIRE(roundTripped == options);
 }
 
 TEST_CASE("scp dpor trace json round-trips thread traces",
@@ -491,7 +437,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
                 return dpor::algo::TerminalExecutionAction::Continue;
             }
 
-            bundle = makeTraceBundleForExecution(
+            bundle = makeTraceBundle(
                 scenario, execution, dpor::model::CommunicationModel::Async,
                 TerminalMeta{
                     .mKind = execution.kind,
@@ -513,7 +459,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
     std::filesystem::remove(path);
 
     REQUIRE(loaded.mVersion == 1);
-    REQUIRE(sameScenarioOptions(loaded.mOptions, bundle->mOptions));
+    REQUIRE(loaded.mOptions == bundle->mOptions);
     REQUIRE(loaded.mCommunicationModel == bundle->mCommunicationModel);
     REQUIRE(loaded.mTerminal.mKind == bundle->mTerminal.mKind);
     REQUIRE(loaded.mTerminal.mFailureMessage == bundle->mTerminal.mFailureMessage);

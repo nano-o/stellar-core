@@ -888,6 +888,30 @@ traceBundleFromJson(Json::Value const& value)
     return bundle;
 }
 
+TraceBundle
+makeTraceBundle(
+    ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
+    dpor::model::CommunicationModel communicationModel,
+    TerminalMeta terminal)
+{
+    TraceBundle bundle;
+    bundle.mOptions = scenario.options();
+    bundle.mCommunicationModel = communicationModel;
+    bundle.mTerminal = std::move(terminal);
+    bundle.mThreadTraces.reserve(scenario.options().mValidators.size());
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const threadID = threadIdForNodeIndex(nodeIndex);
+        bundle.mThreadTraces.push_back(
+            ThreadTraceRecord{
+                .mThreadID = threadID,
+                .mTrace = execution.graph.thread_trace(threadID)});
+    }
+    return bundle;
+}
+
 void
 writeTraceBundle(std::filesystem::path const& path, TraceBundle const& bundle)
 {

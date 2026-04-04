@@ -71,6 +71,8 @@ class ScpDporDefaultScenario
         uint32_t mIncrementNominationTimeoutMS{1000};
         uint32_t mInitialBallotTimeoutMS{1000};
         uint32_t mIncrementBallotTimeoutMS{1000};
+
+        bool operator==(Options const& other) const = default;
     };
 
     struct BoundaryInspection

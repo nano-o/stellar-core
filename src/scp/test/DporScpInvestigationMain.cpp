@@ -782,8 +782,9 @@ dumpTerminalExecution(
         return;
     }
 
-    for (std::size_t nodeIndex = 0;
-         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    for (auto const nodeIndex :
+         focusFirstNodeOrder(scenario.options().mValidators.size(),
+                             bundle.mTerminal.mFocusNodeIndex))
     {
         auto const tid = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
         auto const& trace = findThreadTrace(bundle, tid);
@@ -828,31 +829,6 @@ dumpErrorExecution(
     }
 }
 
-stellar::scpdpor::TraceBundle
-makeTraceBundle(
-    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
-        execution,
-    dpor::model::CommunicationModel communicationModel,
-    stellar::scpdpor::TerminalMeta terminal)
-{
-    stellar::scpdpor::TraceBundle bundle;
-    bundle.mOptions = scenario.options();
-    bundle.mCommunicationModel = communicationModel;
-    bundle.mTerminal = std::move(terminal);
-    bundle.mThreadTraces.reserve(scenario.options().mValidators.size());
-    for (std::size_t nodeIndex = 0;
-         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
-    {
-        auto const threadID = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-        bundle.mThreadTraces.push_back(
-            stellar::scpdpor::ThreadTraceRecord{
-                .mThreadID = threadID,
-                .mTrace = execution.graph.thread_trace(threadID)});
-    }
-    return bundle;
-}
-
 std::filesystem::path
 generateTraceFilePath(std::string const& traceDir)
 {
@@ -865,9 +841,12 @@ generateTraceFilePath(std::string const& traceDir)
                         now.time_since_epoch()) %
                     1000;
 
+    struct tm timeBuf{};
+    gmtime_r(&timeT, &timeBuf);
+
     std::ostringstream filename;
     filename << "trace-"
-             << std::put_time(std::gmtime(&timeT), "%Y%m%d-%H%M%S") << "-"
+             << std::put_time(&timeBuf, "%Y%m%d-%H%M%S") << "-"
              << std::setfill('0') << std::setw(3) << ms.count() << ".json";
     return fs::path(traceDir) / filename.str();
 }
@@ -1176,7 +1155,7 @@ main(int argc, char* argv[])
                     }
                     if (!dumpedTerminalExecution)
                     {
-                        auto const bundle = makeTraceBundle(
+                        auto const bundle = stellar::scpdpor::makeTraceBundle(
                             scenario, execution, options.mCommunicationModel,
                             stellar::scpdpor::TerminalMeta{
                                 .mKind = execution.kind,
@@ -1211,7 +1190,7 @@ main(int argc, char* argv[])
                         }
                         if (!dumpedTerminalExecution)
                         {
-                            auto const bundle = makeTraceBundle(
+                            auto const bundle = stellar::scpdpor::makeTraceBundle(
                                 scenario, execution,
                                 options.mCommunicationModel,
                                 stellar::scpdpor::TerminalMeta{
@@ -1259,7 +1238,7 @@ main(int argc, char* argv[])
                         }
                         if (!dumpedTerminalExecution)
                         {
-                            auto const bundle = makeTraceBundle(
+                            auto const bundle = stellar::scpdpor::makeTraceBundle(
                                 scenario, execution,
                                 options.mCommunicationModel,
                                 stellar::scpdpor::TerminalMeta{
@@ -1290,7 +1269,7 @@ main(int argc, char* argv[])
                     }
                     if (!dumpedTerminalExecution)
                     {
-                        auto const bundle = makeTraceBundle(
+                        auto const bundle = stellar::scpdpor::makeTraceBundle(
                             scenario, execution, options.mCommunicationModel,
                             stellar::scpdpor::TerminalMeta{
                                 .mKind =

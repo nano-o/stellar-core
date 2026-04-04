@@ -69,6 +69,13 @@ toJson(TraceBundle const& bundle);
 TraceBundle
 traceBundleFromJson(Json::Value const& value);
 
+TraceBundle
+makeTraceBundle(
+    ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
+    dpor::model::CommunicationModel communicationModel,
+    TerminalMeta terminal);
+
 void
 writeTraceBundle(std::filesystem::path const& path, TraceBundle const& bundle);
 

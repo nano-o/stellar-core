@@ -139,7 +139,6 @@ large SCP property suite.
   - `--parallel` / `--workers`
   - `--print-stats`
   - `--fail-on-first-terminal`
-  - `--write-trace-json`
   - `--replay-trace-json`
   - `--replay-node N|all`
 - The investigation runner now wraps thread-step exceptions as DPOR error
