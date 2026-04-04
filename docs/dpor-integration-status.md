@@ -39,6 +39,11 @@ large SCP property suite.
   the rest of their object graph through `STELLAR_CORE_DPOR_LINK_OBJECTS`.
   This keeps DPOR opt-in, but it still reuses a large portion of the normal
   `stellar-core` object graph.
+- Because `stellar-core-dpor-tests` still links that shared object graph, any
+  process-wide runtime switch enabled by its custom main also applies to the
+  non-DPOR test objects linked into the same binary. In particular, the current
+  assert-throw mode used for DPOR error-capture is process-wide within
+  `stellar-core-dpor-tests`; it is not yet scoped only to the DPOR smoke code.
 - The DPOR targets also force the generated XDR / xdrquery / Rust bridge
   sources and the sibling `lib` build artifacts they rely on (`xdrc`,
   `libxdrpp`, `libsodium`, and the local static archives), so a clean

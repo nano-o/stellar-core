@@ -493,7 +493,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
                 "moved to a bad state") != std::string::npos);
 }
 
-TEST_CASE("scp dpor captures an SCP assert as an error execution",
+TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -502,6 +502,8 @@ TEST_CASE("scp dpor captures an SCP assert as an error execution",
         ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
 
+    std::string const expectedAssert =
+        "validationLevel != SCPDriver::kInvalidValue";
     bool capturedAssertError = false;
     std::string capturedMessage;
 
@@ -515,6 +517,8 @@ TEST_CASE("scp dpor captures an SCP assert as an error execution",
             auto const errorExecution = findErrorExecution(
                 scenario.options().mValidators.size(), execution);
             if (errorExecution &&
+                errorExecution->mMessage.find(expectedAssert) !=
+                    std::string::npos &&
                 errorExecution->mMessage.find("BallotProtocol.cpp") !=
                     std::string::npos)
             {
@@ -529,6 +533,7 @@ TEST_CASE("scp dpor captures an SCP assert as an error execution",
     (void)result;
 
     REQUIRE(capturedAssertError);
+    REQUIRE(capturedMessage.find(expectedAssert) != std::string::npos);
     REQUIRE(capturedMessage.find("BallotProtocol.cpp") != std::string::npos);
 }
 
