@@ -139,14 +139,23 @@ large SCP property suite.
   - `--parallel` / `--workers`
   - `--print-stats`
   - `--fail-on-first-terminal`
+  - `--trace-dir DIR`
+    - directory for auto-named JSON trace files written when the runner stops
+      on a captured failure path
   - `--replay-trace-json`
   - `--replay-node N|all`
+    - default replay scope is the stored focus node; `all` replays every node
+      in focus-first order
 - The investigation runner now wraps thread-step exceptions as DPOR error
   executions, dumps replay lead-ins for all scenario threads with the failing
   thread first, can fail fast on the first terminal execution for smoke-test
-  workflows, can write the first terminal execution as a structured JSON
-  artifact, can reload that artifact for deterministic replay without running
-  DPOR, and exits nonzero with the original exception message.
+  workflows, can write the first captured terminal execution as a structured
+  JSON artifact into `--trace-dir` (default `dpor-traces`), prints the chosen
+  path as `trace-json=...`, can reload that artifact for deterministic replay
+  without running DPOR, and exits nonzero with the original exception message.
+- The persisted artifact stores exact per-thread observed traces rather than a
+  full schedule. Deeper traces with many envelope deliveries can grow
+  noticeably because the envelope payloads are persisted as exact base64 XDR.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
   currently contains 25 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
@@ -223,5 +232,9 @@ I verified the current state directly in this tree:
 - The checked-in exploration model is still a three-node, single-slot SCP
   harness. There is not yet a broader family of scenarios or a multi-slot /
   ledger-closing model.
+- Trace JSON load validates the artifact schema and per-trace invariants, but
+  some default-scenario semantic checks are still deferred until replay builds
+  `ScpDporDefaultScenario` from the stored options rather than being enforced
+  entirely inside `loadTraceBundle()`.
 - DPOR still depends on `BUILD_TESTS`; `--disable-tests --enable-dpor` is not
   supported.

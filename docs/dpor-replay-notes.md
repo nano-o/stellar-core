@@ -24,8 +24,9 @@ the JSON trace flow described below.
 
 ## JSON Trace Capture And Replay
 
-`scp-dpor-investigation` persists terminal executions as structured JSON
-artifacts into `--trace-dir` on error, and can reload them later with
+`scp-dpor-investigation` persists the first captured terminal execution as a
+structured JSON artifact into `--trace-dir` (default `dpor-traces`), prints
+the chosen path as `trace-json=...`, and can reload that artifact later with
 `--replay-trace-json PATH`.
 
 The persisted replay input is not a full schedule. It stores:
@@ -43,6 +44,20 @@ This matches the existing replay seam:
 The JSON trace therefore preserves the exact per-thread observed-value input
 needed for debugger-oriented replay without encoding DPOR reads-from edges or
 global insertion order.
+
+Replay defaults to the stored `focus_node_index`. `--replay-node N` overrides
+that to one node, and `--replay-node all` replays every node in focus-first
+order.
+
+Because envelope deliveries are stored as exact base64 XDR payloads, traces
+with many delivered envelopes can grow noticeably faster than timer-heavy or
+choice-heavy traces.
+
+`loadTraceBundle()` validates the JSON schema, trace payloads, thread coverage,
+and focus metadata, but some default-scenario semantic checks are still
+deferred until replay constructs `ScpDporDefaultScenario` from the stored
+options. In practice, malformed scenario shapes still fail early on replay, but
+not all option-level constraints are enforced by JSON load alone.
 
 ## Scenario Start State
 
