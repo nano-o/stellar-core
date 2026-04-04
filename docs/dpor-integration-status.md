@@ -82,8 +82,10 @@ large SCP property suite.
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
 - [`src/scp/test/ScpDporTraceJson.h`](../src/scp/test/ScpDporTraceJson.h) and
   [`src/scp/test/ScpDporTraceJson.cpp`](../src/scp/test/ScpDporTraceJson.cpp)
-  serialize exact `ThreadTrace` bundles, scenario options, and terminal
-  metadata as pretty-printed JSON for debugger-oriented replay.
+  serialize versioned, pretty-printed replay bundles for debugger-oriented
+  replay. Each bundle stores the effective default-scenario options, the
+  communication model, terminal metadata (including failure text and focus
+  node/thread), and one exact `ThreadTrace` per thread.
 - [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
   is the current default scenario layer. It currently builds a three-validator,
   single-slot SCP program and can inspect both boundary state and replay
@@ -161,10 +163,13 @@ large SCP property suite.
   workflows, can write the first captured terminal execution as a structured
   JSON artifact into `--trace-dir` (default `dpor-traces`), prints the chosen
   path as `trace-json=...`, can reload that artifact for deterministic replay
-  without running DPOR, and exits nonzero with the original exception message.
+  without rerunning DPOR, and exits nonzero with the original exception
+  message.
 - The persisted artifact stores exact per-thread observed traces rather than a
   full schedule. Deeper traces with many envelope deliveries can grow
   noticeably because the envelope payloads are persisted as exact base64 XDR.
+  Reload uses the stored scenario options and thread traces with the existing
+  harness replay seam rather than reconstructing a DPOR schedule.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
   currently contains 26 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation

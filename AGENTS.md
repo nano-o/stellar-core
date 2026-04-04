@@ -31,6 +31,8 @@ Prioritize work that:
 Before starting DPOR implementation work, read
 [docs/dpor-integration-status.md](docs/dpor-integration-status.md). Use it as
 the source of truth for what is already integrated and what limitations remain.
+For trace-capture or replay work, also read
+[docs/dpor-replay-notes.md](docs/dpor-replay-notes.md).
 
 Previous attempt: branch `dpor-skip-ledgers-p25` (accessible via
 `git log dpor-skip-ledgers-p25` in this repo). That branch has 64 commits of
@@ -86,6 +88,8 @@ Notes:
 - Useful verification commands:
   - `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"`
   - `./src/scp-dpor-investigation --depth 12`
+  - `./src/scp-dpor-investigation --fail-on-first-terminal --trace-dir "$PWD/dpor-traces" --depth 12`
+  - `./src/scp-dpor-investigation --replay-trace-json PATH --replay-node N|all`
 
 ## DPOR dependency
 
