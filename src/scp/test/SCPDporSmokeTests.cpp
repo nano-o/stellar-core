@@ -493,6 +493,45 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
                 "moved to a bad state") != std::string::npos);
 }
 
+TEST_CASE("scp dpor captures an SCP assert as an error execution",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+    ScpDporDefaultScenario scenario(std::move(options));
+
+    bool capturedAssertError = false;
+    std::string capturedMessage;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = wrapProgramExceptionsAsErrorExecutions(
+        scenario.makeProgram());
+    config.max_depth = 50;
+    config.communication_model = dpor::model::CommunicationModel::FifoP2P;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto const errorExecution = findErrorExecution(
+                scenario.options().mValidators.size(), execution);
+            if (errorExecution &&
+                errorExecution->mMessage.find("BallotProtocol.cpp") !=
+                    std::string::npos)
+            {
+                capturedAssertError = true;
+                capturedMessage = errorExecution->mMessage;
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    auto const result = dpor::algo::verify(config);
+    (void)result;
+
+    REQUIRE(capturedAssertError);
+    REQUIRE(capturedMessage.find("BallotProtocol.cpp") != std::string::npos);
+}
+
 TEST_CASE("scp dpor exploration finds a prepare boundary",
           "[scp][dpor][smoke]")
 {

@@ -3,6 +3,7 @@
 // of this distribution or at http://www.apache.org/licenses/LICENSE-2.0
 
 #include "test/test.h"
+#include "util/GlobalChecks.h"
 
 namespace stellar
 {
@@ -29,5 +30,6 @@ makeArgs(int argc, char* const* argv)
 int
 main(int argc, char* const* argv)
 {
+    stellar::enableAssertThrowMode();
     return stellar::runTest(stellar::makeArgs(argc, argv));
 }

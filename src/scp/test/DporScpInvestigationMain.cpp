@@ -5,6 +5,7 @@
 #include "scp/test/ScpDporDefaultScenario.h"
 #include "scp/test/ScpDporInvestigationUtils.h"
 #include "scp/test/ScpDporTraceJson.h"
+#include "util/GlobalChecks.h"
 #include "util/Logging.h"
 
 #include <algorithm>
@@ -1103,6 +1104,7 @@ main(int argc, char* argv[])
 {
     try
     {
+        stellar::enableAssertThrowMode();
         stellar::Logging::init();
         stellar::Logging::setFmt("<dpor>");
         stellar::Logging::setLogLevel(stellar::LogLevel::LVL_WARNING, nullptr);

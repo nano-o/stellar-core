@@ -146,6 +146,10 @@ large SCP property suite.
   - `--replay-node N|all`
     - default replay scope is the stored focus node; `all` replays every node
       in focus-first order
+- Both DPOR binaries enable assert-throw mode at startup
+  (`enableAssertThrowMode()` in `src/util/GlobalChecks.h`), so SCP
+  `releaseAssert` and `dbgAbort` failures are captured as DPOR error executions
+  with file:line context rather than aborting the process.
 - The investigation runner now wraps thread-step exceptions as DPOR error
   executions, dumps replay lead-ins for all scenario threads with the failing
   thread first, can fail fast on the first terminal execution for smoke-test
@@ -157,7 +161,7 @@ large SCP property suite.
   full schedule. Deeper traces with many envelope deliveries can grow
   noticeably because the envelope payloads are persisted as exact base64 XDR.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 25 smoke tests. The checked-in coverage exercises:
+  currently contains 26 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -179,6 +183,8 @@ large SCP property suite.
     replay
   - JSON round-trips for scenario options and raw per-thread traces
   - trace-bundle write/load/replay of a captured error execution
+  - capturing an SCP `releaseAssert` as a DPOR error execution with file:line
+    context
 
 ## Verification in this workspace
 
