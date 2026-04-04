@@ -5,31 +5,44 @@ and the replay-support layer.
 
 It is descriptive, not a design commitment.
 
-## `scp-dpor-investigation --dump-terminal-trace`
+## `scp-dpor-investigation --fail-on-first-terminal`
 
-The `--dump-terminal-trace` mode stops after the first terminal execution.
+The `--fail-on-first-terminal` mode is a smoke-test command.
 The callback in
 [`src/scp/test/DporScpInvestigationMain.cpp`](../src/scp/test/DporScpInvestigationMain.cpp)
-returns `TerminalExecutionAction::Stop`, so DPOR prints the first terminal
-execution it encounters and then stops exploring.
+returns `TerminalExecutionAction::Stop` at the first terminal execution it
+encounters, rewrites that terminal as a runner failure, dumps replay traces in
+focus-first order, and exits nonzero.
 
-Without `--dump-terminal-trace`, the default scenario explores a small number
-of executions at sufficiently large depth (the exact count depends on DPOR
-dynamics and scenario configuration).
+Without `--fail-on-first-terminal`, the default scenario explores a small
+number of executions at sufficiently large depth (the exact count depends on
+DPOR dynamics and scenario configuration).
 
-The printed "trace" is not a full per-thread step log. It uses
-`execution.graph.thread_trace(...)`, which contains only:
+This mode is intentionally a fail-fast runner check rather than a general
+terminal-capture workflow. For debugger-oriented capture and later replay, use
+the JSON trace flow described below.
 
-- values observed by receives
-- nondeterministic choice values
+## JSON Trace Capture And Replay
 
-It does not include:
+`scp-dpor-investigation` can now persist a terminal execution as a structured
+JSON artifact with `--write-trace-json PATH` and reload it later with
+`--replay-trace-json PATH`.
 
-- sends
-- local state transitions
-- internal SCP work performed while handling a receive or timer firing
+The persisted replay input is not a full schedule. It stores:
 
-This is why the terminal dump can look much shorter than the actual execution.
+- the effective `ScpDporDefaultScenario::Options`
+- terminal metadata such as terminal kind, failure message, and focus thread
+- one raw `ThreadTrace` per thread
+
+This matches the existing replay seam:
+
+- DPOR produces `execution.graph.thread_trace(threadId)`
+- the SCP harness reconstructs human-meaningful replay steps by feeding that
+  trace into `inspectThreadReplayTrace(...)`
+
+The JSON trace therefore preserves the exact per-thread observed-value input
+needed for debugger-oriented replay without encoding DPOR reads-from edges or
+global insertion order.
 
 ## Scenario Start State
 

@@ -1,6 +1,6 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-04-02 for branch `skip-ledgers-p25-dpor-2`.
+Status snapshot as of 2026-04-04 for branch `skip-ledgers-p25-dpor-2`.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -75,6 +75,10 @@ large SCP property suite.
   observed traces, including hidden txset status and wait-time choices. Replay
   semantics are also described in
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
+- [`src/scp/test/ScpDporTraceJson.h`](../src/scp/test/ScpDporTraceJson.h) and
+  [`src/scp/test/ScpDporTraceJson.cpp`](../src/scp/test/ScpDporTraceJson.cpp)
+  serialize exact `ThreadTrace` bundles, scenario options, and terminal
+  metadata as pretty-printed JSON for debugger-oriented replay.
 - [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
   is the current default scenario layer. It currently builds a three-validator,
   single-slot SCP program and can inspect both boundary state and replay
@@ -134,14 +138,18 @@ large SCP property suite.
   - `--fifo`
   - `--parallel` / `--workers`
   - `--print-stats`
-  - `--dump-initial-steps`
-  - `--dump-terminal-trace`
-  - `--dump-terminal-replay-trace`
+  - `--fail-on-first-terminal`
+  - `--write-trace-json`
+  - `--replay-trace-json`
+  - `--replay-node N|all`
 - The investigation runner now wraps thread-step exceptions as DPOR error
   executions, dumps replay lead-ins for all scenario threads with the failing
-  thread first, and exits nonzero with the original exception message.
+  thread first, can fail fast on the first terminal execution for smoke-test
+  workflows, can write the first terminal execution as a structured JSON
+  artifact, can reload that artifact for deterministic replay without running
+  DPOR, and exits nonzero with the original exception message.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 22 smoke tests. The checked-in coverage exercises:
+  currently contains 25 smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -161,6 +169,8 @@ large SCP property suite.
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
+  - JSON round-trips for scenario options and raw per-thread traces
+  - trace-bundle write/load/replay of a captured error execution
 
 ## Verification in this workspace
 
@@ -175,10 +185,6 @@ I verified the current state directly in this tree:
   `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
 - `./src/scp-dpor-investigation --stop-on-externalize --depth 16` reported
   `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
-- `./src/scp-dpor-investigation --with-nomination-timers --dump-initial-steps
-  3` shows the leader's step 2 as `receive(nonblocking=true)`, while adding
-  `--max-nomination-timers-round 0` changes that same step to
-  `receive(nonblocking=false)`.
 - `./src/scp-dpor-investigation --stop-on-commit --with-balloting-timers
   --max-balloting-timers-round 0 --depth 16` reported
   `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
@@ -193,6 +199,11 @@ I verified the current state directly in this tree:
   `kind=all-explored executions=40 full=1 error=0 depth-limit=39`.
 - `./src/scp-dpor-investigation --download-succeeds-in-round 1 --depth 12`
   reported `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
+- `./src/scp-dpor-investigation --fail-on-first-terminal --depth 12` dumped
+  replay traces for the first terminal execution, reported
+  `kind=stopped executions=1 full=0 error=0 depth-limit=1`, and exited with
+  `error: stopped at first terminal execution because
+  --fail-on-first-terminal was set for smoke testing`.
 - `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
   --depth 12` exited with
   `error: full execution missing EXTERNALIZE envelope from node-index=0

@@ -4,9 +4,11 @@
 
 #include "scp/test/ScpDporDefaultScenario.h"
 #include "scp/test/ScpDporInvestigationUtils.h"
+#include "scp/test/ScpDporTraceJson.h"
 #include "test/Catch2.h"
 
 #include <algorithm>
+#include <filesystem>
 #include <optional>
 #include <stdexcept>
 
@@ -156,6 +158,67 @@ fullExecutionExternalizedValuesAgree(
     return true;
 }
 
+bool
+sameScenarioOptions(ScpDporDefaultScenario::Options const& lhs,
+                    ScpDporDefaultScenario::Options const& rhs)
+{
+    return lhs.mValidators == rhs.mValidators &&
+           lhs.mQuorumSet == rhs.mQuorumSet &&
+           lhs.mSlotIndex == rhs.mSlotIndex &&
+           lhs.mPreviousValue == rhs.mPreviousValue &&
+           lhs.mInitialValues == rhs.mInitialValues &&
+           lhs.mStopOnPrepare == rhs.mStopOnPrepare &&
+           lhs.mStopOnCommit == rhs.mStopOnCommit &&
+           lhs.mStopOnExternalize == rhs.mStopOnExternalize &&
+           lhs.mPrepareBoundaryCounter == rhs.mPrepareBoundaryCounter &&
+           lhs.mMaxNominationRound == rhs.mMaxNominationRound &&
+           lhs.mMaxBallotingRound == rhs.mMaxBallotingRound &&
+           lhs.mMaxNominationTimersRound == rhs.mMaxNominationTimersRound &&
+           lhs.mMaxBallotingTimersRound == rhs.mMaxBallotingTimersRound &&
+           lhs.mNominationTimerSetLimit == rhs.mNominationTimerSetLimit &&
+           lhs.mEnableNominationTimeouts == rhs.mEnableNominationTimeouts &&
+           lhs.mEnableBallotingTimeouts == rhs.mEnableBallotingTimeouts &&
+           lhs.mDownloadTimeMode == rhs.mDownloadTimeMode &&
+           lhs.mTxSetStatusMode == rhs.mTxSetStatusMode &&
+           lhs.mDownloadSucceedsInRound == rhs.mDownloadSucceedsInRound &&
+           lhs.mInitialNominationTimeoutMS == rhs.mInitialNominationTimeoutMS &&
+           lhs.mIncrementNominationTimeoutMS ==
+               rhs.mIncrementNominationTimeoutMS &&
+           lhs.mInitialBallotTimeoutMS == rhs.mInitialBallotTimeoutMS &&
+           lhs.mIncrementBallotTimeoutMS == rhs.mIncrementBallotTimeoutMS;
+}
+
+TraceBundle
+makeTraceBundleForExecution(
+    ScpDporDefaultScenario const& scenario,
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
+    dpor::model::CommunicationModel communicationModel,
+    TerminalMeta terminal)
+{
+    TraceBundle bundle;
+    bundle.mOptions = scenario.options();
+    bundle.mCommunicationModel = communicationModel;
+    bundle.mTerminal = std::move(terminal);
+    bundle.mThreadTraces.reserve(scenario.options().mValidators.size());
+    for (std::size_t nodeIndex = 0;
+         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+    {
+        auto const threadID = threadIdForNodeIndex(nodeIndex);
+        bundle.mThreadTraces.push_back(
+            ThreadTraceRecord{
+                .mThreadID = threadID,
+                .mTrace = execution.graph.thread_trace(threadID)});
+    }
+    return bundle;
+}
+
+std::filesystem::path
+traceJsonTempPath(std::string_view name)
+{
+    return std::filesystem::temp_directory_path() /
+           std::filesystem::path(std::string(name) + ".json");
+}
+
 } // namespace
 
 TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
@@ -250,6 +313,57 @@ TEST_CASE("scp dpor scenario supports same and unique initial value presets",
     REQUIRE(uniqueScenario.options().mInitialValues.at(1) !=
             uniqueScenario.options().mInitialValues.at(2));
     REQUIRE(uniqueVotes.front() != sameVotes.front());
+}
+
+TEST_CASE("scp dpor trace json round-trips scenario options",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mStopOnCommit = true;
+    options.mMaxNominationRound = 2;
+    options.mMaxBallotingRound = 3;
+    options.mMaxNominationTimersRound = 4;
+    options.mMaxBallotingTimersRound = 5;
+    options.mNominationTimerSetLimit = 6;
+    options.mEnableNominationTimeouts = true;
+    options.mEnableBallotingTimeouts = true;
+    options.mDownloadTimeMode =
+        ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+    options.mDownloadSucceedsInRound = 7;
+    options.mInitialNominationTimeoutMS = 1200;
+    options.mIncrementNominationTimeoutMS = 1300;
+    options.mInitialBallotTimeoutMS = 1400;
+    options.mIncrementBallotTimeoutMS = 1500;
+
+    auto const roundTripped = optionsFromJson(toJson(options));
+
+    REQUIRE(sameScenarioOptions(roundTripped, options));
+}
+
+TEST_CASE("scp dpor trace json round-trips thread traces",
+          "[scp][dpor][smoke]")
+{
+    ScpDporDefaultScenario scenario;
+    auto program = scenario.makeProgram();
+    auto const& leader = program.threads.at(threadIdForNodeIndex(0));
+    auto const firstSend = requireSendLabel(leader({}, 0));
+
+    ThreadTrace trace;
+    trace.push_back(ObservedValue::bottom());
+    trace.push_back(ObservedValue{firstSend.value});
+    trace.push_back(ObservedValue{makeTimerChoiceValue(
+        scenario.options().mSlotIndex, Slot::NOMINATION_TIMER)});
+    trace.push_back(ObservedValue{makeTxSetDownloadWaitTimeChoiceValue(
+        scenario.options().mSlotIndex, std::chrono::milliseconds(1500))});
+    trace.push_back(ObservedValue{makeTxSetStatusChoiceValue(
+        scenario.options().mSlotIndex, DporScpTxSetStatus::Invalid)});
+
+    auto const roundTripped = threadTraceFromJson(toJson(trace));
+
+    REQUIRE(roundTripped == trace);
 }
 
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",
@@ -350,6 +464,86 @@ TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
                 scenario.options().mSlotIndex, DporScpTxSetStatus::Invalid)});
     REQUIRE(replayInspection->mReplayErrorMessage.has_value());
     REQUIRE(replayInspection->mReplayErrorMessage->find(
+                "moved to a bad state") != std::string::npos);
+}
+
+TEST_CASE("scp dpor trace json writes loads and replays an error execution",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = false;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+    ScpDporDefaultScenario scenario(std::move(options));
+
+    std::optional<TraceBundle> bundle;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = wrapProgramExceptionsAsErrorExecutions(
+        scenario.makeProgram());
+    config.max_depth = 13;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto const errorExecution = findErrorExecution(
+                scenario.options().mValidators.size(), execution);
+            if (!errorExecution)
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+
+            bundle = makeTraceBundleForExecution(
+                scenario, execution, dpor::model::CommunicationModel::Async,
+                TerminalMeta{
+                    .mKind = execution.kind,
+                    .mFailureMessage = errorExecution->mMessage,
+                    .mFocusNodeIndex = errorExecution->mNodeIndex,
+                    .mFocusThreadID = errorExecution->mThreadID});
+            return dpor::algo::TerminalExecutionAction::Stop;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(bundle.has_value());
+
+    auto const path = traceJsonTempPath("scp-dpor-trace-json-error");
+    std::filesystem::remove(path);
+    writeTraceBundle(path, *bundle);
+    auto const loaded = loadTraceBundle(path);
+    std::filesystem::remove(path);
+
+    REQUIRE(loaded.mVersion == 1);
+    REQUIRE(sameScenarioOptions(loaded.mOptions, bundle->mOptions));
+    REQUIRE(loaded.mCommunicationModel == bundle->mCommunicationModel);
+    REQUIRE(loaded.mTerminal.mKind == bundle->mTerminal.mKind);
+    REQUIRE(loaded.mTerminal.mFailureMessage == bundle->mTerminal.mFailureMessage);
+    REQUIRE(loaded.mTerminal.mFocusNodeIndex == bundle->mTerminal.mFocusNodeIndex);
+    REQUIRE(loaded.mTerminal.mFocusThreadID == bundle->mTerminal.mFocusThreadID);
+    REQUIRE(loaded.mThreadTraces.size() == bundle->mThreadTraces.size());
+    for (std::size_t i = 0; i < bundle->mThreadTraces.size(); ++i)
+    {
+        REQUIRE(loaded.mThreadTraces.at(i).mThreadID ==
+                bundle->mThreadTraces.at(i).mThreadID);
+        REQUIRE(loaded.mThreadTraces.at(i).mTrace ==
+                bundle->mThreadTraces.at(i).mTrace);
+    }
+
+    ScpDporDefaultScenario loadedScenario(loaded.mOptions);
+    auto const inspection = loadedScenario.inspectThreadReplayTrace(
+        loaded.mTerminal.mFocusNodeIndex,
+        loaded.mThreadTraces.at(loaded.mTerminal.mFocusNodeIndex).mTrace);
+
+    REQUIRE(!inspection.mSteps.empty());
+    auto const& failingStep = inspection.mSteps.back();
+    REQUIRE(failingStep.mNestedChoices.size() == 2);
+    REQUIRE(failingStep.mNestedChoices.at(0) ==
+            ObservedValue{makeTxSetStatusChoiceValue(
+                loaded.mOptions.mSlotIndex, DporScpTxSetStatus::Waiting)});
+    REQUIRE(failingStep.mNestedChoices.at(1) ==
+            ObservedValue{makeTxSetStatusChoiceValue(
+                loaded.mOptions.mSlotIndex, DporScpTxSetStatus::Invalid)});
+    REQUIRE(inspection.mReplayErrorMessage.has_value());
+    REQUIRE(inspection.mReplayErrorMessage->find(
                 "moved to a bad state") != std::string::npos);
 }
 
