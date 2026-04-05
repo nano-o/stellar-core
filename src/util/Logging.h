@@ -22,6 +22,42 @@
 #include <memory>
 #include <spdlog/spdlog.h>
 
+namespace stellar
+{
+typedef std::shared_ptr<spdlog::logger> LogPtr;
+}
+
+#else
+
+namespace stellar
+{
+typedef void* LogPtr;
+}
+
+#endif
+
+#if defined(STELLAR_DISABLE_LOGGING)
+
+// Compile-eliminate all log calls. Used by DPOR targets where SCP code is
+// replayed millions of times and even the level-check overhead matters.
+#define LOG_CHECK(logger, level, action) (void)0
+#define CLOG_TRACE(partition, f, ...) (void)0
+#define CLOG_DEBUG(partition, f, ...) (void)0
+#define CLOG_INFO(partition, f, ...) (void)0
+#define CLOG_WARNING(partition, f, ...) (void)0
+#define CLOG_ERROR(partition, f, ...) (void)0
+#define CLOG_FATAL(partition, f, ...) (void)0
+#define LOG_TRACE(lg, fmt, ...) (void)0
+#define LOG_DEBUG(lg, fmt, ...) (void)0
+#define LOG_INFO(lg, fmt, ...) (void)0
+#define LOG_WARNING(lg, fmt, ...) (void)0
+#define LOG_ERROR(lg, fmt, ...) (void)0
+#define LOG_FATAL(lg, fmt, ...) (void)0
+#define GET_LOG(name) nullptr
+#define DEFAULT_LOG nullptr
+
+#elif defined(USE_SPDLOG)
+
 #define LOG_CHECK(logger, level, action) \
     do \
     { \
@@ -77,10 +113,6 @@
 
 #define GET_LOG(name) spdlog::get(name)
 #define DEFAULT_LOG spdlog::default_logger()
-namespace stellar
-{
-typedef std::shared_ptr<spdlog::logger> LogPtr;
-}
 
 #else
 // No spdlog either: delegate back to old logging interface, which will
@@ -116,10 +148,6 @@ typedef std::shared_ptr<spdlog::logger> LogPtr;
     CLOG(LVL_FATAL, logger) << fmt::format(f, ##__VA_ARGS__)
 #define GET_LOG(name) name
 #define DEFAULT_LOG nullptr
-namespace stellar
-{
-typedef void* LogPtr;
-}
 
 #endif
 

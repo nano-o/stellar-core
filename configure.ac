@@ -474,6 +474,72 @@ AC_ARG_ENABLE(tests,
         [Disable building test suite]))
 AM_CONDITIONAL(BUILD_TESTS, [test x$enable_tests != xno])
 
+AC_ARG_ENABLE(dpor,
+    AS_HELP_STRING([--enable-dpor],
+        [Enable optional DPOR SCP test targets]))
+AC_ARG_WITH(dpor-dir,
+    AS_HELP_STRING([--with-dpor-dir=PATH],
+        [Path to a CPP-DPOR source checkout (default: external/dpor, then ../dpor)]))
+AC_ARG_VAR([DPOR_CPPFLAGS], [Preprocessor flags for DPOR targets])
+AC_ARG_VAR([DPOR_CXXFLAGS], [C++ flags for DPOR targets])
+
+DPOR_DIR=
+stellar_core_dpor_dir_candidate=
+test "${DPOR_CPPFLAGS+set}" || DPOR_CPPFLAGS=
+test "${DPOR_CXXFLAGS+set}" || DPOR_CXXFLAGS=
+
+AS_IF([test "x$enable_dpor" = "xyes"], [
+  AS_IF([test "x$enable_tests" = "xno"], [
+    AC_MSG_ERROR([--enable-dpor requires tests to be enabled])
+  ])
+
+  AS_IF([test -n "$with_dpor_dir" && test "x$with_dpor_dir" != "xno"], [
+    stellar_core_dpor_dir_candidate="$with_dpor_dir"
+  ], [test -d "$srcdir/external/dpor/include"], [
+    stellar_core_dpor_dir_candidate="$srcdir/external/dpor"
+  ], [test -d "$srcdir/../dpor/include"], [
+    stellar_core_dpor_dir_candidate="$srcdir/../dpor"
+  ], [
+    AC_MSG_ERROR([cannot find a DPOR checkout; clone https://github.com/nano-o/CPP-DPOR.git into external/dpor or pass --with-dpor-dir])
+  ])
+
+  DPOR_DIR="$(cd "$stellar_core_dpor_dir_candidate" && pwd)"
+  AS_IF([test ! -d "$DPOR_DIR/include"], [
+    AC_MSG_ERROR([DPOR include directory not found under $DPOR_DIR/include])
+  ])
+
+  AS_IF([test -z "$DPOR_CPPFLAGS"], [
+    DPOR_CPPFLAGS="-I$DPOR_DIR/include"
+  ])
+  AS_IF([test -z "$DPOR_CXXFLAGS"], [
+    DPOR_CXXFLAGS="-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING"
+  ])
+
+  AC_MSG_CHECKING([whether DPOR headers compile with configured target flags])
+  stellar_core_save_CPPFLAGS="$CPPFLAGS"
+  stellar_core_save_CXXFLAGS="$CXXFLAGS"
+  CPPFLAGS="$CPPFLAGS $DPOR_CPPFLAGS"
+  CXXFLAGS="$CXXFLAGS $DPOR_CXXFLAGS"
+  AC_COMPILE_IFELSE(
+    [AC_LANG_SOURCE([[
+#include <dpor/algo/dpor.hpp>
+
+int main()
+{
+    return 0;
+}
+]])],
+    [AC_MSG_RESULT([yes])],
+    [AC_MSG_RESULT([no])
+     AC_MSG_ERROR([failed to compile a DPOR probe with DPOR_CPPFLAGS/DPOR_CXXFLAGS])])
+  CPPFLAGS="$stellar_core_save_CPPFLAGS"
+  CXXFLAGS="$stellar_core_save_CXXFLAGS"
+])
+AC_SUBST(DPOR_DIR)
+AC_SUBST(DPOR_CPPFLAGS)
+AC_SUBST(DPOR_CXXFLAGS)
+AM_CONDITIONAL(ENABLE_DPOR, [test x$enable_dpor = xyes])
+
 AC_ARG_ENABLE(thread-jitter,
     AS_HELP_STRING([--enable-thread-jitter],
         [Enable thread jitter injection for finding concurrency bugs]))
@@ -587,4 +653,3 @@ ac_configure_args="$ac_configure_args $(esc "CC=$CC" "CXX=$CXX" "CFLAGS=$CFLAGS"
 AC_CONFIG_HEADERS(config.h)
 AC_CONFIG_FILES(lib/Makefile src/Makefile Makefile)
 AC_OUTPUT
-

@@ -717,7 +717,7 @@ BallotProtocol::getPrepareCandidates(SCPStatement const& hint)
     }
     break;
     default:
-        abort();
+        dbgAbort();
     };
 
     std::set<SCPBallot> candidates;
@@ -778,7 +778,7 @@ BallotProtocol::getPrepareCandidates(SCPStatement const& hint)
             }
             break;
             default:
-                abort();
+                dbgAbort();
             }
         }
     }
@@ -1219,7 +1219,7 @@ BallotProtocol::attemptAcceptCommit(SCPStatement const& hint)
         break;
     }
     default:
-        abort();
+        dbgAbort();
     };
 
     if (mPhase == SCP_PHASE_CONFIRM)
@@ -1364,7 +1364,7 @@ statementBallotCounter(SCPStatement const& st)
         return UINT32_MAX;
     default:
         // Should never be called with SCP_ST_NOMINATE.
-        abort();
+        dbgAbort();
     }
 }
 
@@ -1477,7 +1477,7 @@ BallotProtocol::attemptConfirmCommit(SCPStatement const& hint)
         break;
     }
     default:
-        abort();
+        dbgAbort();
     };
 
     if (!areBallotsCompatible(ballot, mCommit->getBallot()))
@@ -1952,7 +1952,7 @@ BallotProtocol::getStatementValues(SCPStatement const& st)
         values.insert(st.pledges.externalize().commit.value);
         break;
     default:
-        abort();
+        dbgAbort();
     }
     return values;
 }

@@ -268,16 +268,17 @@ NominationProtocol::updateRoundLeaders()
         mRoundLeaders.insert(newRoundLeaders.begin(), newRoundLeaders.end());
         if (oldSize != mRoundLeaders.size())
         {
-            if (Logging::logDebug("SCP"))
+// Skip leader-string formatting entirely in DPOR builds where logging is
+// compile-elided.
+#if !defined(STELLAR_DISABLE_LOGGING)
+            CLOG_DEBUG(SCP, "updateRoundLeaders: {} -> {}", oldSize,
+                       mRoundLeaders.size());
+            for (auto const& rl : mRoundLeaders)
             {
-                CLOG_DEBUG(SCP, "updateRoundLeaders: {} -> {}", oldSize,
-                           mRoundLeaders.size());
-                for (auto const& rl : mRoundLeaders)
-                {
-                    CLOG_DEBUG(SCP, "    leader {}",
-                               mSlot.getSCPDriver().toShortString(rl));
-                }
+                CLOG_DEBUG(SCP, "    leader {}",
+                           mSlot.getSCPDriver().toShortString(rl));
             }
+#endif
             return;
         }
         else
