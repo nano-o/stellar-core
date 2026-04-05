@@ -545,7 +545,9 @@ TEST_CASE("scp dpor captures a real BallotProtocol dbgAbort as an error "
 
 TEST_CASE("scp dpor exploration finds a prepare boundary", "[scp][dpor][smoke]")
 {
-    ScpDporDefaultScenario scenario;
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = true;
+    ScpDporDefaultScenario scenario(std::move(options));
     bool foundPrepareBoundary = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -670,7 +672,9 @@ TEST_CASE("scp dpor node detects the balloting round boundary",
 TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
           "[scp][dpor][smoke]")
 {
-    ScpDporDefaultScenario scenario;
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = true;
+    ScpDporDefaultScenario scenario(std::move(options));
     std::vector<ThreadTrace> threadTraces(
         scenario.options().mValidators.size());
     bool capturedTrace = false;
@@ -739,7 +743,9 @@ TEST_CASE("scp dpor replay trace captures follower emitted envelopes",
 TEST_CASE("scp dpor emitted envelopes expose missing externalize",
           "[scp][dpor][smoke]")
 {
-    ScpDporDefaultScenario scenario;
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = true;
+    ScpDporDefaultScenario scenario(std::move(options));
     std::size_t fullExecutionsChecked = 0;
     bool foundMissingExternalize = false;
 

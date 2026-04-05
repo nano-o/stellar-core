@@ -322,11 +322,6 @@ makeScenario(CommandLineOptions const& options)
     scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
     scenarioOptions.mStopOnCommit = options.mStopOnCommit;
     scenarioOptions.mStopOnExternalize = options.mStopOnExternalize;
-    if (!scenarioOptions.mStopOnPrepare && !scenarioOptions.mStopOnCommit &&
-        !scenarioOptions.mStopOnExternalize)
-    {
-        scenarioOptions.mStopOnPrepare = true;
-    }
     scenarioOptions.mMaxNominationRound = options.mMaxNominationRound;
     scenarioOptions.mMaxBallotingRound = options.mMaxBallotingRound;
     scenarioOptions.mMaxNominationTimersRound =
