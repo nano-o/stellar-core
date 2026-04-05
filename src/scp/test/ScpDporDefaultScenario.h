@@ -52,7 +52,7 @@ class ScpDporDefaultScenario
         uint64_t mSlotIndex{0};
         Value mPreviousValue;
         std::vector<Value> mInitialValues;
-        bool mStopOnPrepare{true};
+        bool mStopOnPrepare{false};
         bool mStopOnCommit{false};
         bool mStopOnExternalize{false};
         uint32_t mPrepareBoundaryCounter{
@@ -62,7 +62,7 @@ class ScpDporDefaultScenario
         std::optional<uint32_t> mMaxNominationTimersRound;
         std::optional<uint32_t> mMaxBallotingTimersRound;
         std::optional<uint32_t> mNominationTimerSetLimit;
-        bool mEnableNominationTimeouts{true};
+        bool mEnableNominationTimeouts{false};
         bool mEnableBallotingTimeouts{false};
         DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::BelowThreshold};
         TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::Valid};
@@ -164,7 +164,6 @@ class ScpDporDefaultScenario
         options.mPreviousValue = makeValue("prev");
         options.mInitialValues = {makeValue("x"), makeValue("y"),
                                   makeValue("y")};
-        options.mEnableNominationTimeouts = false;
         return options;
     }
 
