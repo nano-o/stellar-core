@@ -814,4 +814,103 @@ TEST_CASE("scp dpor full executions keep externalized values in agreement",
     REQUIRE(fullExecutionsChecked == result.full_executions_explored);
 }
 
+TEST_CASE("scp dpor node latches txset status once a value is resolved",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+    Value otherValue;
+    otherValue.push_back('y');
+
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+    auto const validCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+
+    node.restoreReplayBaseline(validCheckpoint);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kFullyValidatedValue);
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+
+    node.restoreReplayBaseline(checkpoint);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
+    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
+            SCPDriver::kInvalidValue);
+    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
+            SCPDriver::kInvalidValue);
+
+    node.restoreReplayBaseline(checkpoint);
+    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
+                      DporScpNode::TxSetStatusChoiceRequired);
+}
+
+TEST_CASE(
+    "scp dpor replay reuses a latched txset status once a value is resolved",
+    "[scp][dpor][smoke]")
+{
+    auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2001);
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 1;
+    qSet.validators.push_back(validator.getPublicKey());
+
+    Value previousValue;
+    previousValue.push_back('p');
+    Value initialValue;
+    initialValue.push_back('x');
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    std::vector<SecretKey> validators{validator};
+    std::vector<Value> initialValues{initialValue};
+    ScpDporReplaySupport replaySupport(validators, qSet, 0, previousValue,
+                                       initialValues, config);
+    DporScpNode node(validator, qSet, config);
+
+    std::vector<SCPDriver::ValidationLevel> seenStatuses;
+    node.setupTimer(0, Slot::NOMINATION_TIMER, std::chrono::milliseconds(10),
+                    [&node, &seenStatuses, initialValue]() {
+                        seenStatuses.push_back(
+                            node.validateValue(0, initialValue, false));
+                        seenStatuses.push_back(
+                            node.validateValue(0, initialValue, false));
+                    });
+
+    ThreadTrace trace;
+    trace.emplace_back(ObservedValue::bottom());
+    trace.emplace_back(
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Invalid));
+    trace.emplace_back(ObservedValue::bottom());
+
+    auto const progress =
+        replaySupport.replayObservation(node, 0, trace, 0,
+                                        std::optional<int>{
+                                            Slot::NOMINATION_TIMER});
+
+    REQUIRE(progress.mConsumedTraceEntries == 2);
+    REQUIRE(progress.mConsumedStepCount == 1);
+    REQUIRE_FALSE(progress.mPendingEvent.has_value());
+    REQUIRE(progress.mObservedBottom);
+
+    std::vector<SCPDriver::ValidationLevel> const expectedStatuses{
+        SCPDriver::kInvalidValue, SCPDriver::kInvalidValue};
+    REQUIRE(seenStatuses == expectedStatuses);
+}
+
 } // namespace stellar::scpdpor
