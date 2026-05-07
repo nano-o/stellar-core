@@ -342,7 +342,8 @@ class HerderSCPDriver : public SCPDriver
                                  LedgerHeaderHistoryEntry const& lcl,
                                  uint64_t closeTimeOffset) const;
 
-    bool deserializeAndValidateStellarValue(Value const& value,
+    bool deserializeAndValidateStellarValue(uint64_t slotIndex,
+                                            Value const& value,
                                             StellarValue& sv) const;
     void extractValidUpgrades(StellarValue& sv, bool nomination) const;
 };

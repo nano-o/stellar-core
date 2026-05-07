@@ -362,7 +362,8 @@ HerderSCPDriver::validatePastOrFutureValue(
 // TODO(rebase): Consider just folding this into
 // deserializeAndValidateStellarValue.
 bool
-HerderSCPDriver::checkValueTypeAndSkipHashInvariant(StellarValue const& b) const
+HerderSCPDriver::checkValueTypeAndSkipHashInvariant(
+    StellarValue const& b) const
 {
     // Only signed and skip values participate in SCP.
     // TODO(8): Grep for signature checks and update them for SKIP values
@@ -491,7 +492,8 @@ HerderSCPDriver::validateValueAgainstLocalState(
 }
 
 bool
-HerderSCPDriver::deserializeAndValidateStellarValue(Value const& value,
+HerderSCPDriver::deserializeAndValidateStellarValue(uint64_t slotIndex,
+                                                    Value const& value,
                                                     StellarValue& sv) const
 {
     ZoneScoped;
@@ -505,7 +507,6 @@ HerderSCPDriver::deserializeAndValidateStellarValue(Value const& value,
         return false;
     }
 
-    // TODO(rebase): Remove slot index after rebase
     if (!checkValueTypeAndSkipHashInvariant(sv))
     {
         return false;
@@ -573,7 +574,7 @@ HerderSCPDriver::validateValue(uint64_t slotIndex, Value const& value,
     }
 
     StellarValue b;
-    if (!deserializeAndValidateStellarValue(value, b))
+    if (!deserializeAndValidateStellarValue(slotIndex, value, b))
     {
         mSCPMetrics.mValueInvalid.Mark();
         return SCPDriver::kInvalidValue;
@@ -611,7 +612,7 @@ HerderSCPDriver::extractValidValue(uint64_t slotIndex, Value const& value)
 {
     ZoneScoped;
     StellarValue b;
-    if (!deserializeAndValidateStellarValue(value, b))
+    if (!deserializeAndValidateStellarValue(slotIndex, value, b))
     {
         return nullptr;
     }

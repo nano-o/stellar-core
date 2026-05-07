@@ -56,6 +56,86 @@ endif
 if BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES) $(SRC_TEST_CXX_FILES)
 CARGO_FEATURE_TESTUTILS = --features testutils
+if ENABLE_DPOR
+EXTRA_PROGRAMS = stellar-core-dpor-tests scp-dpor-investigation
+
+SCP_DPOR_TEST_MAIN = scp/test/SCPDporTestMain.cpp
+SCP_DPOR_INVESTIGATION_MAIN = scp/test/DporScpInvestigationMain.cpp
+SCP_DPOR_GENERATED_FILES = rust/RustBridge.h
+SCP_DPOR_GENERATED_SOURCE_FILES = \
+	$(SRC_X_FILES:.x=.h) \
+	main/StellarCoreVersion.cpp \
+	main/XDRFilesSha256.cpp \
+	util/xdrquery/XDRQueryScanner.cpp \
+	util/xdrquery/XDRQueryParser.h \
+	util/xdrquery/XDRQueryParser.cpp \
+	rust/RustBridge.h \
+	rust/RustBridge.cpp
+SCP_DPOR_BUILD_ARTIFACTS = \
+	$(XDRC) \
+	$(libsodium_LIBS) \
+	$(xdrpp_LIBS)
+SCP_DPOR_BUILD_PREREQUISITES = \
+	$(SCP_DPOR_GENERATED_SOURCE_FILES) \
+	$(SCP_DPOR_BUILD_ARTIFACTS)
+SCP_DPOR_LINK_DEPS = \
+	$(soci_LIBS) \
+	$(libmedida_LIBS) \
+	$(top_builddir)/lib/lib3rdparty.a \
+	$(libsodium_LIBS) \
+	$(xdrpp_LIBS)
+SCP_DPOR_SHARED_SOURCE_FILES = $(SRC_DPOR_SUPPORT_H_FILES) $(SRC_DPOR_SUPPORT_CXX_FILES) $(SCP_DPOR_GENERATED_FILES)
+SCP_DPOR_REBUILT_SCP_SOURCE_FILES = \
+	scp/BallotProtocol.cpp \
+	scp/LocalNode.cpp \
+	scp/NominationProtocol.cpp \
+	scp/QuorumSetUtils.cpp \
+	scp/SCP.cpp \
+	scp/SCPDriver.cpp \
+	scp/Slot.cpp
+SCP_DPOR_REPLACED_OBJECTS = $(SCP_DPOR_REBUILT_SCP_SOURCE_FILES:.cpp=.$(OBJEXT))
+STELLAR_CORE_DPOR_LINK_OBJECTS = \
+	$(filter-out main/main.$(OBJEXT) $(SCP_DPOR_REPLACED_OBJECTS),$(stellar_core_OBJECTS))
+
+# Direct `make -C src ...` skips the top-level `all` target and sibling `lib`
+# recursion, so DPOR targets must materialize their generated sources and
+# out-of-dir build artifacts explicitly on clean trees.
+$(soci_LIBS) $(libmedida_LIBS) $(top_builddir)/lib/lib3rdparty.a:
+	cd $(top_builddir)/lib && $(MAKE) $(AM_MAKEFLAGS) $(notdir $@)
+
+$(libsodium_LIBS):
+	cd $(top_builddir)/lib/libsodium && $(MAKE) $(AM_MAKEFLAGS) src/libsodium/libsodium.la
+
+$(xdrpp_LIBS):
+	cd $(top_builddir)/lib/xdrpp && $(MAKE) $(AM_MAKEFLAGS) xdrpp/libxdrpp.a
+
+$(XDRC):
+	cd $(top_builddir)/lib/xdrpp && $(MAKE) $(AM_MAKEFLAGS) xdrc/xdrc$(EXEEXT)
+
+stellar_core_dpor_tests_SOURCES = \
+	$(SCP_DPOR_REBUILT_SCP_SOURCE_FILES) \
+	$(SCP_DPOR_SHARED_SOURCE_FILES) \
+	$(SRC_DPOR_TEST_CXX_FILES) \
+	$(SCP_DPOR_TEST_MAIN)
+stellar_core_dpor_tests_CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)
+stellar_core_dpor_tests_CXXFLAGS = $(AM_CXXFLAGS) $(DPOR_CXXFLAGS)
+stellar_core_dpor_tests_DEPENDENCIES = $(SCP_DPOR_LINK_DEPS) $(STELLAR_CORE_DPOR_LINK_OBJECTS) $(LIBRUST_STELLAR_CORE)
+stellar_core_dpor_tests_LDADD = \
+	$(STELLAR_CORE_DPOR_LINK_OBJECTS) \
+	$(stellar_core_LDADD)
+
+scp_dpor_investigation_SOURCES = \
+	$(SCP_DPOR_REBUILT_SCP_SOURCE_FILES) \
+	$(SCP_DPOR_SHARED_SOURCE_FILES) \
+	$(SCP_DPOR_INVESTIGATION_MAIN)
+scp_dpor_investigation_CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)
+scp_dpor_investigation_CXXFLAGS = $(AM_CXXFLAGS) $(DPOR_CXXFLAGS)
+scp_dpor_investigation_DEPENDENCIES = $(SCP_DPOR_LINK_DEPS) $(STELLAR_CORE_DPOR_LINK_OBJECTS) $(LIBRUST_STELLAR_CORE)
+scp_dpor_investigation_LDADD = \
+	$(STELLAR_CORE_DPOR_LINK_OBJECTS) \
+	$(stellar_core_LDADD)
+$(stellar_core_dpor_tests_OBJECTS) $(scp_dpor_investigation_OBJECTS) $(STELLAR_CORE_DPOR_LINK_OBJECTS): $(SCP_DPOR_BUILD_PREREQUISITES)
+endif
 else # !BUILD_TESTS
 stellar_core_SOURCES = main/StellarCoreVersion.cpp main/XDRFilesSha256.cpp $(SRC_CXX_FILES)
 CARGO_FEATURE_TESTUTILS =
