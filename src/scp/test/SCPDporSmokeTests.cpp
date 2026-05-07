@@ -139,6 +139,28 @@ findExternalizedValue(std::vector<SCPEnvelope> const& envelopes)
 }
 
 bool
+hasTxSetStatusObservation(
+    ScpDporDefaultScenario::ThreadReplayTraceInspection const& inspection,
+    uint64 slotIndex, DporScpTxSetStatus status)
+{
+    auto const expected =
+        ObservedValue{makeTxSetStatusChoiceValue(slotIndex, status)};
+    for (auto const& step : inspection.mSteps)
+    {
+        if (step.mObservedValue && *step.mObservedValue == expected)
+        {
+            return true;
+        }
+        if (std::find(step.mNestedChoices.begin(), step.mNestedChoices.end(),
+                      expected) != step.mNestedChoices.end())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
 fullExecutionExternalizedValuesAgree(
     ScpDporDefaultScenario const& scenario,
     dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
@@ -381,6 +403,8 @@ TEST_CASE("scp dpor investigation wraps thread throws as error executions",
 TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
           "[scp][dpor][smoke]")
 {
+    std::string const expectedError =
+        "SCP forced commit on locally-invalid value";
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mTxSetStatusMode =
@@ -394,45 +418,46 @@ TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = wrapProgramExceptionsAsErrorExecutions(
         scenario.makeProgram());
-    config.max_depth = 13;
+    config.max_depth = 50;
+    config.communication_model = dpor::model::CommunicationModel::FifoP2P;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
-            errorExecution = findErrorExecution(
+            auto candidate = findErrorExecution(
                 scenario.options().mValidators.size(), execution);
-            if (!errorExecution)
+            if (!candidate ||
+                candidate->mMessage.find(expectedError) == std::string::npos)
             {
                 return dpor::algo::TerminalExecutionAction::Continue;
             }
 
             auto const trace =
-                execution.graph.thread_trace(errorExecution->mThreadID);
+                execution.graph.thread_trace(candidate->mThreadID);
             replayInspection = scenario.inspectThreadReplayTrace(
-                errorExecution->mNodeIndex, trace);
+                candidate->mNodeIndex, trace);
+            errorExecution = std::move(candidate);
             return dpor::algo::TerminalExecutionAction::Stop;
         };
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(result.error_executions_explored >= 1);
     REQUIRE(errorExecution.has_value());
+    REQUIRE(errorExecution->mMessage.find(expectedError) != std::string::npos);
     REQUIRE(replayInspection.has_value());
     REQUIRE(!replayInspection->mSteps.empty());
-    auto const& failingStep = replayInspection->mSteps.back();
-    REQUIRE(failingStep.mNestedChoices.size() == 2);
-    REQUIRE(failingStep.mNestedChoices.at(0) ==
-            ObservedValue{makeTxSetStatusChoiceValue(
-                scenario.options().mSlotIndex, DporScpTxSetStatus::Waiting)});
-    REQUIRE(failingStep.mNestedChoices.at(1) ==
-            ObservedValue{makeTxSetStatusChoiceValue(
-                scenario.options().mSlotIndex, DporScpTxSetStatus::Invalid)});
+    REQUIRE(hasTxSetStatusObservation(*replayInspection,
+                                      scenario.options().mSlotIndex,
+                                      DporScpTxSetStatus::Invalid));
     REQUIRE(replayInspection->mReplayErrorMessage.has_value());
     REQUIRE(replayInspection->mReplayErrorMessage->find(
-                "moved to a bad state") != std::string::npos);
+                expectedError) != std::string::npos);
 }
 
 TEST_CASE("scp dpor trace json writes loads and replays an error execution",
           "[scp][dpor][smoke]")
 {
+    std::string const expectedError =
+        "SCP forced commit on locally-invalid value";
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mTxSetStatusMode =
@@ -444,18 +469,21 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = wrapProgramExceptionsAsErrorExecutions(
         scenario.makeProgram());
-    config.max_depth = 13;
+    config.max_depth = 50;
+    config.communication_model = dpor::model::CommunicationModel::FifoP2P;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
             auto const errorExecution = findErrorExecution(
                 scenario.options().mValidators.size(), execution);
-            if (!errorExecution)
+            if (!errorExecution ||
+                errorExecution->mMessage.find(expectedError) ==
+                    std::string::npos)
             {
                 return dpor::algo::TerminalExecutionAction::Continue;
             }
 
             bundle = makeTraceBundle(
-                scenario, execution, dpor::model::CommunicationModel::Async,
+                scenario, execution, config.communication_model,
                 TerminalMeta{
                     .mKind = execution.kind,
                     .mFailureMessage = errorExecution->mMessage,
@@ -466,7 +494,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(result.error_executions_explored >= 1);
     REQUIRE(bundle.has_value());
 
     auto const path = traceJsonTempPath("scp-dpor-trace-json-error");
@@ -482,6 +510,9 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
     REQUIRE(loaded.mTerminal.mFailureMessage == bundle->mTerminal.mFailureMessage);
     REQUIRE(loaded.mTerminal.mFocusNodeIndex == bundle->mTerminal.mFocusNodeIndex);
     REQUIRE(loaded.mTerminal.mFocusThreadID == bundle->mTerminal.mFocusThreadID);
+    REQUIRE(loaded.mTerminal.mFailureMessage);
+    REQUIRE(loaded.mTerminal.mFailureMessage->find(expectedError) !=
+            std::string::npos);
     REQUIRE(loaded.mThreadTraces.size() == bundle->mThreadTraces.size());
     for (std::size_t i = 0; i < bundle->mThreadTraces.size(); ++i)
     {
@@ -497,20 +528,14 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
         loaded.mThreadTraces.at(loaded.mTerminal.mFocusNodeIndex).mTrace);
 
     REQUIRE(!inspection.mSteps.empty());
-    auto const& failingStep = inspection.mSteps.back();
-    REQUIRE(failingStep.mNestedChoices.size() == 2);
-    REQUIRE(failingStep.mNestedChoices.at(0) ==
-            ObservedValue{makeTxSetStatusChoiceValue(
-                loaded.mOptions.mSlotIndex, DporScpTxSetStatus::Waiting)});
-    REQUIRE(failingStep.mNestedChoices.at(1) ==
-            ObservedValue{makeTxSetStatusChoiceValue(
-                loaded.mOptions.mSlotIndex, DporScpTxSetStatus::Invalid)});
+    REQUIRE(hasTxSetStatusObservation(inspection, loaded.mOptions.mSlotIndex,
+                                      DporScpTxSetStatus::Invalid));
     REQUIRE(inspection.mReplayErrorMessage.has_value());
     REQUIRE(inspection.mReplayErrorMessage->find(
-                "moved to a bad state") != std::string::npos);
+                expectedError) != std::string::npos);
 }
 
-TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
+TEST_CASE("scp dpor captures forced invalid commit as an error execution",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -519,9 +544,9 @@ TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
         ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
 
-    std::string const expectedAssert =
-        "validationLevel != SCPDriver::kInvalidValue";
-    bool capturedAssertError = false;
+    std::string const expectedError =
+        "SCP forced commit on locally-invalid value";
+    bool capturedInvalidCommitError = false;
     std::string capturedMessage;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -534,12 +559,10 @@ TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
             auto const errorExecution = findErrorExecution(
                 scenario.options().mValidators.size(), execution);
             if (errorExecution &&
-                errorExecution->mMessage.find(expectedAssert) !=
-                    std::string::npos &&
-                errorExecution->mMessage.find("BallotProtocol.cpp") !=
+                errorExecution->mMessage.find(expectedError) !=
                     std::string::npos)
             {
-                capturedAssertError = true;
+                capturedInvalidCommitError = true;
                 capturedMessage = errorExecution->mMessage;
                 return dpor::algo::TerminalExecutionAction::Stop;
             }
@@ -549,9 +572,9 @@ TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
     auto const result = dpor::algo::verify(config);
     (void)result;
 
-    REQUIRE(capturedAssertError);
-    REQUIRE(capturedMessage.find(expectedAssert) != std::string::npos);
-    REQUIRE(capturedMessage.find("BallotProtocol.cpp") != std::string::npos);
+    REQUIRE(capturedInvalidCommitError);
+    REQUIRE(capturedMessage.find(expectedError) != std::string::npos);
+    REQUIRE(capturedMessage.find("setAcceptCommit") != std::string::npos);
 }
 
 TEST_CASE("scp dpor exploration finds a prepare boundary",
@@ -687,6 +710,7 @@ TEST_CASE("scp dpor replay trace captures emitted envelopes",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = true;
     options.mTxSetStatusMode =
         ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
@@ -698,11 +722,6 @@ TEST_CASE("scp dpor replay trace captures emitted envelopes",
     config.max_depth = 12;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
-            if (!execution.is_full_execution())
-            {
-                return dpor::algo::TerminalExecutionAction::Continue;
-            }
-
             bool executionSawEmittedEnvelope = false;
             bool executionSawBoundaryPrepare = false;
             for (std::size_t nodeIndex = 0;

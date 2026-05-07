@@ -304,6 +304,8 @@ class DporScpNode : public SCPDriver
     signEnvelope(SCPEnvelope& envelope) override;
     SCPQuorumSetPtr
     getQSet(Hash const& qSetHash) override;
+    bool
+    isEnvelopeReady(SCPEnvelope const& envelope) const override;
     std::optional<std::chrono::milliseconds>
     getTxSetDownloadWaitTime(Value const& value) const override;
     std::chrono::milliseconds
