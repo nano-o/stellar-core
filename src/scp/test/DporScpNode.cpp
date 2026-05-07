@@ -663,6 +663,16 @@ DporScpNode::getQSet(Hash const& qSetHash)
     return it->second;
 }
 
+bool
+DporScpNode::isEnvelopeReady(SCPEnvelope const&) const
+{
+    // The DPOR model delivers envelopes directly to SCP, bypassing
+    // PendingEnvelopes, so this SCPDriver hook is not called during DPOR
+    // exploration. If that changes, readiness should be modeled in the
+    // scenario layer rather than as an independent nondeterministic choice.
+    return true;
+}
+
 std::optional<std::chrono::milliseconds>
 DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
 {
