@@ -5,10 +5,10 @@ Status snapshot as of 2026-04-04 for branch `skip-ledgers-p25-dpor-2`.
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
 dedicated binaries, a split support layer (`types` / `bridge` / `node` /
-`replay` / `scenario`), and a configurable three-node scenario that can explore
-prepare, commit, timer, and txset-wait behavior. It is still isolated from the
-main `stellar-core` binary and from `stellar-core test`, but it is not yet a
-large SCP property suite.
+`replay` / `scenario`), and a configurable three- or four-node scenario that can
+explore prepare, commit, timer, and txset-wait behavior. It is still isolated
+from the main `stellar-core` binary and from `stellar-core test`, but it is not
+yet a large SCP property suite.
 
 ## Build integration
 
@@ -87,9 +87,9 @@ large SCP property suite.
   communication model, terminal metadata (including failure text and focus
   node/thread), and one exact `ThreadTrace` per thread.
 - [`src/scp/test/ScpDporDefaultScenario.h`](../src/scp/test/ScpDporDefaultScenario.h)
-  is the current default scenario layer. It currently builds a three-validator,
-  single-slot SCP program and can inspect both boundary state and replay
-  traces.
+  is the current default scenario layer. It currently builds a three- or
+  four-validator, single-slot SCP program and can inspect both boundary state
+  and replay traces.
 - Production SCP changes are still small. The main hooks are `friend class
   DporScpNode` in:
   - [`src/scp/SCP.h`](../src/scp/SCP.h)
@@ -142,6 +142,8 @@ large SCP property suite.
       the externalized value, and a failing execution dumps its replay trace
   - `--with-nomination-timers`
   - `--with-balloting-timers`
+  - `--nodes 3|4` / `--validators 3|4`
+    - the four-node configuration uses a 3-of-4 quorum set on every node
   - `--init same|unique`
   - `--max-nomination-round`
   - `--max-balloting-round`
@@ -180,7 +182,7 @@ large SCP property suite.
   Reload uses the stored scenario options and thread traces with the existing
   harness replay seam rather than reconstructing a DPOR schedule.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
-  currently contains 26 smoke tests. The checked-in coverage exercises:
+  contains DPOR smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
   - initial envelope fanout
   - prepare-boundary discovery
@@ -255,9 +257,9 @@ I verified the current state directly in this tree:
 - DPOR is still isolated from the main binary and from `stellar-core test`, but
   it remains nested under the test build and still reuses a large portion of
   the normal object graph.
-- The checked-in exploration model is still a three-node, single-slot SCP
-  harness. There is not yet a broader family of scenarios or a multi-slot /
-  ledger-closing model.
+- The checked-in exploration model is still a small single-slot SCP harness
+  with three- and four-node configurations. There is not yet a broader family
+  of scenarios or a multi-slot / ledger-closing model.
 - Trace JSON load validates the artifact schema and per-trace invariants, but
   some default-scenario semantic checks are still deferred until replay builds
   `ScpDporDefaultScenario` from the stored options rather than being enforced

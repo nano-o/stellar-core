@@ -24,6 +24,10 @@ namespace stellar::scpdpor
 class ScpDporDefaultScenario
 {
   public:
+    static constexpr std::size_t DEFAULT_VALIDATOR_COUNT = 3;
+    static constexpr std::size_t MIN_VALIDATOR_COUNT = 3;
+    static constexpr std::size_t MAX_VALIDATOR_COUNT = 4;
+
     enum class DownloadTimeMode : std::uint8_t
     {
         BelowThreshold,
@@ -121,10 +125,10 @@ class ScpDporDefaultScenario
                          mOptions.mInitialValues,
                          buildNodeConfiguration(mOptions))
     {
-        if (mOptions.mValidators.size() != 3)
+        if (!isSupportedValidatorCount(mOptions.mValidators.size()))
         {
             throw std::invalid_argument(
-                "default scenario currently requires exactly 3 validators");
+                "default scenario currently supports 3 or 4 validators");
         }
         if (mOptions.mInitialValues.size() != mOptions.mValidators.size())
         {
@@ -153,19 +157,46 @@ class ScpDporDefaultScenario
     static Options
     makeDefaultOptions()
     {
+        return makeDefaultOptions(DEFAULT_VALIDATOR_COUNT);
+    }
+
+    static Options
+    makeDefaultOptions(std::size_t validatorCount)
+    {
         Options options;
-        options.mValidators = {SecretKey::pseudoRandomForTestingFromSeed(1000),
-                               SecretKey::pseudoRandomForTestingFromSeed(1001),
-                               SecretKey::pseudoRandomForTestingFromSeed(1002)};
-        options.mQuorumSet.threshold = 2;
+        if (!isSupportedValidatorCount(validatorCount))
+        {
+            throw std::invalid_argument(
+                "default scenario validator count must be 3 or 4");
+        }
+
+        options.mValidators.reserve(validatorCount);
+        for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+        {
+            options.mValidators.push_back(
+                SecretKey::pseudoRandomForTestingFromSeed(1000 + nodeIndex));
+        }
+
+        options.mQuorumSet.threshold = static_cast<uint32_t>(validatorCount - 1);
         for (auto const& validator : options.mValidators)
         {
             options.mQuorumSet.validators.push_back(validator.getPublicKey());
         }
         options.mPreviousValue = makeValue("prev");
-        options.mInitialValues = {makeValue("x"), makeValue("y"),
-                                  makeValue("y")};
+        options.mInitialValues.reserve(validatorCount);
+        options.mInitialValues.push_back(makeValue("x"));
+        for (std::size_t nodeIndex = 1; nodeIndex < validatorCount; ++nodeIndex)
+        {
+            options.mInitialValues.push_back(makeValue("y"));
+        }
         return options;
+    }
+
+    static bool
+    isSupportedValidatorCount(std::size_t validatorCount)
+    {
+        return validatorCount >= MIN_VALIDATOR_COUNT &&
+               validatorCount <= MAX_VALIDATOR_COUNT;
     }
 
     static std::vector<Value>

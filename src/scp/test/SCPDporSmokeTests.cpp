@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <stdexcept>
 
 namespace stellar::scpdpor
@@ -239,6 +240,61 @@ TEST_CASE("scp dpor leader initially sends to both followers then waits",
     REQUIRE(receive.is_blocking());
 }
 
+TEST_CASE("scp dpor default scenario supports four validators",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions(4);
+
+    REQUIRE(options.mValidators.size() == 4);
+    REQUIRE(options.mQuorumSet.threshold == 3);
+    REQUIRE(options.mQuorumSet.validators.size() == 4);
+    for (auto const& validator : options.mValidators)
+    {
+        auto const publicKey = validator.getPublicKey();
+        REQUIRE(std::find(options.mQuorumSet.validators.begin(),
+                          options.mQuorumSet.validators.end(),
+                          publicKey) != options.mQuorumSet.validators.end());
+    }
+
+    REQUIRE(options.mInitialValues.size() == 4);
+    REQUIRE(options.mInitialValues.at(0) != options.mInitialValues.at(1));
+    REQUIRE(options.mInitialValues.at(1) == options.mInitialValues.at(2));
+    REQUIRE(options.mInitialValues.at(2) == options.mInitialValues.at(3));
+
+    ScpDporDefaultScenario scenario(options);
+    auto program = scenario.makeProgram();
+    REQUIRE(program.threads.size() == 4);
+
+    std::optional<std::size_t> initialSender;
+    for (std::size_t nodeIndex = 0; nodeIndex < options.mValidators.size();
+         ++nodeIndex)
+    {
+        auto const& thread = program.threads.at(threadIdForNodeIndex(nodeIndex));
+        auto const firstEvent = thread({}, 0);
+        if (firstEvent && std::holds_alternative<SendLabel>(*firstEvent))
+        {
+            initialSender = nodeIndex;
+            break;
+        }
+    }
+    REQUIRE(initialSender);
+
+    auto const& sender =
+        program.threads.at(threadIdForNodeIndex(*initialSender));
+    std::set<dpor::model::ThreadId> destinations;
+    for (std::size_t step = 0; step < options.mValidators.size() - 1; ++step)
+    {
+        auto const send = requireSendLabel(sender({}, step));
+        destinations.insert(send.destination);
+    }
+    REQUIRE(destinations.size() == options.mValidators.size() - 1);
+    REQUIRE(!destinations.contains(threadIdForNodeIndex(*initialSender)));
+
+    auto const receive = requireReceiveLabel(
+        sender({}, options.mValidators.size() - 1));
+    REQUIRE(receive.is_blocking());
+}
+
 TEST_CASE("scp dpor nomination timer round cap disables later timer firings",
           "[scp][dpor][smoke]")
 {
@@ -326,6 +382,9 @@ TEST_CASE("scp dpor trace json round-trips scenario options",
     auto const roundTripped = optionsFromJson(toJson(options));
 
     REQUIRE(roundTripped == options);
+
+    auto const fourNodeOptions = ScpDporDefaultScenario::makeDefaultOptions(4);
+    REQUIRE(optionsFromJson(toJson(fourNodeOptions)) == fourNodeOptions);
 }
 
 TEST_CASE("scp dpor trace json round-trips thread traces",

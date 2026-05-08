@@ -34,6 +34,8 @@ struct CommandLineOptions
         mInitMode;
     std::size_t mWorkers{1};
     std::size_t mDepth{12};
+    std::size_t mValidatorCount{
+        stellar::scpdpor::ScpDporDefaultScenario::DEFAULT_VALIDATOR_COUNT};
     std::optional<uint32_t> mMaxNominationRound;
     std::optional<uint32_t> mMaxBallotingRound;
     std::optional<uint32_t> mMaxNominationTimersRound;
@@ -190,6 +192,10 @@ printUsage(char const* argv0)
               << "  --depth N\n"
               << "      DPOR max depth (default: " << defaults.mDepth
               << ")\n"
+              << "  --nodes N | --validators N\n"
+              << "      Validator count, currently 3 or 4; 4 uses a"
+              << " 3-of-4 quorum set on every node"
+              << " (default: " << defaults.mValidatorCount << ")\n"
               << "  --max-nomination-round N"
               << " | --max-nomination-rounds N\n"
               << "      Stop when nomination round reaches N"
@@ -385,6 +391,19 @@ parseSizeValue(std::string_view arg, std::string_view value)
     }
 }
 
+std::size_t
+parseValidatorCountValue(std::string_view arg, std::string_view value)
+{
+    auto const validatorCount = parseSizeValue(arg, value);
+    if (!stellar::scpdpor::ScpDporDefaultScenario::isSupportedValidatorCount(
+            validatorCount))
+    {
+        throw std::invalid_argument(
+            std::string(arg) + " currently supports only 3 or 4 validators");
+    }
+    return validatorCount;
+}
+
 stellar::scpdpor::ScpDporDefaultScenario
 makeScenario(CommandLineOptions const& options)
 {
@@ -400,7 +419,8 @@ makeScenario(CommandLineOptions const& options)
     }
 
     auto scenarioOptions =
-        stellar::scpdpor::ScpDporDefaultScenario::makeDefaultOptions();
+        stellar::scpdpor::ScpDporDefaultScenario::makeDefaultOptions(
+            options.mValidatorCount);
     if (options.mInitMode)
     {
         scenarioOptions.mInitialValues =
@@ -969,6 +989,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         {
             options.mDepth =
                 static_cast<std::size_t>(std::stoull(argv[++i]));
+            continue;
+        }
+        if ((arg == "--nodes" || arg == "--validators") && i + 1 < argc)
+        {
+            options.mValidatorCount = parseValidatorCountValue(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-nomination-round" ||
