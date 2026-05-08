@@ -36,6 +36,10 @@ struct CommandLineOptions
     std::size_t mDepth{12};
     std::size_t mValidatorCount{
         stellar::scpdpor::ScpDporDefaultScenario::DEFAULT_VALIDATOR_COUNT};
+    std::optional<std::size_t> mMaxQueuedTasks;
+    std::optional<std::size_t> mSyncSteps;
+    std::optional<std::size_t> mProgressCounterFlushInterval;
+    std::optional<std::size_t> mProgressPollIntervalSteps;
     std::optional<uint32_t> mMaxNominationRound;
     std::optional<uint32_t> mMaxBallotingRound;
     std::optional<uint32_t> mMaxNominationTimersRound;
@@ -57,6 +61,7 @@ struct CommandLineOptions
     bool mNominationAlwaysWaiting{false};
     std::optional<uint32_t> mDownloadSucceedsInRound;
     bool mFailOnFirstTerminal{false};
+    bool mSerializeTerminalCallbacks{false};
     std::optional<std::chrono::seconds> mPrintStatsInterval;
     std::string mTraceDir{"dpor-traces"};
     std::optional<std::string> mReplayTraceJsonPath;
@@ -180,6 +185,7 @@ void
 printUsage(char const* argv0)
 {
     auto const defaults = CommandLineOptions{};
+    auto const parallelDefaults = dpor::algo::ParallelVerifyOptions{};
 
     std::cerr << "Usage: " << argv0 << " [options]\n\n"
               << "Options:\n"
@@ -189,6 +195,23 @@ printUsage(char const* argv0)
               << "      Use the host parallelism shortcut"
               << " (default: off; this machine: "
               << defaultParallelWorkers() << " workers)\n"
+              << "  --max-queued-tasks N\n"
+              << "      Parallel worker queue budget; 0 uses DPOR default"
+              << " (default: " << parallelDefaults.max_queued_tasks << ")\n"
+              << "  --sync-steps N\n"
+              << "      Parallel stop/progress synchronization interval;"
+              << " 0 enables strict stop checks"
+              << " (default: " << parallelDefaults.sync_steps << ")\n"
+              << "  --progress-counter-flush-interval N\n"
+              << "      Flush worker-local progress counters after N terminal"
+              << " executions; 0 uses DPOR default"
+              << " (default: "
+              << parallelDefaults.progress_counter_flush_interval << ")\n"
+              << "  --progress-poll-interval-steps N\n"
+              << "      Poll the progress clock every N progress checkpoints;"
+              << " 0 or 1 polls every checkpoint"
+              << " (default: " << parallelDefaults.progress_poll_interval_steps
+              << ")\n"
               << "  --depth N\n"
               << "      DPOR max depth (default: " << defaults.mDepth
               << ")\n"
@@ -272,6 +295,10 @@ printUsage(char const* argv0)
               << "  --fail-on-first-terminal\n"
               << "      Smoke-test mode: stop at the first terminal"
               << " execution, dump replay traces, and fail the command"
+              << " (default: off)\n"
+              << "  --serialize-terminal-callbacks\n"
+              << "      Diagnostic mode: run terminal observer bodies under"
+              << " one mutex to isolate callback concurrency"
               << " (default: off)\n"
               << "  --trace-dir DIR\n"
               << "      Directory for JSON trace files written on error"
@@ -985,6 +1012,27 @@ parseOptions(char const* argv0, int argc, char* argv[])
                 static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
+        if (arg == "--max-queued-tasks" && i + 1 < argc)
+        {
+            options.mMaxQueuedTasks = parseSizeValue(arg, argv[++i]);
+            continue;
+        }
+        if (arg == "--sync-steps" && i + 1 < argc)
+        {
+            options.mSyncSteps = parseSizeValue(arg, argv[++i]);
+            continue;
+        }
+        if (arg == "--progress-counter-flush-interval" && i + 1 < argc)
+        {
+            options.mProgressCounterFlushInterval =
+                parseSizeValue(arg, argv[++i]);
+            continue;
+        }
+        if (arg == "--progress-poll-interval-steps" && i + 1 < argc)
+        {
+            options.mProgressPollIntervalSteps = parseSizeValue(arg, argv[++i]);
+            continue;
+        }
         if (arg == "--depth" && i + 1 < argc)
         {
             options.mDepth =
@@ -1100,6 +1148,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mFailOnFirstTerminal = true;
             continue;
         }
+        if (arg == "--serialize-terminal-callbacks")
+        {
+            options.mSerializeTerminalCallbacks = true;
+            continue;
+        }
         if (arg == "--trace-dir" && i + 1 < argc)
         {
             options.mTraceDir = argv[++i];
@@ -1179,18 +1232,27 @@ main(int argc, char* argv[])
                     }
                 };
         }
-        std::mutex terminalExecutionMutex;
+        std::recursive_mutex terminalExecutionMutex;
         bool dumpedTerminalExecution = false;
         std::optional<std::string> failureMessage;
         config.on_terminal_execution =
             [&](dpor::algo::TerminalExecutionT<
                     stellar::scpdpor::ScpDporValue> const& execution) {
+                std::unique_lock<std::recursive_mutex> serializedCallbackGuard;
+                if (options.mSerializeTerminalCallbacks)
+                {
+                    serializedCallbackGuard =
+                        std::unique_lock<std::recursive_mutex>(
+                            terminalExecutionMutex);
+                }
+
                 auto const errorExecution =
                     stellar::scpdpor::findErrorExecution(
                         scenario.options().mValidators.size(), execution);
                 if (errorExecution)
                 {
-                    std::lock_guard<std::mutex> guard(terminalExecutionMutex);
+                    std::lock_guard<std::recursive_mutex> guard(
+                        terminalExecutionMutex);
                     if (!failureMessage)
                     {
                         failureMessage = errorExecution->mMessage;
@@ -1217,7 +1279,7 @@ main(int argc, char* argv[])
                         findNodeMissingExternalize(scenario, execution);
                     if (missingNodeIndex)
                     {
-                        std::lock_guard<std::mutex> guard(
+                        std::lock_guard<std::recursive_mutex> guard(
                             terminalExecutionMutex);
                         if (!failureMessage)
                         {
@@ -1257,7 +1319,7 @@ main(int argc, char* argv[])
                         findAgreementFailure(scenario, execution);
                     if (agreementFailure)
                     {
-                        std::lock_guard<std::mutex> guard(
+                        std::lock_guard<std::recursive_mutex> guard(
                             terminalExecutionMutex);
                         if (!failureMessage)
                         {
@@ -1304,7 +1366,8 @@ main(int argc, char* argv[])
 
                 if (options.mFailOnFirstTerminal)
                 {
-                    std::lock_guard<std::mutex> guard(terminalExecutionMutex);
+                    std::lock_guard<std::recursive_mutex> guard(
+                        terminalExecutionMutex);
                     if (!failureMessage)
                     {
                         failureMessage = failOnFirstTerminalFailureMessage();
@@ -1330,11 +1393,31 @@ main(int argc, char* argv[])
                 return dpor::algo::TerminalExecutionAction::Continue;
             };
 
-        auto const result = options.mWorkers > 1
-                                ? dpor::algo::verify_parallel(
-                                      config,
-                                      {.max_workers = options.mWorkers})
-                                : dpor::algo::verify(config);
+        dpor::algo::ParallelVerifyOptions parallelOptions;
+        parallelOptions.max_workers = options.mWorkers;
+        if (options.mMaxQueuedTasks)
+        {
+            parallelOptions.max_queued_tasks = *options.mMaxQueuedTasks;
+        }
+        if (options.mSyncSteps)
+        {
+            parallelOptions.sync_steps = *options.mSyncSteps;
+        }
+        if (options.mProgressCounterFlushInterval)
+        {
+            parallelOptions.progress_counter_flush_interval =
+                *options.mProgressCounterFlushInterval;
+        }
+        if (options.mProgressPollIntervalSteps)
+        {
+            parallelOptions.progress_poll_interval_steps =
+                *options.mProgressPollIntervalSteps;
+        }
+
+        auto const result =
+            options.mWorkers > 1
+                ? dpor::algo::verify_parallel(config, parallelOptions)
+                : dpor::algo::verify(config);
 
         std::cout << "kind="
                   << (result.all_explored() ? "all-explored" : "stopped")
