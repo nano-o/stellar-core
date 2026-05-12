@@ -793,8 +793,20 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
 }
 
 SCPDriver::ValidationLevel
-DporScpNode::validateValue(uint64, Value const& value, bool nomination)
+DporScpNode::validateValue(uint64, Value const& value, bool nomination,
+                           SCPDriver::ValidationExtraInfo* extraInfo) const
 {
+    if (extraInfo)
+    {
+        // DPOR scenarios always treat values as if they target the current
+        // ledger so that BallotProtocol::maybeReplaceValueWithSkip and the
+        // PREPARE-leniency path remain exercisable. Setting these
+        // deterministically (rather than letting the model checker choose)
+        // avoids expanding the search tree.
+        extraInfo->mIsCurrentLedger = true;
+        extraInfo->mIsTxSetInvalid = false;
+    }
+
     if (isSkipLedgerValue(value))
     {
         return SCPDriver::kFullyValidatedValue;
@@ -833,7 +845,12 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination)
     {
         mPendingTxSetDownloadStatusCounts.erase(value);
     }
-    return validationLevelForTxSetStatus(status);
+    auto level = validationLevelForTxSetStatus(status);
+    if (extraInfo && level == SCPDriver::kInvalidValue)
+    {
+        extraInfo->mIsTxSetInvalid = true;
+    }
+    return level;
 }
 
 Value

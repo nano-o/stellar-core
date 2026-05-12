@@ -313,8 +313,9 @@ class DporScpNode : public SCPDriver
     void
     emitEnvelope(SCPEnvelope const& envelope) override;
     ValidationLevel
-    validateValue(uint64 slotIndex, Value const& value,
-                  bool nomination) override;
+    validateValue(uint64 slotIndex, Value const& value, bool nomination,
+                  SCPDriver::ValidationExtraInfo* extraInfo = nullptr)
+        const override;
     Value
     makeSkipLedgerValueFromValue(Value const& value) const override;
     bool
