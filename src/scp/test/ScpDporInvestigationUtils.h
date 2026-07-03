@@ -23,6 +23,17 @@ struct InvestigationErrorExecution
     std::string mMessage;
 };
 
+// Full and Blocked partition the maximal executions: Full means every thread
+// completed, Blocked means at least one thread ended waiting on a blocking
+// receive no message can satisfy. Checks over complete interleavings (missing
+// externalize, agreement) must consider both kinds.
+inline bool
+isMaximalExecution(
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
+{
+    return execution.is_full_execution() || execution.is_blocked_execution();
+}
+
 inline Program
 wrapProgramExceptionsAsErrorExecutions(Program program)
 {

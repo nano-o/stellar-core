@@ -173,6 +173,8 @@ terminalExecutionKindName(dpor::algo::TerminalExecutionKind kind)
     {
     case dpor::algo::TerminalExecutionKind::Full:
         return "full";
+    case dpor::algo::TerminalExecutionKind::Blocked:
+        return "blocked";
     case dpor::algo::TerminalExecutionKind::Error:
         return "error";
     case dpor::algo::TerminalExecutionKind::DepthLimit:
@@ -243,13 +245,13 @@ printUsage(char const* argv0)
               << "  --stop-on-externalize\n"
               << "      Stop at the externalize boundary (default: off)\n"
               << "  --must-externalize\n"
-              << "      Require every full execution to include an"
-              << " EXTERNALIZE envelope from every node;"
+              << "      Require every maximal (full or blocked) execution to"
+              << " include an EXTERNALIZE envelope from every node;"
               << " dumps replay trace on failure"
               << " (default: off)\n"
               << "  --check-agreement\n"
-              << "      Require every full execution's EXTERNALIZE"
-              << " envelopes to agree on the externalized value;"
+              << "      Require every maximal (full or blocked) execution's"
+              << " EXTERNALIZE envelopes to agree on the externalized value;"
               << " dumps replay trace on failure"
               << " (default: off)\n"
               << "  --with-nomination-timers\n"
@@ -573,6 +575,7 @@ printProgressSnapshot(std::ostream& out,
          << elapsedMS.count()
          << " terminal_executions=" << snapshot.terminal_executions
          << " full_executions=" << snapshot.full_executions
+         << " blocked_executions=" << snapshot.blocked_executions
          << " error_executions=" << snapshot.error_executions
          << " depth_limit_executions=" << snapshot.depth_limit_executions
          << " active_workers=" << snapshot.active_workers << "/"
@@ -750,7 +753,7 @@ findNodeMissingExternalize(
     dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
         execution)
 {
-    if (!execution.is_full_execution())
+    if (!stellar::scpdpor::isMaximalExecution(execution))
     {
         return std::nullopt;
     }
@@ -783,7 +786,7 @@ findAgreementFailure(
     dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
         execution)
 {
-    if (!execution.is_full_execution())
+    if (!stellar::scpdpor::isMaximalExecution(execution))
     {
         return std::nullopt;
     }
@@ -1284,7 +1287,9 @@ main(int argc, char* argv[])
                         if (!failureMessage)
                         {
                             std::ostringstream message;
-                            message << "full execution missing EXTERNALIZE"
+                            message << terminalExecutionKindName(
+                                           execution.kind)
+                                    << " execution missing EXTERNALIZE"
                                     << " envelope from node-index="
                                     << *missingNodeIndex
                                     << " thread="
@@ -1324,7 +1329,9 @@ main(int argc, char* argv[])
                         if (!failureMessage)
                         {
                             std::ostringstream message;
-                            message << "full execution has conflicting"
+                            message << terminalExecutionKindName(
+                                           execution.kind)
+                                    << " execution has conflicting"
                                     << " EXTERNALIZE values between"
                                     << " node-index="
                                     << agreementFailure->mReference.mNodeIndex
@@ -1392,6 +1399,32 @@ main(int argc, char* argv[])
 
                 return dpor::algo::TerminalExecutionAction::Continue;
             };
+        config.on_fatal_error =
+            [](dpor::algo::FatalErrorContextT<
+                stellar::scpdpor::ScpDporValue> const& context) {
+                std::string message = "<unknown exception>";
+                try
+                {
+                    std::rethrow_exception(context.exception);
+                }
+                catch (std::exception const& ex)
+                {
+                    message = ex.what();
+                }
+                catch (...)
+                {
+                }
+                std::cerr << "fatal-error: " << message << "\n"
+                          << dpor::model::format_graph(
+                                 context.graph,
+                                 [](stellar::scpdpor::ScpDporValue const&
+                                        value) {
+                                     std::ostringstream out;
+                                     out << value;
+                                     return out.str();
+                                 })
+                          << std::flush;
+            };
 
         dpor::algo::ParallelVerifyOptions parallelOptions;
         parallelOptions.max_workers = options.mWorkers;
@@ -1423,6 +1456,7 @@ main(int argc, char* argv[])
                   << (result.all_explored() ? "all-explored" : "stopped")
                   << " executions=" << result.executions_explored
                   << " full=" << result.full_executions_explored
+                  << " blocked=" << result.blocked_executions_explored
                   << " error=" << result.error_executions_explored
                   << " depth-limit=" << result.depth_limit_executions_explored
                   << "\n"

@@ -162,11 +162,11 @@ hasTxSetStatusObservation(
 }
 
 bool
-fullExecutionExternalizedValuesAgree(
+maximalExecutionExternalizedValuesAgree(
     ScpDporDefaultScenario const& scenario,
     dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
 {
-    if (!execution.is_full_execution())
+    if (!isMaximalExecution(execution))
     {
         return true;
     }
@@ -835,7 +835,7 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
     options.mTxSetStatusMode =
         ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
-    std::size_t fullExecutionsChecked = 0;
+    std::size_t maximalExecutionsChecked = 0;
     bool foundMissingExternalize = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -843,12 +843,12 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
     config.max_depth = 12;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
-            if (!execution.is_full_execution())
+            if (!isMaximalExecution(execution))
             {
                 return dpor::algo::TerminalExecutionAction::Continue;
             }
 
-            ++fullExecutionsChecked;
+            ++maximalExecutionsChecked;
             for (std::size_t nodeIndex = 0;
                  nodeIndex < scenario.options().mValidators.size();
                  ++nodeIndex)
@@ -869,11 +869,11 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
 
     static_cast<void>(dpor::algo::verify(config));
 
-    REQUIRE(fullExecutionsChecked > 0);
+    REQUIRE(maximalExecutionsChecked > 0);
     REQUIRE(foundMissingExternalize);
 }
 
-TEST_CASE("scp dpor full executions keep externalized values in agreement",
+TEST_CASE("scp dpor maximal executions keep externalized values in agreement",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -883,27 +883,30 @@ TEST_CASE("scp dpor full executions keep externalized values in agreement",
     options.mDownloadTimeMode =
         ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
-    std::size_t fullExecutionsChecked = 0;
+    std::size_t maximalExecutionsChecked = 0;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = scenario.makeProgram();
     config.max_depth = 12;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
-            if (!execution.is_full_execution())
+            if (!isMaximalExecution(execution))
             {
                 return dpor::algo::TerminalExecutionAction::Continue;
             }
 
-            ++fullExecutionsChecked;
-            REQUIRE(fullExecutionExternalizedValuesAgree(scenario, execution));
+            ++maximalExecutionsChecked;
+            REQUIRE(
+                maximalExecutionExternalizedValuesAgree(scenario, execution));
             return dpor::algo::TerminalExecutionAction::Continue;
         };
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.full_executions_explored > 0);
-    REQUIRE(fullExecutionsChecked == result.full_executions_explored);
+    auto const maximalExecutionsExplored = result.full_executions_explored +
+                                           result.blocked_executions_explored;
+    REQUIRE(maximalExecutionsExplored > 0);
+    REQUIRE(maximalExecutionsChecked == maximalExecutionsExplored);
 }
 
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",

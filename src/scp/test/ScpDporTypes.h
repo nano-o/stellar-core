@@ -10,6 +10,7 @@
 #include <dpor/algo/program.hpp>
 #include <dpor/model/event.hpp>
 #include <dpor/model/exploration_graph.hpp>
+#include <dpor/model/format.hpp>
 
 #include <cstdint>
 #include <functional>

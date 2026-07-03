@@ -271,6 +271,8 @@ terminalKindName(dpor::algo::TerminalExecutionKind kind)
     {
     case dpor::algo::TerminalExecutionKind::Full:
         return "full";
+    case dpor::algo::TerminalExecutionKind::Blocked:
+        return "blocked";
     case dpor::algo::TerminalExecutionKind::Error:
         return "error";
     case dpor::algo::TerminalExecutionKind::DepthLimit:
@@ -285,6 +287,10 @@ parseTerminalKind(std::string_view kind)
     if (kind == "full")
     {
         return dpor::algo::TerminalExecutionKind::Full;
+    }
+    if (kind == "blocked")
+    {
+        return dpor::algo::TerminalExecutionKind::Blocked;
     }
     if (kind == "error")
     {

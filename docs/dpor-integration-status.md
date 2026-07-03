@@ -1,6 +1,7 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-04-04 for branch `skip-ledgers-p25-dpor-2`.
+Status snapshot as of 2026-07-02 for branch `skip-ledgers-p26-dpor`, against
+DPOR library commit `b238b19` (`add blocked execution status`).
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -9,6 +10,20 @@ dedicated binaries, a split support layer (`types` / `bridge` / `node` /
 explore prepare, commit, timer, and txset-wait behavior. It is still isolated
 from the main `stellar-core` binary and from `stellar-core test`, but it is not
 yet a large SCP property suite.
+
+The DPOR library now partitions maximal executions into `Full` (every thread
+completed) and `Blocked` (at least one thread ended waiting on a blocking
+receive that no message can satisfy); previously both were classified `Full`.
+The harness treats the union as "maximal" wherever it checks complete
+interleavings (`isMaximalExecution` in
+[`src/scp/test/ScpDporInvestigationUtils.h`](../src/scp/test/ScpDporInvestigationUtils.h)),
+so `--must-externalize` and `--check-agreement` coverage is unchanged. The
+library also introduced a typed exception hierarchy (`dpor/errors.hpp`), a
+`format_graph` helper (`dpor/model/format.hpp`), and an `on_fatal_error`
+diagnostic hook; the harness's existing exception-to-`ErrorLabel` wrapping
+already matches the new error-reporting contract, and the investigation runner
+wires `on_fatal_error` to dump the in-progress execution graph on fatal
+library or harness errors.
 
 ## Build integration
 
@@ -135,11 +150,13 @@ yet a large SCP property suite.
   - `--stop-on-commit`
   - `--stop-on-externalize`
   - `--must-externalize`
-    - full executions require an `EXTERNALIZE` envelope from every node, and a
-      failing execution dumps its replay trace
+    - maximal (full or blocked) executions require an `EXTERNALIZE` envelope
+      from every node, and a failing execution dumps its replay trace; the
+      failure message names the terminal kind that triggered it
   - `--check-agreement`
-    - full executions require all observed `EXTERNALIZE` envelopes to agree on
-      the externalized value, and a failing execution dumps its replay trace
+    - maximal (full or blocked) executions require all observed `EXTERNALIZE`
+      envelopes to agree on the externalized value, and a failing execution
+      dumps its replay trace
   - `--with-nomination-timers`
   - `--with-balloting-timers`
   - `--nodes 3|4` / `--validators 3|4`
@@ -176,6 +193,12 @@ yet a large SCP property suite.
   path as `trace-json=...`, can reload that artifact for deterministic replay
   without rerunning DPOR, and exits nonzero with the original exception
   message.
+- The summary line and `--print-stats` progress lines report the blocked
+  count (`blocked=` / `blocked_executions=`) alongside full, error, and
+  depth-limit counts, and trace bundles serialize the `blocked` terminal kind.
+- The investigation runner registers the library's `on_fatal_error` hook and
+  prints the fatal exception message plus a `format_graph` rendering of the
+  in-progress execution graph to stderr before the exception propagates.
 - The persisted artifact stores exact per-thread observed traces rather than a
   full schedule. Deeper traces with many envelope deliveries can grow
   noticeably because the envelope payloads are persisted as exact base64 XDR.
@@ -192,7 +215,7 @@ yet a large SCP property suite.
   - balloting-round boundaries
   - replay-trace inspection
   - emitted-envelope inspection for missing externalize
-  - full-execution externalization agreement checks
+  - maximal-execution (full or blocked) externalization agreement checks
   - follower timer-before-delivery behavior
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
@@ -210,47 +233,63 @@ yet a large SCP property suite.
 
 ## Verification in this workspace
 
-I verified the current state directly in this tree:
+I verified the current state directly in this tree (DPOR library `b238b19`):
 
-- `make -n -C src stellar-core-dpor-tests scp-dpor-investigation` shows the
-  DPOR targets compiling with `-I.../external/dpor/include -std=c++20
-  -DFMT_CONSTEVAL=`.
+- The build log shows the DPOR targets compiling with
+  `-I.../external/dpor/include -std=c++20 -DFMT_CONSTEVAL=`.
 - `./src/scp-dpor-investigation --depth 12` reported
-  `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
+  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
 - `./src/scp-dpor-investigation --stop-on-commit --depth 16` reported
-  `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+  `kind=all-explored executions=38 full=0 blocked=0 error=0 depth-limit=38`.
 - `./src/scp-dpor-investigation --stop-on-externalize --depth 16` reported
-  `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+  `kind=all-explored executions=38 full=0 blocked=0 error=0 depth-limit=38`.
 - `./src/scp-dpor-investigation --stop-on-commit --with-balloting-timers
   --max-balloting-timers-round 0 --depth 16` reported
-  `kind=all-explored executions=10 full=0 error=0 depth-limit=10`.
+  `kind=all-explored executions=38 full=0 blocked=0 error=0 depth-limit=38`.
 - `./src/scp-dpor-investigation --txset-status waiting --download-time below
   --depth 12` reported
-  `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
+  `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
   --depth 12` reported
-  `kind=all-explored executions=40 full=1 error=0 depth-limit=39`.
+  `kind=all-explored executions=40 full=0 blocked=1 error=0 depth-limit=39`.
 - `./src/scp-dpor-investigation --check-agreement --txset-status nondet
   --download-time nondet --depth 12` reported
-  `kind=all-explored executions=40 full=1 error=0 depth-limit=39`.
+  `kind=all-explored executions=40 full=0 blocked=1 error=0 depth-limit=39`.
+- `./src/scp-dpor-investigation --parallel --workers 4 --txset-status nondet
+  --download-time nondet --depth 12` reported the same counts as the
+  sequential run.
 - `./src/scp-dpor-investigation --download-succeeds-in-round 1 --depth 12`
-  reported `kind=all-explored executions=3 full=0 error=0 depth-limit=3`.
+  reported
+  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
+- `./src/scp-dpor-investigation --fifo --depth 12` reported
+  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
+- `./src/scp-dpor-investigation --nodes 4 --depth 12` reported
+  `kind=all-explored executions=6 full=0 blocked=0 error=0 depth-limit=6`.
 - `./src/scp-dpor-investigation --fail-on-first-terminal --depth 12` dumped
   replay traces for the first terminal execution, reported
-  `kind=stopped executions=1 full=0 error=0 depth-limit=1`, and exited with
-  `error: stopped at first terminal execution because
+  `kind=stopped executions=1 full=0 blocked=0 error=0 depth-limit=1`, and
+  exited nonzero with `error: stopped at first terminal execution because
   --fail-on-first-terminal was set for smoke testing`.
 - `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
-  --depth 12` exited with
+  --depth 20` exited nonzero with
   `error: full execution missing EXTERNALIZE envelope from node-index=0
   thread=0`, dumped the failing replay trace, and reported
-  `kind=stopped executions=4 full=1 error=0 depth-limit=3`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 97
-  assertions in 22 test cases.
-- `./src/stellar-core-dpor-tests "scp dpor exploration finds a commit boundary"`
-  passed after increasing that test's exploration depth to 60.
-- `./src/stellar-core-dpor-tests "scp dpor exploration finds an externalize
-  boundary"` passed.
+  `kind=stopped executions=11 full=1 blocked=0 error=0 depth-limit=10`.
+  (At `--depth 12` the current default scenario reaches no maximal execution,
+  so the check has nothing to flag there.)
+- `./src/scp-dpor-investigation --must-externalize --txset-status nondet
+  --download-time nondet --depth 12` exited nonzero with
+  `error: blocked execution missing EXTERNALIZE envelope from node-index=0
+  thread=0`, wrote a trace bundle with `terminal-kind=blocked`, and that
+  bundle reloaded and replayed cleanly with
+  `--replay-trace-json ... --replay-node all`.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 195
+  assertions in 30 test cases.
+- Rebuilding the pre-update library (`9345ead`) with the pre-update harness
+  produced identical execution counts for the commands above; the only
+  behavioral difference from the library update is the reclassification of
+  maximal executions with blocked threads from `full` to `blocked`
+  (e.g. `full=1` became `blocked=1` in the nondet txset configuration).
 
 ## Current limitations
 
