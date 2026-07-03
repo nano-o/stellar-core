@@ -12,6 +12,9 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
+#include <system_error>
+#include <unistd.h>
 
 namespace stellar::scpdpor
 {
@@ -161,17 +164,12 @@ hasTxSetStatusObservation(
     return false;
 }
 
-bool
-maximalExecutionExternalizedValuesAgree(
+std::vector<Value>
+collectExternalizedValues(
     ScpDporDefaultScenario const& scenario,
     dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
 {
-    if (!isMaximalExecution(execution))
-    {
-        return true;
-    }
-
-    std::optional<Value> referenceValue;
+    std::vector<Value> externalizedValues;
     for (std::size_t nodeIndex = 0;
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
@@ -180,29 +178,35 @@ maximalExecutionExternalizedValuesAgree(
         auto const inspection = scenario.inspectEmittedEnvelopes(nodeIndex, trace);
         auto const externalizedValue =
             findExternalizedValue(inspection.mEmittedEnvelopes);
-        if (!externalizedValue)
+        if (externalizedValue)
         {
-            continue;
-        }
-        if (!referenceValue)
-        {
-            referenceValue = *externalizedValue;
-            continue;
-        }
-        if (*externalizedValue != *referenceValue)
-        {
-            return false;
+            externalizedValues.push_back(*externalizedValue);
         }
     }
-    return true;
+    return externalizedValues;
 }
 
-std::filesystem::path
-traceJsonTempPath(std::string_view name)
+// Owns a temp file path unique to this process, so concurrent test runs on
+// one machine cannot race on the same file; removes it on scope exit even
+// when the test body throws.
+struct TraceJsonTempFile
 {
-    return std::filesystem::temp_directory_path() /
-           std::filesystem::path(std::string(name) + ".json");
-}
+    std::filesystem::path mPath;
+
+    explicit TraceJsonTempFile(std::string_view name)
+        : mPath(std::filesystem::temp_directory_path() /
+                std::filesystem::path(std::string(name) + "-" +
+                                      std::to_string(::getpid()) + ".json"))
+    {
+        std::filesystem::remove(mPath);
+    }
+
+    ~TraceJsonTempFile()
+    {
+        std::error_code ec;
+        std::filesystem::remove(mPath, ec);
+    }
+};
 
 } // namespace
 
@@ -556,11 +560,9 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
     REQUIRE(result.error_executions_explored >= 1);
     REQUIRE(bundle.has_value());
 
-    auto const path = traceJsonTempPath("scp-dpor-trace-json-error");
-    std::filesystem::remove(path);
-    writeTraceBundle(path, *bundle);
-    auto const loaded = loadTraceBundle(path);
-    std::filesystem::remove(path);
+    TraceJsonTempFile tempFile("scp-dpor-trace-json-error");
+    writeTraceBundle(tempFile.mPath, *bundle);
+    auto const loaded = loadTraceBundle(tempFile.mPath);
 
     REQUIRE(loaded.mVersion == 1);
     REQUIRE(loaded.mOptions == bundle->mOptions);
@@ -857,7 +859,11 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
                     threadIdForNodeIndex(nodeIndex));
                 auto const inspection =
                     scenario.inspectEmittedEnvelopes(nodeIndex, trace);
-                if (!hasExternalizeEnvelope(inspection.mEmittedEnvelopes))
+                // Require some emitted envelopes so an inspection regression
+                // that drops all envelopes cannot masquerade as a genuine
+                // missing externalize.
+                if (!inspection.mEmittedEnvelopes.empty() &&
+                    !hasExternalizeEnvelope(inspection.mEmittedEnvelopes))
                 {
                     foundMissingExternalize = true;
                     return dpor::algo::TerminalExecutionAction::Stop;
@@ -876,18 +882,20 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
 TEST_CASE("scp dpor maximal executions keep externalized values in agreement",
           "[scp][dpor][smoke]")
 {
+    // Externalize needs far more depth than the exploration-sweep tests use,
+    // so bound the sweep by stopping once the agreement comparison has
+    // genuinely run on an execution where several nodes externalized; the
+    // final REQUIRE guards against the check regressing into vacuity.
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
-    options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
-    options.mDownloadTimeMode =
-        ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
+    options.mStopOnExternalize = true;
     ScpDporDefaultScenario scenario(std::move(options));
     std::size_t maximalExecutionsChecked = 0;
+    bool comparedMultipleExternalizedValues = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = scenario.makeProgram();
-    config.max_depth = 12;
+    config.max_depth = 150;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
             if (!isMaximalExecution(execution))
@@ -896,17 +904,24 @@ TEST_CASE("scp dpor maximal executions keep externalized values in agreement",
             }
 
             ++maximalExecutionsChecked;
-            REQUIRE(
-                maximalExecutionExternalizedValuesAgree(scenario, execution));
+            auto const externalizedValues =
+                collectExternalizedValues(scenario, execution);
+            for (auto const& externalizedValue : externalizedValues)
+            {
+                REQUIRE(externalizedValue == externalizedValues.front());
+            }
+            if (externalizedValues.size() >= 2)
+            {
+                comparedMultipleExternalizedValues = true;
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
             return dpor::algo::TerminalExecutionAction::Continue;
         };
 
-    auto const result = dpor::algo::verify(config);
+    static_cast<void>(dpor::algo::verify(config));
 
-    auto const maximalExecutionsExplored = result.full_executions_explored +
-                                           result.blocked_executions_explored;
-    REQUIRE(maximalExecutionsExplored > 0);
-    REQUIRE(maximalExecutionsChecked == maximalExecutionsExplored);
+    REQUIRE(maximalExecutionsChecked > 0);
+    REQUIRE(comparedMultipleExternalizedValues);
 }
 
 TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
@@ -974,18 +989,22 @@ TEST_CASE("scp dpor node latches txset wait-time once a value times out",
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    auto const chosenAboveWaitTime = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(chosenAboveWaitTime == aboveTimeout);
     auto const aboveCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    auto const latchedAboveWaitTime = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(latchedAboveWaitTime == aboveTimeout);
 
     node.restoreReplayBaseline(aboveCheckpoint);
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    auto const restoredAboveWaitTime = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(restoredAboveWaitTime == aboveTimeout);
     REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(otherValue),
                       DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetDownloadWaitTimeChoice(belowTimeout);
-    REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    auto const chosenBelowWaitTime = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(chosenBelowWaitTime == belowTimeout);
     REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
                       DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
     auto const belowCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
@@ -1011,8 +1030,8 @@ TEST_CASE(
     value.push_back('x');
 
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kAwaitingDownload);
+    auto const waitingLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(waitingLevel == SCPDriver::kAwaitingDownload);
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     node.restoreReplayBaseline(checkpoint);
@@ -1112,29 +1131,35 @@ TEST_CASE("scp dpor node latches txset status once a value is resolved",
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const chosenValidLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(chosenValidLevel == SCPDriver::kFullyValidatedValue);
     auto const validCheckpoint = node.snapshotReplayBaseline(options.mSlotIndex);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const latchedValidLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(latchedValidLevel == SCPDriver::kFullyValidatedValue);
 
     node.restoreReplayBaseline(validCheckpoint);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const restoredValidLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(restoredValidLevel == SCPDriver::kFullyValidatedValue);
     REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
                       DporScpNode::TxSetStatusChoiceRequired);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
-    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
-            SCPDriver::kInvalidValue);
-    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
-            SCPDriver::kInvalidValue);
+    auto const chosenInvalidLevel =
+        node.validateValue(options.mSlotIndex, otherValue, false);
+    REQUIRE(chosenInvalidLevel == SCPDriver::kInvalidValue);
+    auto const latchedInvalidLevel =
+        node.validateValue(options.mSlotIndex, otherValue, false);
+    REQUIRE(latchedInvalidLevel == SCPDriver::kInvalidValue);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kAwaitingDownload);
+    auto const chosenWaitingLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(chosenWaitingLevel == SCPDriver::kAwaitingDownload);
     auto const waitingCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
     REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
@@ -1162,24 +1187,26 @@ TEST_CASE("scp dpor node can model eventual valid txset resolution",
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
-    REQUIRE(requireTxSetStatusChoices(node, options.mSlotIndex, value) ==
-            config.mSupportedTxSetStatusChoices);
+    auto const initialChoices =
+        requireTxSetStatusChoices(node, options.mSlotIndex, value);
+    REQUIRE(initialChoices == config.mSupportedTxSetStatusChoices);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kAwaitingDownload);
+    auto const waitingLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(waitingLevel == SCPDriver::kAwaitingDownload);
     auto const waitingCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    REQUIRE(requireTxSetStatusChoices(node, options.mSlotIndex, value) ==
-            config.mSupportedTxSetStatusChoices);
+    auto const rebranchedChoices =
+        requireTxSetStatusChoices(node, options.mSlotIndex, value);
+    REQUIRE(rebranchedChoices == config.mSupportedTxSetStatusChoices);
 
     node.restoreReplayBaseline(waitingCheckpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const resolvedLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(resolvedLevel == SCPDriver::kFullyValidatedValue);
+    auto const latchedLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(latchedLevel == SCPDriver::kFullyValidatedValue);
 }
 
 TEST_CASE("scp dpor node can model eventual invalid txset resolution",
@@ -1199,24 +1226,26 @@ TEST_CASE("scp dpor node can model eventual invalid txset resolution",
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
-    REQUIRE(requireTxSetStatusChoices(node, options.mSlotIndex, value) ==
-            config.mSupportedTxSetStatusChoices);
+    auto const initialChoices =
+        requireTxSetStatusChoices(node, options.mSlotIndex, value);
+    REQUIRE(initialChoices == config.mSupportedTxSetStatusChoices);
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Waiting);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kAwaitingDownload);
+    auto const waitingLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(waitingLevel == SCPDriver::kAwaitingDownload);
     auto const waitingCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    REQUIRE(requireTxSetStatusChoices(node, options.mSlotIndex, value) ==
-            config.mSupportedTxSetStatusChoices);
+    auto const rebranchedChoices =
+        requireTxSetStatusChoices(node, options.mSlotIndex, value);
+    REQUIRE(rebranchedChoices == config.mSupportedTxSetStatusChoices);
 
     node.restoreReplayBaseline(waitingCheckpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kInvalidValue);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kInvalidValue);
+    auto const resolvedLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(resolvedLevel == SCPDriver::kInvalidValue);
+    auto const latchedLevel = node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(latchedLevel == SCPDriver::kInvalidValue);
 }
 
 TEST_CASE("scp dpor node can force waiting txset status during nomination",
@@ -1235,18 +1264,23 @@ TEST_CASE("scp dpor node can force waiting txset status during nomination",
     Value value;
     value.push_back('x');
 
-    REQUIRE(node.validateValue(options.mSlotIndex, value, true) ==
-            SCPDriver::kAwaitingDownload);
-    REQUIRE(requireTxSetStatusChoices(node, options.mSlotIndex, value) ==
-            config.mSupportedTxSetStatusChoices);
+    auto const nominationLevel =
+        node.validateValue(options.mSlotIndex, value, true);
+    REQUIRE(nominationLevel == SCPDriver::kAwaitingDownload);
+    auto const ballotingChoices =
+        requireTxSetStatusChoices(node, options.mSlotIndex, value);
+    REQUIRE(ballotingChoices == config.mSupportedTxSetStatusChoices);
 
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, true) ==
-            SCPDriver::kAwaitingDownload);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const ballotingLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(ballotingLevel == SCPDriver::kFullyValidatedValue);
+    auto const repeatedNominationLevel =
+        node.validateValue(options.mSlotIndex, value, true);
+    REQUIRE(repeatedNominationLevel == SCPDriver::kAwaitingDownload);
+    auto const latchedBallotingLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(latchedBallotingLevel == SCPDriver::kFullyValidatedValue);
 }
 
 TEST_CASE(
@@ -1275,17 +1309,20 @@ TEST_CASE(
     prepareEnvelope.statement.pledges.prepare().ballot.value = value;
     node.emitEnvelope(prepareEnvelope);
 
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const downloadedLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(downloadedLevel == SCPDriver::kFullyValidatedValue);
 
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const forcedValidLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(forcedValidLevel == SCPDriver::kFullyValidatedValue);
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     node.restoreReplayBaseline(checkpoint);
-    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
-            SCPDriver::kFullyValidatedValue);
+    auto const restoredLevel =
+        node.validateValue(options.mSlotIndex, value, false);
+    REQUIRE(restoredLevel == SCPDriver::kFullyValidatedValue);
 }
 
 TEST_CASE(

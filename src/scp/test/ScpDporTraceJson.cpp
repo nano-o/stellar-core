@@ -331,6 +331,41 @@ parseCommunicationModel(std::string_view model)
                                 std::string(model));
 }
 
+// Encode-side counterparts of parseTimerID/parseTxSetStatus. Unlike the
+// diagnostic timerName/txSetStatusName helpers, these throw on values the
+// parser would reject, so an unreplayable trace fails at dump time instead of
+// load time.
+std::string
+encodeTimerID(int timerID)
+{
+    switch (timerID)
+    {
+    case Slot::NOMINATION_TIMER:
+        return "nomination";
+    case Slot::BALLOT_PROTOCOL_TIMER:
+        return "ballot";
+    }
+    throw std::invalid_argument("unsupported timer id in trace value: " +
+                                std::to_string(timerID));
+}
+
+std::string
+encodeTxSetStatus(DporScpTxSetStatus status)
+{
+    switch (status)
+    {
+    case DporScpTxSetStatus::Valid:
+        return "valid";
+    case DporScpTxSetStatus::Waiting:
+        return "waiting";
+    case DporScpTxSetStatus::Invalid:
+        return "invalid";
+    }
+    throw std::invalid_argument(
+        "unsupported txset status in trace value: " +
+        std::to_string(static_cast<unsigned>(status)));
+}
+
 int
 parseTimerID(std::string_view name)
 {
@@ -370,10 +405,56 @@ encodeBytes(std::vector<uint8_t> const& bytes)
     return decoder::encode_b64(bytes);
 }
 
+// The vendored base64 decoder silently skips characters outside the alphabet,
+// so a corrupted string would decode to different bytes instead of failing.
+// Validate the encoding up front so corruption is rejected rather than
+// misparsed.
+void
+requireBase64(std::string const& encoded, std::string const& context)
+{
+    auto const fail = [&]() {
+        throw std::invalid_argument(context + " is not valid base64");
+    };
+
+    if (encoded.size() % 4 != 0)
+    {
+        fail();
+    }
+
+    auto const firstPadding = encoded.find('=');
+    auto const unpaddedSize =
+        firstPadding == std::string::npos ? encoded.size() : firstPadding;
+    if (encoded.size() - unpaddedSize > 2)
+    {
+        fail();
+    }
+
+    auto const isBase64Char = [](char c) {
+        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+               (c >= '0' && c <= '9') || c == '+' || c == '/';
+    };
+    for (std::size_t i = 0; i < unpaddedSize; ++i)
+    {
+        if (!isBase64Char(encoded[i]))
+        {
+            fail();
+        }
+    }
+    for (std::size_t i = unpaddedSize; i < encoded.size(); ++i)
+    {
+        if (encoded[i] != '=')
+        {
+            fail();
+        }
+    }
+}
+
 template <typename T>
 T
 decodeBytes(std::string const& encoded, std::string const& context)
 {
+    requireBase64(encoded, context);
+
     T bytes;
     try
     {
@@ -440,7 +521,8 @@ terminalMetaFromJson(Json::Value const& value)
     terminal.mFocusNodeIndex = static_cast<std::size_t>(requireUint64(
         requireMember(object, "focus_node_index", "terminal"),
         "terminal.focus_node_index"));
-    terminal.mFocusThreadID = static_cast<dpor::model::ThreadId>(requireUint64(
+    static_assert(sizeof(dpor::model::ThreadId) <= sizeof(uint32_t));
+    terminal.mFocusThreadID = static_cast<dpor::model::ThreadId>(requireUint32(
         requireMember(object, "focus_thread_id", "terminal"),
         "terminal.focus_thread_id"));
     return terminal;
@@ -462,7 +544,7 @@ threadTraceRecordFromJson(Json::Value const& value)
     auto const& object = requireObject(value, "thread_trace record");
 
     ThreadTraceRecord record;
-    record.mThreadID = static_cast<dpor::model::ThreadId>(requireUint64(
+    record.mThreadID = static_cast<dpor::model::ThreadId>(requireUint32(
         requireMember(object, "thread", "thread_trace record"),
         "thread_traces[].thread"));
     record.mTrace =
@@ -546,7 +628,7 @@ toJson(ScpDporValue const& value)
         return root;
     case ScpDporValue::Kind::TimerChoice:
         root["kind"] = "timer";
-        root["timer"] = timerName(value.mTimerID);
+        root["timer"] = encodeTimerID(value.mTimerID);
         return root;
     case ScpDporValue::Kind::TxSetDownloadWaitTimeChoice:
         root["kind"] = "txset_wait_time";
@@ -555,8 +637,8 @@ toJson(ScpDporValue const& value)
         return root;
     case ScpDporValue::Kind::TxSetStatusChoice:
         root["kind"] = "txset_status";
-        root["value"] =
-            txSetStatusName(static_cast<DporScpTxSetStatus>(value.mTxSetStatus));
+        root["value"] = encodeTxSetStatus(
+            static_cast<DporScpTxSetStatus>(value.mTxSetStatus));
         return root;
     }
     throw std::logic_error("unknown ScpDporValue kind");
@@ -865,9 +947,14 @@ traceBundleFromJson(Json::Value const& value)
     auto const& object = requireObject(value, "trace bundle");
 
     TraceBundle bundle;
-    bundle.mVersion = static_cast<int>(requireUint64(
+    auto const version = requireUint64(
         requireMember(object, "version", "trace bundle"),
-        "trace bundle.version"));
+        "trace bundle.version");
+    if (version > static_cast<uint64_t>(std::numeric_limits<int>::max()))
+    {
+        throw std::invalid_argument("trace bundle.version is out of range");
+    }
+    bundle.mVersion = static_cast<int>(version);
 
     auto const& scenario =
         requireObject(requireMember(object, "scenario", "trace bundle"),
@@ -936,6 +1023,7 @@ writeTraceBundle(std::filesystem::path const& path, TraceBundle const& bundle)
                                  path.string());
     }
     out << writer.write(toJson(bundle));
+    out.flush();
     if (!out)
     {
         throw std::runtime_error("failed to write trace json: " +

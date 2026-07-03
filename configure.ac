@@ -532,6 +532,22 @@ int main()
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
      AC_MSG_ERROR([failed to compile a DPOR probe with DPOR_CPPFLAGS/DPOR_CXXFLAGS])])
+  AC_MSG_CHECKING([whether the DPOR checkout provides the blocked-execution API])
+  AC_COMPILE_IFELSE(
+    [AC_LANG_SOURCE([[
+#include <dpor/algo/dpor.hpp>
+
+static_assert(static_cast<int>(dpor::algo::TerminalExecutionKind::Blocked) >= 0,
+              "DPOR checkout too old");
+
+int main()
+{
+    return 0;
+}
+]])],
+    [AC_MSG_RESULT([yes])],
+    [AC_MSG_RESULT([no])
+     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old (missing dpor::algo::TerminalExecutionKind::Blocked); update it to commit b238b19 or later of https://github.com/nano-o/CPP-DPOR.git])])
   CPPFLAGS="$stellar_core_save_CPPFLAGS"
   CXXFLAGS="$stellar_core_save_CXXFLAGS"
 ])

@@ -4,6 +4,7 @@
 
 #include "scp/test/ScpDporReplaySupport.h"
 
+#include <atomic>
 #include <vector>
 
 namespace stellar::scpdpor
@@ -12,9 +13,16 @@ namespace stellar::scpdpor
 namespace
 {
 
+uint64_t
+nextReplaySupportGeneration()
+{
+    static std::atomic<uint64_t> generationCounter{0};
+    return ++generationCounter;
+}
+
 struct ReplayStateCacheEntry
 {
-    ScpDporReplaySupport const* mSupport{};
+    uint64_t mGeneration{};
     std::size_t mNodeIndex{};
     std::unique_ptr<DporScpNode> mNode;
 };
@@ -81,11 +89,7 @@ decodeKnownTxSetChoices(ThreadTrace const& trace, std::size_t observedIndex)
             ++decoded.mTraceEntries;
             continue;
         }
-        if (!isTxSetStatusChoiceValue(choiceValue) &&
-            !isTxSetDownloadWaitTimeChoiceValue(choiceValue))
-        {
-            break;
-        }
+        break;
     }
     return decoded;
 }
@@ -102,6 +106,7 @@ ScpDporReplaySupport::ScpDporReplaySupport(
     , mPreviousValue(std::move(previousValue))
     , mInitialValues(std::move(initialValues))
     , mConfig(std::move(config))
+    , mGeneration(nextReplaySupportGeneration())
 {
     if (mValidators.empty())
     {
@@ -113,6 +118,18 @@ ScpDporReplaySupport::ScpDporReplaySupport(
             "initialValues must match validator count");
     }
     rebuildBaselines();
+}
+
+ScpDporReplaySupport::ScpDporReplaySupport(ScpDporReplaySupport const& other)
+    : mValidators(other.mValidators)
+    , mQSet(other.mQSet)
+    , mSlotIndex(other.mSlotIndex)
+    , mPreviousValue(other.mPreviousValue)
+    , mInitialValues(other.mInitialValues)
+    , mConfig(other.mConfig)
+    , mReplayBaselines(other.mReplayBaselines)
+    , mGeneration(nextReplaySupportGeneration())
+{
 }
 
 std::size_t
@@ -133,14 +150,14 @@ ScpDporReplaySupport::acquireNode(std::size_t nodeIndex) const
     auto& cache = threadLocalReplayStateCache();
     for (auto& entry : cache)
     {
-        if (entry.mSupport == this && entry.mNodeIndex == nodeIndex)
+        if (entry.mGeneration == mGeneration && entry.mNodeIndex == nodeIndex)
         {
             return *entry.mNode;
         }
     }
 
     cache.push_back(ReplayStateCacheEntry{
-        this, nodeIndex,
+        mGeneration, nodeIndex,
         std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet, mConfig)});
     return *cache.back().mNode;
 }

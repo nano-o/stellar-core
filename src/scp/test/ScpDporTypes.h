@@ -104,9 +104,10 @@ namespace std
 template <>
 struct hash<stellar::scpdpor::ScpDporValue>
 {
+    // Not noexcept: hashing envelopes serializes them via xdr_to_opaque,
+    // which allocates.
     std::size_t
     operator()(stellar::scpdpor::ScpDporValue const& value) const
-        noexcept
     {
         std::size_t result =
             std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(value.mKind));

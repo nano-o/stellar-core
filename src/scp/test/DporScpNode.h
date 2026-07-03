@@ -212,6 +212,12 @@ class DporScpNode : public SCPDriver
                          SCPQuorumSet const& localQSet,
                          Configuration const& config);
 
+    // mSCP holds a reference back to this driver and shares slots via
+    // shared_ptr; a copy would silently alias the original's state.
+    DporScpNode(DporScpNode const&) = delete;
+    DporScpNode&
+    operator=(DporScpNode const&) = delete;
+
     NodeID const&
     getNodeID() const;
 

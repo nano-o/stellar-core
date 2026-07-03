@@ -7,6 +7,7 @@
 #include "scp/test/DporScpNode.h"
 #include "scp/test/ScpDporBridge.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -35,6 +36,13 @@ class ScpDporReplaySupport
                          uint64_t slotIndex, Value previousValue,
                          std::vector<Value> initialValues,
                          DporScpNode::Configuration config = {});
+
+    // Copies get a fresh generation so they never adopt thread-local cached
+    // nodes that were created for the source object.
+    ScpDporReplaySupport(ScpDporReplaySupport const& other);
+
+    ScpDporReplaySupport&
+    operator=(ScpDporReplaySupport const&) = delete;
 
     std::size_t
     size() const;
@@ -86,6 +94,9 @@ class ScpDporReplaySupport
     std::vector<Value> mInitialValues;
     DporScpNode::Configuration mConfig;
     std::vector<NodeBaseline> mReplayBaselines;
+    // Process-unique identity used to key the thread-local node cache; unlike
+    // the object's address, it is never reused after destruction.
+    uint64_t mGeneration;
 };
 
 } // namespace stellar::scpdpor
