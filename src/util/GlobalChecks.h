@@ -12,7 +12,12 @@ namespace stellar
 {
 bool threadIsMain();
 
-void dbgAbort();
+// When enabled (write-once, before threads), assert/abort helpers throw
+// std::runtime_error instead of aborting.  Used by DPOR builds so that
+// wrapProgramExceptionsAsErrorExecutions can capture SCP invariant failures.
+void enableAssertThrowMode();
+
+[[noreturn]] void dbgAbortImpl(char const* file, int line);
 
 [[noreturn]] void printErrorAndAbort(char const* s1);
 [[noreturn]] void printErrorAndAbort(char const* s1, char const* s2);
@@ -35,6 +40,8 @@ void dbgAbort();
     (static_cast<bool>(e) \
          ? void(0) \
          : stellar::printAssertFailureAndThrow(#e, __FILE__, __LINE__))
+
+#define dbgAbort() stellar::dbgAbortImpl(__FILE__, __LINE__)
 
 #ifdef NDEBUG
 

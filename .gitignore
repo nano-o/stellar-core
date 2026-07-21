@@ -133,3 +133,9 @@ min-testcases/
 /src/util/xdrquery/stack.hh
 
 __pycache__
+
+# DPOR (cloned into external/dpor for --enable-dpor builds)
+/external/dpor
+/src/stellar-core-dpor-tests
+/src/scp-dpor-investigation
+/dpor-traces/

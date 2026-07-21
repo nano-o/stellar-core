@@ -14,6 +14,7 @@
 
 namespace stellar
 {
+class DporScpNode;
 class NominationProtocol
 {
   protected:
@@ -135,5 +136,7 @@ class NominationProtocol
     // Strip any upgrades that `value` may have, modifying it in place.  Does
     // nothing if `value` has no upgrades.
     void stripUpgrades(ValueWrapperPtr& value) const;
+
+    friend class DporScpNode;
 };
 }
