@@ -3,15 +3,45 @@
 DPOR is an opt-in, test-only build target for SCP model-checking. It requires
 C++20 and an external header-only dependency.
 
+## Build target: post-CAP-0083 only
+
+The DPOR build targets post-CAP-0083 (empty-tx-set) `stellar-core` only, so
+every `configure` invocation below includes
+`--enable-next-protocol-version-unsafe-for-production`. That flag defines
+`CAP_0083` in the **global** `AM_CPPFLAGS`, which compiles in the empty-tx-set
+code path and — critically — keeps the DPOR-rebuilt SCP subset and the linked
+non-DPOR objects agreeing on the `SCPDriver` vtable layout. Never add
+`-DCAP_0083` to the DPOR target flags alone: that produces a silent vtable/ODR
+mismatch, not a build error. See
+[`dpor-integration-status.md`](./dpor-integration-status.md) for the rationale.
+
+Because this flag changes both preprocessor defines and generated XDR, turn it
+on (or off) with a clean rebuild — run `make clean` first; an incremental
+`make` will not reliably pick up the change.
+
+> **This recipe is expected to change as stellar-core development
+> progresses.** The empty-tx-set feature is gated behind the "next protocol
+> version" switch only until that protocol version ships. Once it is released,
+> `CAP_0083` stops living behind
+> `--enable-next-protocol-version-unsafe-for-production` (it becomes always-on
+> and the `CAP_0083` conditional may be retired), while that flag advances to a
+> still-newer protocol version. The build-flag layout also shifts periodically
+> on its own (e.g. the recent addition of
+> `--enable-fastdev-unsafe-for-production`). Re-check the flag and update these
+> docs when the empty-tx-set protocol version is released or the flag layout
+> changes again.
+
 ## Quick start
 
 ```bash
 # Initialize dependencies, including the pinned DPOR revision (once, after clone)
 git submodule update --init --recursive
 
-# Configure with DPOR enabled
+# Configure with DPOR enabled (post-CAP-0083 target — see "Build target" above)
 ./autogen.sh
-./configure --enable-dpor CC=clang-20 CXX=clang++-20
+./configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  CC=clang-20 CXX=clang++-20
 
 # Build library dependencies first (required on a clean tree)
 make -C lib -j"$(nproc)"
@@ -75,7 +105,9 @@ directory to keep the source tree clean:
 
 ```bash
 mkdir -p /path/to/build && cd /path/to/build
-/path/to/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
+/path/to/stellar-core/configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```

@@ -62,6 +62,17 @@ a local build proves otherwise, `DPOR_CXXFLAGS` should include
 because the vendored fmt/spdlog headers are not currently safe under C++20
 without it.
 
+The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core` only**.
+Configure it with `--enable-next-protocol-version-unsafe-for-production`, which
+defines `CAP_0083` in the global `AM_CPPFLAGS`. `CAP_0083` must stay global
+(never a DPOR-target-only flag): it changes the `SCPDriver` vtable layout, and
+the DPOR binaries link non-DPOR objects from the normal build, so a DPOR-only
+define would silently corrupt the vtable rather than fail to build. Do not add
+`-DCAP_0083` to `DPOR_CXXFLAGS`. Toggling this flag needs a clean rebuild
+(`make clean` first). See [docs/dpor-build.md](docs/dpor-build.md) and
+[docs/dpor-integration-status.md](docs/dpor-integration-status.md) for details.
+(The scenario/code layer has not yet been updated for this target.)
+
 Normal build:
 ```bash
 git submodule update --init --recursive
@@ -77,7 +88,9 @@ Current DPOR build workflow:
 ```bash
 git submodule update --init --recursive
 ./autogen.sh
-./configure --enable-dpor CC=clang-20 CXX=clang++-20
+./configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
@@ -187,7 +200,9 @@ make -j"$(nproc)"
 Out-of-tree DPOR build:
 ```bash
 cd /home/dev/stellar-core-build
-/home/dev/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
+/home/dev/stellar-core/configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```

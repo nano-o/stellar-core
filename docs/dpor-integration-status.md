@@ -1,10 +1,18 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-07-20 for branch `dpor-on-master`, based on
+Status snapshot as of 2026-07-23 for branch `dpor-on-master`, based on
 upstream `master` (`f8b9c6eb2`, which includes the merged CAP-0083
 empty-tx-set feature), against DPOR library commit `d2c06e7` (functionally
 identical to the `b238b19` pin previously recorded here; the commits in
 between are comment/doc-only).
+
+The DPOR build now targets **post-CAP-0083 (empty-tx-set) `stellar-core`
+only**. It must be configured with
+`--enable-next-protocol-version-unsafe-for-production` so that `CAP_0083` is
+defined globally and the empty-tx-set code path is compiled in. The earlier
+pre-CAP-0083 build shape (with `CAP_0083` compiled out) is no longer a
+supported configuration. The scenario layer has not yet been updated for this
+target — see the build-target note below and Current limitations.
 
 This branch is the port of the DPOR work from `skip-ledgers-p26-dpor` onto
 master. The old branch's 18 skip-ledgers feature commits were dropped
@@ -34,13 +42,19 @@ port adapted the harness to master's renamed driver API:
   SCP's `releaseAssert(protocolAllowsEmptyTxSetValues())` fire
   deterministically once a ballot envelope validates as only structurally
   valid.
-- Note: without `--enable-next-protocol-version-unsafe-for-production`
-  (which defines `CAP_0083` globally), master compiles out
-  `BallotProtocol::maybeReplaceValueWithEmptyTxSet`, so the empty-tx-set
-  replacement path is inert in the default DPOR build. The current
-  scenarios do not depend on it. Do not add `-DCAP_0083` to only the DPOR
-  target flags: the DPOR binaries link non-DPOR objects from the normal
-  build, and `CAP_0083` changes the `SCPDriver` vtable layout.
+- Build target: the DPOR build targets post-CAP-0083 `stellar-core` only and
+  is configured with `--enable-next-protocol-version-unsafe-for-production`,
+  which defines `CAP_0083` globally. With `CAP_0083` defined,
+  `BallotProtocol::maybeReplaceValueWithEmptyTxSet` and the rest of the
+  empty-tx-set path are compiled in rather than stubbed out. `CAP_0083` must
+  stay global: the DPOR binaries link non-DPOR objects from the normal build,
+  and `CAP_0083` changes the `SCPDriver` vtable layout, so a
+  DPOR-target-only `-DCAP_0083` would produce a silent vtable/ODR mismatch,
+  not a build error. The configure flag routes the define through the global
+  `AM_CPPFLAGS`, which the DPOR targets inherit
+  (`..._CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)`), keeping the rebuilt SCP
+  subset and the linked objects consistent. Do not hand-add `-DCAP_0083` to
+  `DPOR_CXXFLAGS`.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -76,6 +90,14 @@ library or harness errors.
 - `external/dpor` is a submodule pinned to CPP-DPOR commit `d2c06e7`. The
   `--with-dpor-dir` override remains available for development against another
   checkout.
+- The required configure invocation for the DPOR build (post-CAP-0083 target)
+  is:
+
+  ```bash
+  ./configure --enable-dpor \
+    --enable-next-protocol-version-unsafe-for-production \
+    CC=clang-20 CXX=clang++-20
+  ```
 - The checked-in build still requires tests to remain enabled.
   `--disable-tests --enable-dpor` errors out in `configure.ac`, and the DPOR
   programs are declared under `if BUILD_TESTS` in
@@ -87,9 +109,14 @@ library or harness errors.
   `EXTRA_PROGRAMS` behind `ENABLE_DPOR`:
   - `stellar-core-dpor-tests`
   - `scp-dpor-investigation`
-- Those targets get `$(DPOR_CPPFLAGS)` and `$(DPOR_CXXFLAGS)` locally. DPOR is
-  not added to global `AM_CPPFLAGS`, and no DPOR sources are added to
-  `stellar_core_SOURCES`.
+- Those targets get `$(DPOR_CPPFLAGS)` and `$(DPOR_CXXFLAGS)` locally, and
+  because they are declared as `..._CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)`
+  they also inherit the global `AM_CPPFLAGS`. DPOR's own flags are not added to
+  global `AM_CPPFLAGS`, and no DPOR sources are added to
+  `stellar_core_SOURCES`. `CAP_0083` is deliberately the exception: it is a
+  whole-build feature define that lives in global `AM_CPPFLAGS` (via the
+  configure flag) precisely so the DPOR and non-DPOR objects agree on the
+  `SCPDriver` vtable.
 - The DPOR binaries rebuild a small SCP subset under C++20
   (`BallotProtocol.cpp`, `LocalNode.cpp`, `NominationProtocol.cpp`,
   `QuorumSetUtils.cpp`, `SCP.cpp`, `SCPDriver.cpp`, and `Slot.cpp`) and link
@@ -312,9 +339,15 @@ it after confirming no build is active), then rerun configure.
 
 ## Verification in this workspace
 
-I verified the current state directly in this tree (branch `dpor-on-master`,
-DPOR library `d2c06e7`), after confirming a normal (non-DPOR) configure and
-build stays clean with no DPOR sources or symbols in `stellar-core`:
+> **Pending re-verification.** The command outputs below were captured under
+> the previous pre-CAP-0083 build configuration (`CAP_0083` compiled out). They
+> have not yet been re-run against the post-CAP-0083-only target, and the
+> counts are expected to change once the scenarios are updated for that target.
+
+I verified the earlier (pre-CAP-0083) state directly in this tree (branch
+`dpor-on-master`, DPOR library `d2c06e7`), after confirming a normal (non-DPOR)
+configure and build stays clean with no DPOR sources or symbols in
+`stellar-core`:
 
 - `./src/scp-dpor-investigation --depth 12` reported
   `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
@@ -384,3 +417,12 @@ build stays clean with no DPOR sources or symbols in `stellar-core`:
   entirely inside `loadTraceBundle()`.
 - DPOR still depends on `BUILD_TESTS`; `--disable-tests --enable-dpor` is not
   supported.
+- The scenarios still encode pre-CAP-0083 assumptions and have not been updated
+  for the post-CAP-0083-only target. In particular, the `invalid` txset-status
+  mode maps directly to `kInvalidValue`, and `mProtocolAllowsEmptyTxSetValues`
+  is toggled off as a deterministic SCP error source — both model driver
+  behavior that post-CAP-0083 `stellar-core` would not produce for a value a
+  node is balloting on (a fetched value stays `kStructurallyValidValue` and is
+  swapped for an empty-tx-set value on download timeout). Revising the
+  scenarios and the txset-status model for the empty-tx-set target is follow-up
+  work.
