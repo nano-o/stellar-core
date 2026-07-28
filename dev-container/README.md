@@ -38,8 +38,8 @@ For a heavier CI-like pass with temporary PostgreSQL:
 ./ci-build.sh --use-temp-db --protocol current
 ```
 
-Once the DPOR integration lands as `external/dpor`, no special container
-handling is needed beyond updating submodules:
+The DPOR dependency is pinned as the `external/dpor` submodule. No special
+container handling is needed beyond updating submodules:
 
 ```bash
 git submodule update --init --recursive external/dpor

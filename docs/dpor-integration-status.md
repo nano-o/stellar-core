@@ -73,6 +73,9 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `d2c06e7`. The
+  `--with-dpor-dir` override remains available for development against another
+  checkout.
 - The checked-in build still requires tests to remain enabled.
   `--disable-tests --enable-dpor` errors out in `configure.ac`, and the DPOR
   programs are declared under `if BUILD_TESTS` in
@@ -107,6 +110,37 @@ library or harness errors.
   ```bash
   make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
   ```
+
+### Building with Namespace-backed sccache
+
+Use `--enable-nsc-sccache` to cache the whole build, including the normal
+C/C++ object graph, the DPOR-specific C++20 objects, and Rust compilation. It
+implies `--enable-sccache`; do not combine it with `--enable-ccache`.
+
+First authenticate `nsc` and confirm that the `sccache` selected from `PATH`
+was built with WebDAV support:
+
+```bash
+nsc auth check-login
+sccache --help | sed -n '/Enabled features:/,$p'
+```
+
+Then configure and build:
+
+```bash
+./autogen.sh
+./configure --enable-dpor --enable-nsc-sccache \
+  CC=clang-20 CXX=clang++-20
+make -C lib -j"$(nproc)"
+make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
+```
+
+Configure runs `nsc cache sccache setup --cache_name stellar`, restarts the
+`sccache` daemon with the resulting WebDAV credentials, and fails if
+`sccache -s` does not report a WebDAV cache location. If stopping the daemon
+reports a protocol-decoding error after upgrading `sccache`, an older daemon
+is still running; stop it with the client version that started it (or terminate
+it after confirming no build is active), then rerun configure.
 
 ## Support layer
 

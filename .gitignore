@@ -134,8 +134,7 @@ min-testcases/
 
 __pycache__
 
-# DPOR (cloned into external/dpor for --enable-dpor builds)
-/external/dpor
+# DPOR
 /src/stellar-core-dpor-tests
 /src/scp-dpor-investigation
 /dpor-traces/

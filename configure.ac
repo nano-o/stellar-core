@@ -512,7 +512,7 @@ AC_ARG_ENABLE(dpor,
         [Enable optional DPOR SCP test targets]))
 AC_ARG_WITH(dpor-dir,
     AS_HELP_STRING([--with-dpor-dir=PATH],
-        [Path to a CPP-DPOR source checkout (default: external/dpor, then ../dpor)]))
+        [Path to a CPP-DPOR source checkout (default: external/dpor submodule, then ../dpor)]))
 AC_ARG_VAR([DPOR_CPPFLAGS], [Preprocessor flags for DPOR targets])
 AC_ARG_VAR([DPOR_CXXFLAGS], [C++ flags for DPOR targets])
 
@@ -533,7 +533,7 @@ AS_IF([test "x$enable_dpor" = "xyes"], [
   ], [test -d "$srcdir/../dpor/include"], [
     stellar_core_dpor_dir_candidate="$srcdir/../dpor"
   ], [
-    AC_MSG_ERROR([cannot find a DPOR checkout; clone https://github.com/nano-o/CPP-DPOR.git into external/dpor or pass --with-dpor-dir])
+    AC_MSG_ERROR([cannot find DPOR headers; run 'git submodule update --init external/dpor' or pass --with-dpor-dir])
   ])
 
   DPOR_DIR="$(cd "$stellar_core_dpor_dir_candidate" && pwd)"
@@ -708,4 +708,3 @@ ac_configure_args="$ac_configure_args $(esc "CC=$CC" "CXX=$CXX" "CFLAGS=$CFLAGS"
 AC_CONFIG_HEADERS(config.h)
 AC_CONFIG_FILES(lib/Makefile src/Makefile Makefile)
 AC_OUTPUT
-

@@ -6,11 +6,8 @@ C++20 and an external header-only dependency.
 ## Quick start
 
 ```bash
-# Initialize vendored dependencies (once, after clone)
+# Initialize dependencies, including the pinned DPOR revision (once, after clone)
 git submodule update --init --recursive
-
-# Clone the DPOR dependency (once)
-git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
 
 # Configure with DPOR enabled
 ./autogen.sh
@@ -28,6 +25,48 @@ make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 # Run investigation
 ./src/scp-dpor-investigation --depth 12
 ```
+
+`external/dpor` is a submodule pinned by `stellar-core`. Do not check out the
+DPOR `main` branch for a normal build: `git submodule update --init
+external/dpor` restores the revision selected by the parent repository. Use
+`--with-dpor-dir=PATH` only when intentionally testing another CPP-DPOR
+checkout.
+
+To confirm that the checkout matches the pin:
+
+```bash
+git submodule status external/dpor
+```
+
+The output should begin with a space. A leading `+` means the checkout is at a
+different commit; rerun `git submodule update --init external/dpor` to restore
+the pinned revision.
+
+## Building with Namespace-backed sccache
+
+To cache the normal C/C++ object graph, the DPOR-specific C++20 objects, and
+Rust compilation, authenticate `nsc` and confirm that the `sccache` selected
+from `PATH` has WebDAV support:
+
+```bash
+nsc auth check-login
+sccache --help | sed -n '/Enabled features:/,$p'
+```
+
+Then add `--enable-nsc-sccache` when configuring:
+
+```bash
+./autogen.sh
+./configure --enable-dpor --enable-nsc-sccache \
+  CC=clang-20 CXX=clang++-20
+make -C lib -j"$(nproc)"
+make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
+```
+
+This option implies `--enable-sccache` and cannot be combined with
+`--enable-ccache`. Configure runs `nsc cache sccache setup --cache_name
+stellar`, starts the cache daemon with the returned WebDAV credentials, and
+verifies that `sccache -s` reports WebDAV storage.
 
 ## Out-of-tree builds
 

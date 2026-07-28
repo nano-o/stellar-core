@@ -76,7 +76,6 @@ Tests are compiled into the main `stellar-core` binary and run via
 Current DPOR build workflow:
 ```bash
 git submodule update --init --recursive
-git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
 ./autogen.sh
 ./configure --enable-dpor CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
@@ -103,16 +102,19 @@ Notes:
 
 Upstream: `https://github.com/nano-o/CPP-DPOR.git` (branch `main`)
 
-DPOR is header-only C++20. Clone it before configuring:
+DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
+commit `d2c06e7`. Initialize the revision selected by `stellar-core` before
+configuring:
 ```bash
-git clone https://github.com/nano-o/CPP-DPOR.git external/dpor
+git submodule update --init external/dpor
 ```
 
-`external/dpor` is gitignored. The current configure integration looks for it
-there by default.
+The configure integration looks for it there by default. Use
+`--with-dpor-dir=PATH` only when intentionally testing another checkout.
 
 The 2PC timeout example at `external/dpor/examples/two_phase_commit_timeout/`
-(once cloned) is the reference pattern for the types / bridge / scenario split.
+(once initialized) is the reference pattern for the types / bridge / scenario
+split.
 Key files in that example:
 - `sim/dpor_types.hpp` — value type + DPOR aliases
 - `sim/bridge.hpp` — encode/decode between domain objects and DPOR values
@@ -166,7 +168,7 @@ Inside the container:
 - Working directory: `/home/dev/stellar-core`
 - Compiler: `clang++-20` (default), `g++-14` (alternative)
 - User: `dev` (non-root, UID/GID matched to host)
-- DPOR clone target: `git clone https://github.com/nano-o/CPP-DPOR.git external/dpor`
+- DPOR dependency: the pinned `external/dpor` submodule
 
 ### Out-of-tree builds in containers
 
