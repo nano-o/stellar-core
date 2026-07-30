@@ -14,6 +14,8 @@
 namespace stellar::scpdpor
 {
 
+inline constexpr int TRACE_BUNDLE_VERSION = 2;
+
 struct TerminalMeta
 {
     dpor::algo::TerminalExecutionKind mKind{
@@ -31,7 +33,7 @@ struct ThreadTraceRecord
 
 struct TraceBundle
 {
-    int mVersion{1};
+    int mVersion{TRACE_BUNDLE_VERSION};
     ScpDporDefaultScenario::Options mOptions;
     dpor::model::CommunicationModel mCommunicationModel{
         dpor::model::CommunicationModel::Async};
@@ -39,47 +41,35 @@ struct TraceBundle
     std::vector<ThreadTraceRecord> mThreadTraces;
 };
 
-Json::Value
-toJson(ScpDporValue const& value);
+Json::Value toJson(ScpDporValue const& value);
 
-ScpDporValue
-scpDporValueFromJson(Json::Value const& value);
+ScpDporValue scpDporValueFromJson(Json::Value const& value);
 
-Json::Value
-toJson(ObservedValue const& observed);
+Json::Value toJson(ObservedValue const& observed);
 
-ObservedValue
-observedValueFromJson(Json::Value const& value);
+ObservedValue observedValueFromJson(Json::Value const& value);
 
-Json::Value
-toJson(ThreadTrace const& trace);
+Json::Value toJson(ThreadTrace const& trace);
 
-ThreadTrace
-threadTraceFromJson(Json::Value const& value);
+ThreadTrace threadTraceFromJson(Json::Value const& value);
 
-Json::Value
-toJson(ScpDporDefaultScenario::Options const& options);
+Json::Value toJson(ScpDporDefaultScenario::Options const& options);
 
-ScpDporDefaultScenario::Options
-optionsFromJson(Json::Value const& value);
+ScpDporDefaultScenario::Options optionsFromJson(Json::Value const& value);
 
-Json::Value
-toJson(TraceBundle const& bundle);
+Json::Value toJson(TraceBundle const& bundle);
+
+TraceBundle traceBundleFromJson(Json::Value const& value);
 
 TraceBundle
-traceBundleFromJson(Json::Value const& value);
+makeTraceBundle(ScpDporDefaultScenario const& scenario,
+                dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
+                dpor::model::CommunicationModel communicationModel,
+                TerminalMeta terminal);
 
-TraceBundle
-makeTraceBundle(
-    ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
-    dpor::model::CommunicationModel communicationModel,
-    TerminalMeta terminal);
+void writeTraceBundle(std::filesystem::path const& path,
+                      TraceBundle const& bundle);
 
-void
-writeTraceBundle(std::filesystem::path const& path, TraceBundle const& bundle);
-
-TraceBundle
-loadTraceBundle(std::filesystem::path const& path);
+TraceBundle loadTraceBundle(std::filesystem::path const& path);
 
 } // namespace stellar::scpdpor

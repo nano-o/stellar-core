@@ -11,8 +11,8 @@ only**. It must be configured with
 `--enable-next-protocol-version-unsafe-for-production` so that `CAP_0083` is
 defined globally and the empty-tx-set code path is compiled in. The earlier
 pre-CAP-0083 build shape (with `CAP_0083` compiled out) is no longer a
-supported configuration. The scenario layer has not yet been updated for this
-target — see the build-target note below and Current limitations.
+supported configuration. The scenario layer models both CAP-0083 replacement
+routes and keeps outright SCP-value invalidity separate from txset status.
 
 This branch is the port of the DPOR work from `skip-ledgers-p26-dpor` onto
 master. The old branch's 18 skip-ledgers feature commits were dropped
@@ -28,8 +28,7 @@ port adapted the harness to master's renamed driver API:
   `kStructurallyValidValue` (same ordinal and semantics).
 - `DporScpNode` implements master's new pure virtuals
   `isParallelTxSetDownloadEnabled()` (returns `true`) and
-  `protocolAllowsEmptyTxSetValues()` (configurable, default `true`; see
-  below).
+  `protocolAllowsEmptyTxSetValues()` (always `true` in normal scenarios).
 - The old branch's accept-commit guard (`throwIfValueInvalidForCommit`,
   which the error-capture smoke tests used as their SCP error source) does
   not exist on master. Master's equivalent
@@ -37,11 +36,11 @@ port adapted the harness to master's renamed driver API:
   harness's txset-status latch makes it unreachable: peers' CONFIRM
   envelopes are rejected while a value is only structurally valid, so a
   node can never ratify commit on a value it has not resolved as valid.
-  The error-capture smoke tests instead disallow empty-tx-set values via
-  the new `mProtocolAllowsEmptyTxSetValues` scenario option, which makes
+  The error-capture smoke tests instead use an explicitly test-only protocol
+  gate fault injection, which makes
   SCP's `releaseAssert(protocolAllowsEmptyTxSetValues())` fire
   deterministically once a ballot envelope validates as only structurally
-  valid.
+  valid. Normal scenarios do not expose or toggle this fault.
 - Build target: the DPOR build targets post-CAP-0083 `stellar-core` only and
   is configured with `--enable-next-protocol-version-unsafe-for-production`,
   which defines `CAP_0083` globally. With `CAP_0083` defined,
@@ -90,6 +89,8 @@ library or harness errors.
 - `external/dpor` is a submodule pinned to CPP-DPOR commit `d2c06e7`. The
   `--with-dpor-dir` override remains available for development against another
   checkout.
+- Configure rejects `--enable-dpor` unless the next-protocol option is active,
+  enforcing the post-CAP-0083 vtable/build contract.
 - The required configure invocation for the DPOR build (post-CAP-0083 target)
   is:
 
@@ -156,7 +157,9 @@ Then configure and build:
 
 ```bash
 ./autogen.sh
-./configure --enable-dpor --enable-nsc-sccache \
+./configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  --enable-nsc-sccache \
   CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
@@ -225,30 +228,38 @@ it after confirming no build is active), then rerun configure.
   - nomination-timer and balloting-timer firing caps
   - timer-set limits
   - txset download wait-time modes: `below`, `above`, and `nondet`
-  - txset validation-status modes: `valid`, `waiting`, `invalid`, and `nondet`
-    - in `valid` mode, status choices explore `waiting` and `valid`
-    - in `invalid` mode, status choices explore `waiting` and `invalid`
-    - in `nondet` mode, status choices explore `valid`, `waiting`, and
+  - txset validation-status modes: `valid`, `downloading`, `invalid`, and
+    `nondet`
+    - in `valid` mode, status choices explore `downloading` and `valid`
+    - in `invalid` mode, status choices explore `downloading` and `invalid`
+    - in `nondet` mode, status choices explore `valid`, `downloading`, and
       `invalid`
     - in the branching modes above, status choices reoccur only while the last
-      result for a value is `waiting`; once a value resolves to `valid` or
+      result for a value is `downloading`; once a value resolves to `valid` or
       `invalid`, later queries on that node reuse the same result without
       another DPOR choice
-  - nomination-only forced waiting for txset validation, so nomination-path
-    queries return `waiting` without consuming a txset-status choice while
+    - `invalid` means a downloaded-invalid txset: validation remains
+      structurally valid, the download wait hook returns no value, and SCP
+      immediately ballots on the derived empty-tx-set value
+  - nomination-only forced downloading for txset validation, so
+    nomination-path queries return structurally valid without consuming a
+    txset-status choice while
     ballot-path validation still follows the configured status mode
   - in `nondet` wait-time mode, choices reoccur only while the last wait-time
     result for a value is still below the download timeout; once a value times
     out, later queries on that node reuse the timed-out result without another
     DPOR choice
-  - forcing later txset validation calls to return `valid` after a node emits
-    its first `PREPARE` in a configured ballot round
-  - disallowing empty-tx-set values (`mProtocolAllowsEmptyTxSetValues =
-    false`), which makes SCP's
+  - forcing later txset validation calls for that ballot value to return
+    `valid` after a node emits its first non-empty `PREPARE` in a configured
+    ballot round; resolution is isolated per value
+  - deterministic per-node outright-invalid value sets, kept separate from
+    txset status so malformed values are rejected without empty-txset
+    replacement
+  - an explicitly test-only protocol-gate fault injection, which makes SCP's
     `releaseAssert(protocolAllowsEmptyTxSetValues())` fire once a ballot
     envelope validates as only structurally valid; the error-capture smoke
-    tests use this as their deterministic SCP error source (there is no
-    investigation-runner flag for it yet)
+    tests use this as their deterministic SCP error source, and the
+    investigation runner does not expose it
   - custom timeout parameters for nomination and balloting
 - [`src/scp/test/DporScpInvestigationMain.cpp`](../src/scp/test/DporScpInvestigationMain.cpp)
   exposes that surface through flags such as:
@@ -274,7 +285,11 @@ it after confirming no build is active), then rerun configure.
   - `--max-balloting-timers-round`
   - `--download-time`
   - `--txset-status`
-  - `--nomination-always-waiting`
+  - `--nomination-always-downloading`
+    - `--nomination-always-waiting` remains a compatibility alias
+  - `--invalid-proposer N`
+    - with unique initial values, every other node rejects proposer `N`'s
+      value as outright invalid while the proposer can still emit it
   - `--download-succeeds-in-round`
   - `--fifo`
   - `--parallel` / `--workers`
@@ -326,82 +341,60 @@ it after confirming no build is active), then rerun configure.
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
   - txset status latch-once-resolved replay behavior
-  - nomination-only forced waiting for txset validation
+  - nomination-only forced downloading for txset validation
   - `download-succeeds-in-round` forcing later txset validation to `valid`
   - investigation-style wrapping of thread exceptions into inspectable DPOR
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
-  - JSON round-trips for scenario options and raw per-thread traces
+  - JSON version-2 round-trips for scenario options, per-node
+    outright-invalid mappings, and raw per-thread traces
+  - explicit rejection of semantically incompatible version-1 traces
+  - timeout-driven and downloaded-invalid empty-txset replacement
+  - outright-invalid nomination and ballot rejection without replacement
+  - empty-txset nomination-versus-ballot validation
+  - per-value txset download resolution
   - trace-bundle write/load/replay of a captured error execution
   - capturing an SCP `releaseAssert` as a DPOR error execution with file:line
     context
 
 ## Verification in this workspace
 
-> **Pending re-verification.** The command outputs below were captured under
-> the previous pre-CAP-0083 build configuration (`CAP_0083` compiled out). They
-> have not yet been re-run against the post-CAP-0083-only target, and the
-> counts are expected to change once the scenarios are updated for that target.
+Verified directly in this tree with the post-CAP-0083 configure and build:
 
-I verified the earlier (pre-CAP-0083) state directly in this tree (branch
-`dpor-on-master`, DPOR library `d2c06e7`), after confirming a normal (non-DPOR)
-configure and build stays clean with no DPOR sources or symbols in
-`stellar-core`:
-
-- `./src/scp-dpor-investigation --depth 12` reported
-  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
-- `./src/scp-dpor-investigation --stop-on-commit --depth 16` reported
-  `kind=all-explored executions=34 full=0 blocked=0 error=0 depth-limit=34`.
-- `./src/scp-dpor-investigation --stop-on-externalize --depth 16` reported
-  `kind=all-explored executions=34 full=0 blocked=0 error=0 depth-limit=34`.
-- `./src/scp-dpor-investigation --stop-on-commit --with-balloting-timers
-  --max-balloting-timers-round 0 --depth 16` reported
-  `kind=all-explored executions=34 full=0 blocked=0 error=0 depth-limit=34`.
-  (These three counts were 38 on the old skip-ledgers base; the smaller
-  tree is expected from master's evolved ballot-phase validation and the
-  empty-tx-set replacement path being compiled out without `CAP_0083`.)
-- `./src/scp-dpor-investigation --txset-status waiting --download-time below
+- `make -C src -j8 stellar-core-dpor-tests scp-dpor-investigation` completed;
+  emitted DPOR compile lines contained global `-DCAP_0083` plus target-local
+  `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`.
+- A disposable clean configure with `--enable-dpor` but without
+  `--enable-next-protocol-version-unsafe-for-production` failed with
+  `--enable-dpor requires
+  --enable-next-protocol-version-unsafe-for-production`.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 251
+  assertions in 39 test cases.
+- `./src/scp-dpor-investigation --txset-status invalid --stop-on-prepare
   --depth 12` reported
+  `kind=all-explored executions=16 full=0 blocked=0 error=0 depth-limit=16`.
+- `./src/scp-dpor-investigation --txset-status downloading --download-time
+  above --stop-on-prepare --depth 12` reported
+  `kind=all-explored executions=4 full=0 blocked=1 error=0 depth-limit=3`.
+- `./src/scp-dpor-investigation --txset-status downloading --download-time
+  below --depth 12` reported
   `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
+- `./src/scp-dpor-investigation --init unique --invalid-proposer 0 --depth 12`
+  reported
+  `kind=all-explored executions=1 full=0 blocked=1 error=0 depth-limit=0`.
 - `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
   --depth 12` reported
-  `kind=all-explored executions=40 full=0 blocked=1 error=0 depth-limit=39`.
-- `./src/scp-dpor-investigation --check-agreement --txset-status nondet
-  --download-time nondet --depth 12` reported
-  `kind=all-explored executions=40 full=0 blocked=1 error=0 depth-limit=39`.
-- `./src/scp-dpor-investigation --parallel --workers 4 --txset-status nondet
-  --download-time nondet --depth 12` reported the same counts as the
-  sequential run.
-- `./src/scp-dpor-investigation --download-succeeds-in-round 1 --depth 12`
-  reported
-  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
-- `./src/scp-dpor-investigation --fifo --depth 12` reported
-  `kind=all-explored executions=17 full=0 blocked=0 error=0 depth-limit=17`.
-- `./src/scp-dpor-investigation --nodes 4 --depth 12` reported
-  `kind=all-explored executions=6 full=0 blocked=0 error=0 depth-limit=6`.
-- `./src/scp-dpor-investigation --fail-on-first-terminal --trace-dir ...
-  --depth 12` dumped replay traces for the first terminal execution, wrote a
-  `trace-json=...` artifact that reloaded and replayed cleanly with
-  `--replay-trace-json ... --replay-node all`, reported
-  `kind=stopped executions=1 full=0 blocked=0 error=0 depth-limit=1`, and
-  exited nonzero with `error: stopped at first terminal execution because
-  --fail-on-first-terminal was set for smoke testing`.
-- `./src/scp-dpor-investigation --stop-on-prepare --must-externalize
-  --depth 20` exited nonzero with
-  `error: full execution missing EXTERNALIZE envelope from node-index=0
-  thread=0`, dumped the failing replay trace, and reported
-  `kind=stopped executions=1 full=1 blocked=0 error=0 depth-limit=0`.
-  (On the old base the first full execution appeared later, after 10
-  depth-limited executions.)
-- `./src/scp-dpor-investigation --must-externalize --txset-status nondet
-  --download-time nondet --depth 12` exited nonzero with
-  `error: blocked execution missing EXTERNALIZE envelope from node-index=0
-  thread=0`, wrote a trace bundle with `terminal-kind=blocked`, and that
-  bundle reloaded and replayed cleanly with
-  `--replay-trace-json ... --replay-node all`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 202
-  assertions in 30 test cases.
+  `kind=all-explored executions=46 full=0 blocked=0 error=0 depth-limit=46`.
+- The same nondeterministic command with `--parallel --workers 4` reported
+  identical counts.
+- `--txset-status waiting` and `--nomination-always-waiting` remain accepted as
+  CLI compatibility aliases, while `--invalid-proposer 0` without
+  `--init unique` fails with the intended validation error.
+- `--fail-on-first-terminal --trace-dir ... --txset-status invalid --depth 12`
+  wrote a version-2 trace bundle, and
+  `--replay-trace-json ... --replay-node all` reloaded and replayed every node
+  successfully.
 
 ## Current limitations
 
@@ -417,12 +410,3 @@ configure and build stays clean with no DPOR sources or symbols in
   entirely inside `loadTraceBundle()`.
 - DPOR still depends on `BUILD_TESTS`; `--disable-tests --enable-dpor` is not
   supported.
-- The scenarios still encode pre-CAP-0083 assumptions and have not been updated
-  for the post-CAP-0083-only target. In particular, the `invalid` txset-status
-  mode maps directly to `kInvalidValue`, and `mProtocolAllowsEmptyTxSetValues`
-  is toggled off as a deterministic SCP error source — both model driver
-  behavior that post-CAP-0083 `stellar-core` would not produce for a value a
-  node is balloting on (a fetched value stays `kStructurallyValidValue` and is
-  swapped for an empty-tx-set value on download timeout). Revising the
-  scenarios and the txset-status model for the empty-tx-set target is follow-up
-  work.

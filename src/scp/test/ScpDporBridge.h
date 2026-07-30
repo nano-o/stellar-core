@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "scp/test/DporScpNode.h"
 #include "scp/Slot.h"
+#include "scp/test/DporScpNode.h"
 #include "scp/test/ScpDporTypes.h"
 
 #include <chrono>
@@ -134,7 +134,7 @@ decodeTxSetStatusChoice(ScpDporValue const& value)
     switch (static_cast<DporScpTxSetStatus>(value.mTxSetStatus))
     {
     case DporScpTxSetStatus::Valid:
-    case DporScpTxSetStatus::Waiting:
+    case DporScpTxSetStatus::Downloading:
     case DporScpTxSetStatus::Invalid:
         return static_cast<DporScpTxSetStatus>(value.mTxSetStatus);
     }
@@ -162,8 +162,8 @@ txSetStatusName(DporScpTxSetStatus status)
     {
     case DporScpTxSetStatus::Valid:
         return "valid";
-    case DporScpTxSetStatus::Waiting:
-        return "waiting";
+    case DporScpTxSetStatus::Downloading:
+        return "downloading";
     case DporScpTxSetStatus::Invalid:
         return "invalid";
     }
@@ -186,8 +186,7 @@ operator<<(std::ostream& out, ScpDporValue const& value)
         return out << "txset-wait(slot=" << value.mSlotIndex
                    << ", ms=" << value.mDurationMilliseconds << ")";
     case ScpDporValue::Kind::TxSetStatusChoice:
-        return out << "txset-status(slot=" << value.mSlotIndex
-                   << ", value="
+        return out << "txset-status(slot=" << value.mSlotIndex << ", value="
                    << txSetStatusName(
                           static_cast<DporScpTxSetStatus>(value.mTxSetStatus))
                    << ")";

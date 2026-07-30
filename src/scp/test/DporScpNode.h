@@ -26,7 +26,7 @@ namespace stellar
 enum class DporScpTxSetStatus : std::uint8_t
 {
     Valid,
-    Waiting,
+    Downloading,
     Invalid
 };
 
@@ -48,8 +48,7 @@ class DporScpNode : public SCPDriver
         explicit TxSetDownloadWaitTimeChoiceRequired(
             std::vector<std::chrono::milliseconds> choices);
 
-        std::vector<std::chrono::milliseconds> const&
-        getChoices() const;
+        std::vector<std::chrono::milliseconds> const& getChoices() const;
 
       private:
         std::vector<std::chrono::milliseconds> mChoices;
@@ -61,8 +60,7 @@ class DporScpNode : public SCPDriver
         explicit TxSetStatusChoiceRequired(
             std::vector<DporScpTxSetStatus> choices);
 
-        std::vector<DporScpTxSetStatus> const&
-        getChoices() const;
+        std::vector<DporScpTxSetStatus> const& getChoices() const;
 
       private:
         std::vector<DporScpTxSetStatus> mChoices;
@@ -83,9 +81,10 @@ class DporScpNode : public SCPDriver
         std::optional<uint32_t> mMaxBallotingRound;
         DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
         bool mNondeterministicTxSetStatus{false};
-        bool mNominationAlwaysWaitingTxSetStatus{false};
-        bool mProtocolAllowsEmptyTxSetValues{true};
+        bool mNominationAlwaysDownloadingTxSetStatus{false};
+        bool mInjectEmptyTxSetProtocolGateFailureForTesting{false};
         std::vector<DporScpTxSetStatus> mSupportedTxSetStatusChoices;
+        std::map<NodeID, std::set<Value>> mOutrightInvalidValuesByNode;
         std::optional<uint32_t> mDownloadSucceedsInBallotRound;
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
         std::map<NodeID, std::vector<std::chrono::milliseconds>>
@@ -180,8 +179,8 @@ class DporScpNode : public SCPDriver
         std::map<Value, std::size_t> mPendingTxSetDownloadStatusCounts;
         std::map<Value, std::chrono::milliseconds>
             mLastTxSetDownloadWaitTimeByValue;
-        std::size_t mTxSetDownloadWaitTimeCallCount{};
-        bool mTxSetDownloadSucceeded{};
+        std::map<Value, std::size_t> mTxSetDownloadWaitTimeCallCountsByValue;
+        std::set<Value> mTxSetDownloadsSucceeded;
         bool mHasReachedBoundary{};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
@@ -194,7 +193,8 @@ class DporScpNode : public SCPDriver
             SetupTimer,
             StopTimer,
             FireTimer,
-            UseTxSetDownloadWaitTime
+            UseTxSetDownloadWaitTime,
+            RejectOutrightInvalidValue
         };
 
         Kind mKind{Kind::EmitEnvelope};
@@ -216,147 +216,101 @@ class DporScpNode : public SCPDriver
     // mSCP holds a reference back to this driver and shares slots via
     // shared_ptr; a copy would silently alias the original's state.
     DporScpNode(DporScpNode const&) = delete;
-    DporScpNode&
-    operator=(DporScpNode const&) = delete;
+    DporScpNode& operator=(DporScpNode const&) = delete;
 
-    NodeID const&
-    getNodeID() const;
+    NodeID const& getNodeID() const;
 
-    SCP&
-    getSCP();
+    SCP& getSCP();
 
-    SCP const&
-    getSCP() const;
+    SCP const& getSCP() const;
 
-    void
-    storeQuorumSet(SCPQuorumSet const& qSet);
+    void storeQuorumSet(SCPQuorumSet const& qSet);
 
-    SCPQuorumSetPtr
-    getStoredQuorumSet(Hash const& qSetHash) const;
+    SCPQuorumSetPtr getStoredQuorumSet(Hash const& qSetHash) const;
 
-    bool
-    nominate(uint64 slotIndex, Value const& value, Value const& previousValue);
+    bool nominate(uint64 slotIndex, Value const& value,
+                  Value const& previousValue);
 
-    bool
-    startBalloting(uint64 slotIndex, Value const& value);
+    bool startBalloting(uint64 slotIndex, Value const& value);
 
-    SCP::EnvelopeState
-    receiveEnvelope(SCPEnvelope const& envelope);
+    SCP::EnvelopeState receiveEnvelope(SCPEnvelope const& envelope);
 
-    void
-    setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& envelope);
+    void setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& envelope);
 
-    std::vector<SCPEnvelope>
-    takePendingEnvelopes();
+    std::vector<SCPEnvelope> takePendingEnvelopes();
 
-    std::vector<SCPEnvelope> const&
-    getEmittedEnvelopes() const;
+    std::vector<SCPEnvelope> const& getEmittedEnvelopes() const;
 
-    bool
-    hasActiveTimer(uint64 slotIndex, int timerID) const;
+    bool hasActiveTimer(uint64 slotIndex, int timerID) const;
 
-    std::optional<TimerState>
-    getTimer(uint64 slotIndex, int timerID) const;
+    std::optional<TimerState> getTimer(uint64 slotIndex, int timerID) const;
 
-    bool
-    fireTimer(uint64 slotIndex, int timerID);
+    bool fireTimer(uint64 slotIndex, int timerID);
 
-    void
-    enqueueTxSetStatusChoice(DporScpTxSetStatus status);
+    void enqueueTxSetStatusChoice(DporScpTxSetStatus status);
 
-    void
-    enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
+    void enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
 
-    void
-    setReplayDebugRecordingEnabled(bool enabled);
+    void setReplayDebugRecordingEnabled(bool enabled);
 
-    std::vector<ReplayDebugEvent>
-    takeReplayDebugEvents();
+    std::vector<ReplayDebugEvent> takeReplayDebugEvents();
 
-    ReplayBaseline
-    snapshotReplayBaseline(uint64 slotIndex) const;
+    ReplayBaseline snapshotReplayBaseline(uint64 slotIndex) const;
 
-    void
-    restoreReplayBaseline(ReplayBaseline const& baseline);
+    void restoreReplayBaseline(ReplayBaseline const& baseline);
 
-    void
-    installNominationReplayTimer(uint64 slotIndex,
-                                 std::chrono::milliseconds timeout,
-                                 Value const& value,
-                                 Value const& previousValue);
+    void installNominationReplayTimer(uint64 slotIndex,
+                                      std::chrono::milliseconds timeout,
+                                      Value const& value,
+                                      Value const& previousValue);
 
-    void
-    installBallotingReplayTimer(uint64 slotIndex,
-                                std::chrono::milliseconds timeout);
+    void installBallotingReplayTimer(uint64 slotIndex,
+                                     std::chrono::milliseconds timeout);
 
-    uint32_t
-    inferNominationRound(std::chrono::milliseconds timeout) const;
+    uint32_t inferNominationRound(std::chrono::milliseconds timeout) const;
 
-    uint32_t
-    inferBallotingRound(std::chrono::milliseconds timeout) const;
+    uint32_t inferBallotingRound(std::chrono::milliseconds timeout) const;
 
-    bool
-    hasReachedBoundary() const;
+    bool hasReachedBoundary() const;
 
-    bool
-    hasReachedPrepareBoundary() const;
+    bool hasReachedPrepareBoundary() const;
 
-    SCPEnvelope const*
-    getBoundaryEnvelope() const;
+    SCPEnvelope const* getBoundaryEnvelope() const;
 
-    SCPEnvelope const*
-    getPrepareBoundaryEnvelope() const;
+    SCPEnvelope const* getPrepareBoundaryEnvelope() const;
 
-    void
-    signEnvelope(SCPEnvelope& envelope) override;
-    SCPQuorumSetPtr
-    getQSet(Hash const& qSetHash) override;
-    bool
-    isEnvelopeReady(SCPEnvelope const& envelope) const override;
+    void signEnvelope(SCPEnvelope& envelope) override;
+    SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
+    bool isEnvelopeReady(SCPEnvelope const& envelope) const override;
     std::optional<std::chrono::milliseconds>
     getTxSetDownloadWaitTime(Value const& value) const override;
-    std::chrono::milliseconds
-    getTxSetDownloadTimeout() const override;
-    void
-    emitEnvelope(SCPEnvelope const& envelope) override;
-    ValidationLevel
-    validateValue(uint64 slotIndex, Value const& value,
-                  bool nomination) const override;
+    std::chrono::milliseconds getTxSetDownloadTimeout() const override;
+    void emitEnvelope(SCPEnvelope const& envelope) override;
+    ValidationLevel validateValue(uint64 slotIndex, Value const& value,
+                                  bool nomination) const override;
 #ifdef CAP_0083
-    Value
-    makeEmptyTxSetValueFromValue(Value const& value) const override;
+    Value makeEmptyTxSetValueFromValue(Value const& value) const override;
 #endif
-    bool
-    isEmptyTxSetValue(Value const& value) const override;
-    bool
-    isParallelTxSetDownloadEnabled() const override;
-    bool
-    protocolAllowsEmptyTxSetValues() const override;
-    Hash
-    getHashOf(std::vector<xdr::opaque_vec<>> const& vals) const override;
-    uint64
-    computeHashNode(uint64 slotIndex, Value const& prev, bool isPriority,
-                    int32_t roundNumber, NodeID const& nodeID) override;
-    uint64
-    computeValueHash(uint64 slotIndex, Value const& prev, int32_t roundNumber,
-                     Value const& value) override;
+    bool isEmptyTxSetValue(Value const& value) const override;
+    bool isParallelTxSetDownloadEnabled() const override;
+    bool protocolAllowsEmptyTxSetValues() const override;
+    Hash getHashOf(std::vector<xdr::opaque_vec<>> const& vals) const override;
+    uint64 computeHashNode(uint64 slotIndex, Value const& prev, bool isPriority,
+                           int32_t roundNumber, NodeID const& nodeID) override;
+    uint64 computeValueHash(uint64 slotIndex, Value const& prev,
+                            int32_t roundNumber, Value const& value) override;
     ValueWrapperPtr
     combineCandidates(uint64 slotIndex,
                       ValueWrapperPtrSet const& candidates) override;
-    bool
-    hasUpgrades(Value const& value) override;
-    ValueWrapperPtr
-    stripAllUpgrades(Value const& value) override;
-    uint32_t
-    getUpgradeNominationTimeoutLimit() const override;
-    void
-    setupTimer(uint64 slotIndex, int timerID,
-               std::chrono::milliseconds timeout,
-               std::function<void()> cb) override;
-    void
-    stopTimer(uint64 slotIndex, int timerID) override;
-    std::chrono::milliseconds
-    computeTimeout(uint32 roundNumber, bool isNomination) override;
+    bool hasUpgrades(Value const& value) override;
+    ValueWrapperPtr stripAllUpgrades(Value const& value) override;
+    uint32_t getUpgradeNominationTimeoutLimit() const override;
+    void setupTimer(uint64 slotIndex, int timerID,
+                    std::chrono::milliseconds timeout,
+                    std::function<void()> cb) override;
+    void stopTimer(uint64 slotIndex, int timerID) override;
+    std::chrono::milliseconds computeTimeout(uint32 roundNumber,
+                                             bool isNomination) override;
 
   private:
     struct TimerSetCountEntry
@@ -366,47 +320,37 @@ class DporScpNode : public SCPDriver
         uint32_t mCount{};
     };
 
-    void
-    applyConfiguration(Configuration const& config);
+    void applyConfiguration(Configuration const& config);
 
-    TimerState*
-    findTimer(uint64 slotIndex, int timerID);
+    TimerState* findTimer(uint64 slotIndex, int timerID);
 
-    TimerState const*
-    findTimer(uint64 slotIndex, int timerID) const;
+    TimerState const* findTimer(uint64 slotIndex, int timerID) const;
 
-    void
-    setTimer(TimerState timer);
+    void setTimer(TimerState timer);
 
-    void
-    clearTimer(uint64 slotIndex, int timerID);
+    void clearTimer(uint64 slotIndex, int timerID);
 
-    TimerSetCountEntry*
-    findTimerSetCount(uint64 slotIndex, int timerID);
+    TimerSetCountEntry* findTimerSetCount(uint64 slotIndex, int timerID);
 
-    void
-    recordReplayDebugEvent(ReplayDebugEvent event) const;
+    void recordReplayDebugEvent(ReplayDebugEvent event) const;
 
-    void
-    clearReplayState();
+    void clearReplayState();
 
-    void
-    markTxSetDownloadSucceeded();
+    void markTxSetDownloadSucceeded(Value const& value);
 
-    bool
-    shouldMarkTxSetDownloadSucceeded(SCPEnvelope const& envelope) const;
+    std::optional<Value>
+    txSetDownloadSucceededValue(SCPEnvelope const& envelope) const;
 
-    bool
-    isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
+    bool isOutrightInvalidValue(Value const& value) const;
 
-    uint32_t
-    inferTimeoutRound(std::chrono::milliseconds timeout,
-                      uint32_t initialTimeoutMS,
-                      uint32_t incrementTimeoutMS,
-                      char const* timerName) const;
+    bool isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const;
 
-    uint32_t
-    getNominationRoundForEnvelope(SCPEnvelope const& envelope) const;
+    uint32_t inferTimeoutRound(std::chrono::milliseconds timeout,
+                               uint32_t initialTimeoutMS,
+                               uint32_t incrementTimeoutMS,
+                               char const* timerName) const;
+
+    uint32_t getNominationRoundForEnvelope(SCPEnvelope const& envelope) const;
 
     SecretKey mSecretKey;
     SCP mSCP;
@@ -420,11 +364,12 @@ class DporScpNode : public SCPDriver
     std::optional<uint32_t> mMaxBallotingRound;
     DporScpTxSetStatus mTxSetStatus{DporScpTxSetStatus::Valid};
     bool mNondeterministicTxSetStatus{false};
-    bool mNominationAlwaysWaitingTxSetStatus{false};
-    bool mProtocolAllowsEmptyTxSetValues{true};
+    bool mNominationAlwaysDownloadingTxSetStatus{false};
+    bool mInjectEmptyTxSetProtocolGateFailureForTesting{false};
     std::vector<DporScpTxSetStatus> mSupportedTxSetStatusChoices;
+    std::set<Value> mOutrightInvalidValues;
     std::optional<uint32_t> mDownloadSucceedsInBallotRound;
-    bool mTxSetDownloadSucceeded{false};
+    std::set<Value> mTxSetDownloadsSucceeded;
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};
@@ -440,7 +385,8 @@ class DporScpNode : public SCPDriver
     mutable std::vector<std::chrono::milliseconds>
         mPendingTxSetDownloadWaitTimeChoices;
     mutable std::size_t mNextPendingTxSetDownloadWaitTimeChoice{0};
-    mutable std::size_t mTxSetDownloadWaitTimeCallCount{0};
+    mutable std::map<Value, std::size_t>
+        mTxSetDownloadWaitTimeCallCountsByValue;
     bool mReplayDebugRecordingEnabled{false};
     mutable std::vector<ReplayDebugEvent> mReplayDebugEvents;
     std::optional<uint32_t> mNominationTimerSetLimit;

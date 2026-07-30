@@ -35,6 +35,18 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus thread
 - one raw `ThreadTrace` per thread
 
+Trace bundles use schema version 2. Version 2 gives txset status `invalid` its
+post-CAP-0083 meaning (a structurally valid SCP value whose downloaded txset
+is invalid), uses `downloading` as the canonical unresolved status spelling,
+and stores deterministic per-node outright-invalid value lists separately.
+It also stores the explicitly named test-only empty-txset protocol-gate fault
+used by error-capture fixtures.
+
+Version-1 bundles are rejected before scenario options or trace observations
+are parsed. Their `invalid` status meant outright SCP-value invalidity, so
+silently loading them under the version-2 meaning would replay a different
+protocol execution.
+
 This matches the existing replay seam:
 
 - DPOR produces `execution.graph.thread_trace(threadId)`
@@ -132,10 +144,15 @@ Each `NodeBaseline` contains:
 - installed timers
 - timer set counts
 - per-value txset status history
-- pending txset wait-time eligibility from prior `waiting` results
+- pending txset wait-time eligibility from prior `downloading` results
 - per-value txset wait-time history
-- txset wait-time call count
+- per-value txset wait-time call counts
+- per-value successful txset downloads
 - replay-boundary state
+
+The configured per-node outright-invalid value sets are immutable scenario
+configuration rather than mutable replay state. Loading a version-2 bundle
+reconstructs those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.
 

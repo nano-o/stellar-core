@@ -19,6 +19,11 @@ Because this flag changes both preprocessor defines and generated XDR, turn it
 on (or off) with a clean rebuild — run `make clean` first; an incremental
 `make` will not reliably pick up the change.
 
+`configure` enforces this build contract: `--enable-dpor` without
+`--enable-next-protocol-version-unsafe-for-production` fails with a direct
+configuration error. The fast-development profile also satisfies the
+requirement because it enables the next protocol version before the check.
+
 > **This recipe is expected to change as stellar-core development
 > progresses.** The empty-tx-set feature is gated behind the "next protocol
 > version" switch only until that protocol version ships. Once it is released,
@@ -87,7 +92,9 @@ Then add `--enable-nsc-sccache` when configuring:
 
 ```bash
 ./autogen.sh
-./configure --enable-dpor --enable-nsc-sccache \
+./configure --enable-dpor \
+  --enable-next-protocol-version-unsafe-for-production \
+  --enable-nsc-sccache \
   CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation

@@ -18,6 +18,7 @@
 #include <limits>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -60,13 +61,12 @@ struct CommandLineOptions
     bool mMustExternalize{false};
     bool mCheckAgreement{false};
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
-        mDownloadTimeMode{
-            stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode::
-                BelowThreshold};
-    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode
-        mTxSetStatusMode{
-            stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::Valid};
-    bool mNominationAlwaysWaiting{false};
+        mDownloadTimeMode{stellar::scpdpor::ScpDporDefaultScenario::
+                              DownloadTimeMode::BelowThreshold};
+    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mTxSetStatusMode{
+        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::Valid};
+    bool mNominationAlwaysDownloading{false};
+    std::optional<std::size_t> mInvalidProposerIndex;
     std::optional<uint32_t> mDownloadSucceedsInRound;
     bool mFailOnFirstTerminal{false};
     bool mSerializeTerminalCallbacks{false};
@@ -79,23 +79,18 @@ struct CommandLineOptions
         dpor::model::CommunicationModel::Async};
 };
 
-std::size_t
-defaultParallelWorkers();
+std::size_t defaultParallelWorkers();
 
 std::string_view
-initModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode);
+initModeName(stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode);
 
-std::string_view
-downloadTimeModeName(
+std::string_view downloadTimeModeName(
     stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode);
 
-std::string_view
-txSetStatusModeName(
+std::string_view txSetStatusModeName(
     stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mode);
 
-std::string_view
-communicationModelName(dpor::model::CommunicationModel model);
+std::string_view communicationModelName(dpor::model::CommunicationModel model);
 
 std::string_view
 terminalExecutionKindName(dpor::algo::TerminalExecutionKind kind);
@@ -108,8 +103,7 @@ defaultParallelWorkers()
 }
 
 std::string_view
-initModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode)
+initModeName(stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode)
 {
     using InitialValueMode =
         stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode;
@@ -151,8 +145,8 @@ txSetStatusModeName(
     {
     case TxSetStatusMode::Valid:
         return "valid";
-    case TxSetStatusMode::Waiting:
-        return "waiting";
+    case TxSetStatusMode::Downloading:
+        return "downloading";
     case TxSetStatusMode::Invalid:
         return "invalid";
     case TxSetStatusMode::Nondeterministic:
@@ -203,8 +197,8 @@ printUsage(char const* argv0)
               << "      Worker count (default: " << defaults.mWorkers << ")\n"
               << "  --parallel\n"
               << "      Use the host parallelism shortcut"
-              << " (default: off; this machine: "
-              << defaultParallelWorkers() << " workers)\n"
+              << " (default: off; this machine: " << defaultParallelWorkers()
+              << " workers)\n"
               << "  --max-queued-tasks N\n"
               << "      Parallel worker queue budget; 0 uses DPOR default"
               << " (default: " << parallelDefaults.max_queued_tasks << ")\n"
@@ -223,8 +217,7 @@ printUsage(char const* argv0)
               << " (default: " << parallelDefaults.progress_poll_interval_steps
               << ")\n"
               << "  --depth N\n"
-              << "      DPOR max depth (default: " << defaults.mDepth
-              << ")\n"
+              << "      DPOR max depth (default: " << defaults.mDepth << ")\n"
               << "  --nodes N | --validators N\n"
               << "      Validator count, currently 3 or 4; 4 uses a"
               << " 3-of-4 quorum set on every node"
@@ -279,22 +272,27 @@ printUsage(char const* argv0)
               << " (default override: disabled)\n"
               << "  --download-time below|above|nondet\n"
               << "      Tx-set download wait-time mode relative to the"
-              << " skip threshold; nondet re-chooses while below-threshold"
+              << " download timeout; nondet re-chooses while below-threshold"
               << " and latches once timed out (default: "
               << downloadTimeModeName(defaults.mDownloadTimeMode) << ")\n"
-              << "  --txset-status valid|waiting|invalid|nondet\n"
-              << "      Tx-set validation status mode; valid explores"
-              << " {waiting,valid}, invalid explores {waiting,invalid},"
-              << " nondet explores {valid,waiting,invalid}; branching"
-              << " repeats only while waiting and latches once resolved"
-              << " (default: "
-              << txSetStatusModeName(defaults.mTxSetStatusMode) << ")\n"
-              << "  --nomination-always-waiting\n"
-              << "      Force nomination-time tx-set validation to return"
-              << " waiting without consuming a tx-set-status branch"
-              << " (default: "
-              << (defaults.mNominationAlwaysWaiting ? "on" : "off")
+              << "  --txset-status valid|downloading|invalid|nondet\n"
+              << "      Tx-set status mode; valid explores"
+              << " {downloading,valid}, invalid explores"
+              << " {downloading,invalid}, nondet explores"
+              << " {valid,downloading,invalid}; branching repeats only while"
+              << " downloading and latches once resolved (waiting is accepted"
+              << " as a compatibility alias)"
+              << " (default: " << txSetStatusModeName(defaults.mTxSetStatusMode)
               << ")\n"
+              << "  --nomination-always-downloading\n"
+              << "      Force nomination-time tx-set validation to return"
+              << " downloading without consuming a tx-set-status branch"
+              << " (default: "
+              << (defaults.mNominationAlwaysDownloading ? "on" : "off") << ")\n"
+              << "  --invalid-proposer N\n"
+              << "      Treat proposer N's unique initial value as outright"
+              << " invalid at every other node; requires --init unique"
+              << " (default: disabled)\n"
               << "  --download-succeeds-in-round N\n"
               << "      Once a node emits its first PREPARE in ballot N,"
               << " later tx-set validation returns valid"
@@ -302,8 +300,7 @@ printUsage(char const* argv0)
               << "  --fifo\n"
               << "      Use FIFO point-to-point delivery"
               << " (default communication model: "
-              << communicationModelName(defaults.mCommunicationModel)
-              << ")\n"
+              << communicationModelName(defaults.mCommunicationModel) << ")\n"
               << "  --print-stats N\n"
               << "      Print progress every N seconds"
               << " (default: disabled)\n"
@@ -361,9 +358,9 @@ parseTxSetStatusMode(std::string_view value)
     {
         return TxSetStatusMode::Valid;
     }
-    if (value == "waiting")
+    if (value == "downloading" || value == "waiting")
     {
-        return TxSetStatusMode::Waiting;
+        return TxSetStatusMode::Downloading;
     }
     if (value == "invalid")
     {
@@ -398,8 +395,8 @@ uint32_t
 parseUint32Value(std::string_view arg, std::string_view value)
 {
     auto const parsed = std::stoull(std::string(value));
-    if (parsed > static_cast<unsigned long long>(
-                     std::numeric_limits<uint32_t>::max()))
+    if (parsed >
+        static_cast<unsigned long long>(std::numeric_limits<uint32_t>::max()))
     {
         throw std::invalid_argument(std::string(arg) + " value out of range");
     }
@@ -427,9 +424,8 @@ parseSizeValue(std::string_view arg, std::string_view value)
     }
     catch (std::exception const& ex)
     {
-        throw std::invalid_argument(std::string(arg) +
-                                    " requires an unsigned integer: " +
-                                    ex.what());
+        throw std::invalid_argument(
+            std::string(arg) + " requires an unsigned integer: " + ex.what());
     }
 }
 
@@ -469,6 +465,36 @@ makeScenario(CommandLineOptions const& options)
             stellar::scpdpor::ScpDporDefaultScenario::makeInitialValues(
                 *options.mInitMode, scenarioOptions.mValidators.size());
     }
+    if (options.mInvalidProposerIndex)
+    {
+        auto const proposerIndex = *options.mInvalidProposerIndex;
+        if (proposerIndex >= scenarioOptions.mValidators.size())
+        {
+            throw std::invalid_argument(
+                "--invalid-proposer is outside the validator range");
+        }
+        std::set<stellar::Value> uniqueInitialValues(
+            scenarioOptions.mInitialValues.begin(),
+            scenarioOptions.mInitialValues.end());
+        if (uniqueInitialValues.size() != scenarioOptions.mInitialValues.size())
+        {
+            throw std::invalid_argument(
+                "--invalid-proposer requires unique initial values; use "
+                "--init unique");
+        }
+        scenarioOptions.mOutrightInvalidValuesByNode.resize(
+            scenarioOptions.mValidators.size());
+        for (std::size_t nodeIndex = 0;
+             nodeIndex < scenarioOptions.mValidators.size(); ++nodeIndex)
+        {
+            if (nodeIndex != proposerIndex)
+            {
+                scenarioOptions.mOutrightInvalidValuesByNode.at(nodeIndex)
+                    .push_back(
+                        scenarioOptions.mInitialValues.at(proposerIndex));
+            }
+        }
+    }
     scenarioOptions.mStopOnPrepare = options.mStopOnPrepare;
     scenarioOptions.mStopOnCommit = options.mStopOnCommit;
     scenarioOptions.mStopOnExternalize = options.mStopOnExternalize;
@@ -476,17 +502,15 @@ makeScenario(CommandLineOptions const& options)
     scenarioOptions.mMaxBallotingRound = options.mMaxBallotingRound;
     scenarioOptions.mMaxNominationTimersRound =
         options.mMaxNominationTimersRound;
-    scenarioOptions.mMaxBallotingTimersRound =
-        options.mMaxBallotingTimersRound;
+    scenarioOptions.mMaxBallotingTimersRound = options.mMaxBallotingTimersRound;
     scenarioOptions.mEnableNominationTimeouts = options.mWithNominationTimers;
     scenarioOptions.mEnableBallotingTimeouts = options.mWithBallotingTimers;
     scenarioOptions.mDownloadTimeMode = options.mDownloadTimeMode;
     scenarioOptions.mTxSetStatusMode = options.mTxSetStatusMode;
-    scenarioOptions.mNominationAlwaysWaiting = options.mNominationAlwaysWaiting;
-    scenarioOptions.mDownloadSucceedsInRound =
-        options.mDownloadSucceedsInRound;
-    return stellar::scpdpor::ScpDporDefaultScenario(
-        std::move(scenarioOptions));
+    scenarioOptions.mNominationAlwaysDownloading =
+        options.mNominationAlwaysDownloading;
+    scenarioOptions.mDownloadSucceedsInRound = options.mDownloadSucceedsInRound;
+    return stellar::scpdpor::ScpDporDefaultScenario(std::move(scenarioOptions));
 }
 
 template <typename T>
@@ -530,9 +554,11 @@ stellar::scpdpor::ThreadTrace const&
 findThreadTrace(stellar::scpdpor::TraceBundle const& bundle,
                 dpor::model::ThreadId threadID)
 {
-    auto const it = std::find_if(
-        bundle.mThreadTraces.begin(), bundle.mThreadTraces.end(),
-        [threadID](auto const& record) { return record.mThreadID == threadID; });
+    auto const it =
+        std::find_if(bundle.mThreadTraces.begin(), bundle.mThreadTraces.end(),
+                     [threadID](auto const& record) {
+                         return record.mThreadID == threadID;
+                     });
     if (it == bundle.mThreadTraces.end())
     {
         throw std::logic_error("missing thread trace for requested thread");
@@ -554,8 +580,7 @@ parsePositiveSecondsValue(std::string_view arg, std::string_view value)
     {
         throw std::invalid_argument(std::string(arg) + " value out of range");
     }
-    return std::chrono::seconds(
-        static_cast<std::chrono::seconds::rep>(parsed));
+    return std::chrono::seconds(static_cast<std::chrono::seconds::rep>(parsed));
 }
 
 std::string_view
@@ -593,8 +618,8 @@ printProgressSnapshot(std::ostream& out,
          << " depth_limit_executions=" << snapshot.depth_limit_executions
          << " active_workers=" << snapshot.active_workers << "/"
          << snapshot.max_workers << " queued_tasks=" << snapshot.queued_tasks
-         << "/" << snapshot.max_queued_tasks << " counts_exact="
-         << std::boolalpha << snapshot.counts_exact;
+         << "/" << snapshot.max_queued_tasks
+         << " counts_exact=" << std::boolalpha << snapshot.counts_exact;
     out << line.str() << "\n" << std::flush;
 }
 
@@ -615,9 +640,9 @@ printEventLabel(std::ostream& out, stellar::scpdpor::EventLabel const& event)
                 out << "receive(nonblocking="
                     << (label.is_nonblocking() ? "true" : "false") << ")";
             }
-            else if constexpr (std::is_same_v<
-                                   Label,
-                                   stellar::scpdpor::NondeterministicChoiceLabel>)
+            else if constexpr (std::is_same_v<Label,
+                                              stellar::scpdpor::
+                                                  NondeterministicChoiceLabel>)
             {
                 out << "choice(count=" << label.choices.size()
                     << ", first=" << label.value << ")";
@@ -669,14 +694,17 @@ printReplayDebugEvent(std::ostream& out, uint64_t slotIndex,
     case ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime:
         out << "txset-wait(ms=" << event.mWaitTime->count() << ")";
         return;
+    case ReplayDebugEvent::Kind::RejectOutrightInvalidValue:
+        out << "reject-outright-invalid-value";
+        return;
     }
 }
 
 void
 printThreadReplayTrace(
     std::ostream& out, uint64_t slotIndex,
-    stellar::scpdpor::ScpDporDefaultScenario::
-        ThreadReplayTraceInspection const& inspection)
+    stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceInspection const&
+        inspection)
 {
     for (std::size_t stepIndex = 0; stepIndex < inspection.mSteps.size();
          ++stepIndex)
@@ -685,17 +713,17 @@ printThreadReplayTrace(
         out << "  step=" << stepIndex << " ";
         switch (step.mKind)
         {
-        case stellar::scpdpor::ScpDporDefaultScenario::
-            ThreadReplayTraceStep::Kind::Send:
+        case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
+            Kind::Send:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mSend});
             break;
-        case stellar::scpdpor::ScpDporDefaultScenario::
-            ThreadReplayTraceStep::Kind::NondeterministicChoice:
+        case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
+            Kind::NondeterministicChoice:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mChoice});
             out << " selected=" << formatObservedValue(*step.mObservedValue);
             break;
-        case stellar::scpdpor::ScpDporDefaultScenario::
-            ThreadReplayTraceStep::Kind::Receive:
+        case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
+            Kind::Receive:
             printEventLabel(out, stellar::scpdpor::EventLabel{*step.mReceive});
             out << " observed=" << formatObservedValue(*step.mObservedValue);
             break;
@@ -723,8 +751,8 @@ printThreadReplayTrace(
     if (inspection.mBoundaryEnvelope)
     {
         out << "  boundary="
-            << stellar::scpdpor::makeEnvelopeValue(slotIndex,
-                                                   *inspection.mBoundaryEnvelope)
+            << stellar::scpdpor::makeEnvelopeValue(
+                   slotIndex, *inspection.mBoundaryEnvelope)
             << "\n";
     }
 }
@@ -774,17 +802,16 @@ findNodeMissingExternalize(
     for (std::size_t nodeIndex = 0;
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
-        auto const trace =
-            execution.graph.thread_trace(
-                stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
+        auto const trace = execution.graph.thread_trace(
+            stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
         auto const inspection =
             scenario.inspectEmittedEnvelopes(nodeIndex, trace);
-        auto const hasExternalize = std::any_of(
-            inspection.mEmittedEnvelopes.begin(),
-            inspection.mEmittedEnvelopes.end(),
-            [](stellar::SCPEnvelope const& envelope) {
-                return isExternalizeEnvelope(envelope);
-            });
+        auto const hasExternalize =
+            std::any_of(inspection.mEmittedEnvelopes.begin(),
+                        inspection.mEmittedEnvelopes.end(),
+                        [](stellar::SCPEnvelope const& envelope) {
+                            return isExternalizeEnvelope(envelope);
+                        });
         if (!hasExternalize)
         {
             return nodeIndex;
@@ -808,9 +835,8 @@ findAgreementFailure(
     for (std::size_t nodeIndex = 0;
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
-        auto const trace =
-            execution.graph.thread_trace(
-                stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
+        auto const trace = execution.graph.thread_trace(
+            stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
         auto const inspection =
             scenario.inspectEmittedEnvelopes(nodeIndex, trace);
         auto const externalizedValue =
@@ -837,19 +863,18 @@ findAgreementFailure(
 }
 
 void
-dumpTerminalExecution(
-    std::ostream& out,
-    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-    stellar::scpdpor::TraceBundle const& bundle, bool dumpReplayTrace)
+dumpTerminalExecution(std::ostream& out,
+                      stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+                      stellar::scpdpor::TraceBundle const& bundle,
+                      bool dumpReplayTrace)
 {
-    auto const& leaderTrace = findThreadTrace(
-        bundle, stellar::scpdpor::threadIdForNodeIndex(0));
+    auto const& leaderTrace =
+        findThreadTrace(bundle, stellar::scpdpor::threadIdForNodeIndex(0));
     auto const boundary = scenario.inspectBoundary(0, leaderTrace);
 
-    out << "terminal-kind="
-        << terminalExecutionKindName(bundle.mTerminal.mKind)
-        << " leader-boundary="
-        << (boundary.mReachedBoundary ? "true" : "false") << "\n";
+    out << "terminal-kind=" << terminalExecutionKindName(bundle.mTerminal.mKind)
+        << " leader-boundary=" << (boundary.mReachedBoundary ? "true" : "false")
+        << "\n";
 
     if (!dumpReplayTrace)
     {
@@ -869,10 +894,9 @@ dumpTerminalExecution(
 }
 
 void
-dumpErrorExecution(
-    std::ostream& out,
-    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-    stellar::scpdpor::TraceBundle const& bundle)
+dumpErrorExecution(std::ostream& out,
+                   stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+                   stellar::scpdpor::TraceBundle const& bundle)
 {
     out << "terminal-kind=error"
         << " node-index=" << bundle.mTerminal.mFocusNodeIndex
@@ -919,8 +943,7 @@ generateTraceFilePath(std::string const& traceDir)
     gmtime_r(&timeT, &timeBuf);
 
     std::ostringstream filename;
-    filename << "trace-"
-             << std::put_time(&timeBuf, "%Y%m%d-%H%M%S") << "-"
+    filename << "trace-" << std::put_time(&timeBuf, "%Y%m%d-%H%M%S") << "-"
              << std::setfill('0') << std::setw(3) << ms.count() << ".json";
     return fs::path(traceDir) / filename.str();
 }
@@ -968,8 +991,8 @@ dumpReplayBundle(std::ostream& out, CommandLineOptions const& options,
     }
     else
     {
-        auto const& leaderTrace = findThreadTrace(
-            bundle, stellar::scpdpor::threadIdForNodeIndex(0));
+        auto const& leaderTrace =
+            findThreadTrace(bundle, stellar::scpdpor::threadIdForNodeIndex(0));
         auto const boundary = scenario.inspectBoundary(0, leaderTrace);
         out << "terminal-kind="
             << terminalExecutionKindName(bundle.mTerminal.mKind)
@@ -1024,8 +1047,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--workers" && i + 1 < argc)
         {
-            options.mWorkers =
-                static_cast<std::size_t>(std::stoull(argv[++i]));
+            options.mWorkers = static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
         if (arg == "--max-queued-tasks" && i + 1 < argc)
@@ -1051,8 +1073,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--depth" && i + 1 < argc)
         {
-            options.mDepth =
-                static_cast<std::size_t>(std::stoull(argv[++i]));
+            options.mDepth = static_cast<std::size_t>(std::stoull(argv[++i]));
             continue;
         }
         if ((arg == "--nodes" || arg == "--validators") && i + 1 < argc)
@@ -1064,16 +1085,14 @@ parseOptions(char const* argv0, int argc, char* argv[])
              arg == "--max-nomination-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxNominationRound =
-                parseUint32Value(arg, argv[++i]);
+            options.mMaxNominationRound = parseUint32Value(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-balloting-round" ||
              arg == "--max-balloting-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxBallotingRound =
-                parseUint32Value(arg, argv[++i]);
+            options.mMaxBallotingRound = parseUint32Value(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-nomination-timers-round" ||
@@ -1088,8 +1107,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
              arg == "--max-balloting-timers-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxBallotingTimersRound =
-                parseUint32Value(arg, argv[++i]);
+            options.mMaxBallotingTimersRound = parseUint32Value(arg, argv[++i]);
             continue;
         }
         if (arg == "--stop-on-prepare")
@@ -1142,9 +1160,15 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mTxSetStatusMode = parseTxSetStatusMode(argv[++i]);
             continue;
         }
-        if (arg == "--nomination-always-waiting")
+        if (arg == "--nomination-always-downloading" ||
+            arg == "--nomination-always-waiting")
         {
-            options.mNominationAlwaysWaiting = true;
+            options.mNominationAlwaysDownloading = true;
+            continue;
+        }
+        if (arg == "--invalid-proposer" && i + 1 < argc)
+        {
+            options.mInvalidProposerIndex = parseSizeValue(arg, argv[++i]);
             continue;
         }
         if (arg == "--download-succeeds-in-round" && i + 1 < argc)
@@ -1207,8 +1231,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
     // are enabled; an explicit --max-nomination-timers-round wins.
     if (options.mWithNominationTimers && !options.mMaxNominationTimersRound)
     {
-        options.mMaxNominationTimersRound =
-            DEFAULT_MAX_NOMINATION_TIMERS_ROUND;
+        options.mMaxNominationTimersRound = DEFAULT_MAX_NOMINATION_TIMERS_ROUND;
     }
     return options;
 }
@@ -1228,8 +1251,8 @@ main(int argc, char* argv[])
         auto const options = parseOptions(argv[0], argc, argv);
         if (options.mReplayTraceJsonPath)
         {
-            auto const bundle =
-                stellar::scpdpor::loadTraceBundle(*options.mReplayTraceJsonPath);
+            auto const bundle = stellar::scpdpor::loadTraceBundle(
+                *options.mReplayTraceJsonPath);
             auto const scenario =
                 stellar::scpdpor::ScpDporDefaultScenario(bundle.mOptions);
             dumpReplayBundle(std::cout, options, scenario, bundle);
@@ -1238,8 +1261,9 @@ main(int argc, char* argv[])
 
         auto scenario = makeScenario(options);
         dpor::algo::DporConfigT<stellar::scpdpor::ScpDporValue> config;
-        config.program = stellar::scpdpor::wrapProgramExceptionsAsErrorExecutions(
-            scenario.makeProgram());
+        config.program =
+            stellar::scpdpor::wrapProgramExceptionsAsErrorExecutions(
+                scenario.makeProgram());
         config.max_depth = options.mDepth;
         config.communication_model = options.mCommunicationModel;
         if (options.mPrintStatsInterval)
@@ -1258,27 +1282,63 @@ main(int argc, char* argv[])
         std::recursive_mutex terminalExecutionMutex;
         bool dumpedTerminalExecution = false;
         std::optional<std::string> failureMessage;
-        config.on_terminal_execution =
-            [&](dpor::algo::TerminalExecutionT<
-                    stellar::scpdpor::ScpDporValue> const& execution) {
-                std::unique_lock<std::recursive_mutex> serializedCallbackGuard;
-                if (options.mSerializeTerminalCallbacks)
-                {
-                    serializedCallbackGuard =
-                        std::unique_lock<std::recursive_mutex>(
-                            terminalExecutionMutex);
-                }
+        config
+            .on_terminal_execution = [&](dpor::algo::TerminalExecutionT<
+                                         stellar::scpdpor::ScpDporValue> const&
+                                             execution) {
+            std::unique_lock<std::recursive_mutex> serializedCallbackGuard;
+            if (options.mSerializeTerminalCallbacks)
+            {
+                serializedCallbackGuard =
+                    std::unique_lock<std::recursive_mutex>(
+                        terminalExecutionMutex);
+            }
 
-                auto const errorExecution =
-                    stellar::scpdpor::findErrorExecution(
-                        scenario.options().mValidators.size(), execution);
-                if (errorExecution)
+            auto const errorExecution = stellar::scpdpor::findErrorExecution(
+                scenario.options().mValidators.size(), execution);
+            if (errorExecution)
+            {
+                std::lock_guard<std::recursive_mutex> guard(
+                    terminalExecutionMutex);
+                if (!failureMessage)
+                {
+                    failureMessage = errorExecution->mMessage;
+                }
+                if (!dumpedTerminalExecution)
+                {
+                    auto const bundle = stellar::scpdpor::makeTraceBundle(
+                        scenario, execution, options.mCommunicationModel,
+                        stellar::scpdpor::TerminalMeta{
+                            .mKind = execution.kind,
+                            .mFailureMessage = errorExecution->mMessage,
+                            .mFocusNodeIndex = errorExecution->mNodeIndex,
+                            .mFocusThreadID = errorExecution->mThreadID});
+                    writeTraceBundleToTraceDir(options.mTraceDir, bundle);
+                    dumpErrorExecution(std::cout, scenario, bundle);
+                    dumpedTerminalExecution = true;
+                }
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
+
+            if (options.mMustExternalize)
+            {
+                auto const missingNodeIndex =
+                    findNodeMissingExternalize(scenario, execution);
+                if (missingNodeIndex)
                 {
                     std::lock_guard<std::recursive_mutex> guard(
                         terminalExecutionMutex);
                     if (!failureMessage)
                     {
-                        failureMessage = errorExecution->mMessage;
+                        std::ostringstream message;
+                        message
+                            << terminalExecutionKindName(execution.kind)
+                            << " execution missing EXTERNALIZE"
+                            << " envelope from node-index=" << *missingNodeIndex
+                            << " thread="
+                            << stellar::scpdpor::threadIdForNodeIndex(
+                                   *missingNodeIndex);
+                        failureMessage = message.str();
                     }
                     if (!dumpedTerminalExecution)
                     {
@@ -1286,139 +1346,96 @@ main(int argc, char* argv[])
                             scenario, execution, options.mCommunicationModel,
                             stellar::scpdpor::TerminalMeta{
                                 .mKind = execution.kind,
-                                .mFailureMessage = errorExecution->mMessage,
-                                .mFocusNodeIndex = errorExecution->mNodeIndex,
-                                .mFocusThreadID = errorExecution->mThreadID});
+                                .mFailureMessage = failureMessage,
+                                .mFocusNodeIndex = *missingNodeIndex,
+                                .mFocusThreadID =
+                                    stellar::scpdpor::threadIdForNodeIndex(
+                                        *missingNodeIndex)});
                         writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                        dumpErrorExecution(std::cout, scenario, bundle);
+                        dumpTerminalExecution(std::cout, scenario, bundle,
+                                              true);
                         dumpedTerminalExecution = true;
                     }
                     return dpor::algo::TerminalExecutionAction::Stop;
                 }
+            }
 
-                if (options.mMustExternalize)
-                {
-                    auto const missingNodeIndex =
-                        findNodeMissingExternalize(scenario, execution);
-                    if (missingNodeIndex)
-                    {
-                        std::lock_guard<std::recursive_mutex> guard(
-                            terminalExecutionMutex);
-                        if (!failureMessage)
-                        {
-                            std::ostringstream message;
-                            message << terminalExecutionKindName(
-                                           execution.kind)
-                                    << " execution missing EXTERNALIZE"
-                                    << " envelope from node-index="
-                                    << *missingNodeIndex
-                                    << " thread="
-                                    << stellar::scpdpor::threadIdForNodeIndex(
-                                           *missingNodeIndex);
-                            failureMessage = message.str();
-                        }
-                        if (!dumpedTerminalExecution)
-                        {
-                            auto const bundle = stellar::scpdpor::makeTraceBundle(
-                                scenario, execution,
-                                options.mCommunicationModel,
-                                stellar::scpdpor::TerminalMeta{
-                                    .mKind = execution.kind,
-                                    .mFailureMessage = failureMessage,
-                                    .mFocusNodeIndex = *missingNodeIndex,
-                                    .mFocusThreadID =
-                                        stellar::scpdpor::threadIdForNodeIndex(
-                                            *missingNodeIndex)});
-                            writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                            dumpTerminalExecution(
-                                std::cout, scenario, bundle, true);
-                            dumpedTerminalExecution = true;
-                        }
-                        return dpor::algo::TerminalExecutionAction::Stop;
-                    }
-                }
-
-                if (options.mCheckAgreement)
-                {
-                    auto const agreementFailure =
-                        findAgreementFailure(scenario, execution);
-                    if (agreementFailure)
-                    {
-                        std::lock_guard<std::recursive_mutex> guard(
-                            terminalExecutionMutex);
-                        if (!failureMessage)
-                        {
-                            std::ostringstream message;
-                            message << terminalExecutionKindName(
-                                           execution.kind)
-                                    << " execution has conflicting"
-                                    << " EXTERNALIZE values between"
-                                    << " node-index="
-                                    << agreementFailure->mReference.mNodeIndex
-                                    << " thread="
-                                    << stellar::scpdpor::threadIdForNodeIndex(
-                                           agreementFailure
-                                               ->mReference.mNodeIndex)
-                                    << " and node-index="
-                                    << agreementFailure->mConflicting.mNodeIndex
-                                    << " thread="
-                                    << stellar::scpdpor::threadIdForNodeIndex(
-                                           agreementFailure
-                                               ->mConflicting.mNodeIndex);
-                            failureMessage = message.str();
-                        }
-                        if (!dumpedTerminalExecution)
-                        {
-                            auto const bundle = stellar::scpdpor::makeTraceBundle(
-                                scenario, execution,
-                                options.mCommunicationModel,
-                                stellar::scpdpor::TerminalMeta{
-                                    .mKind = execution.kind,
-                                    .mFailureMessage = failureMessage,
-                                    .mFocusNodeIndex =
-                                        agreementFailure->mConflicting
-                                            .mNodeIndex,
-                                    .mFocusThreadID =
-                                        stellar::scpdpor::threadIdForNodeIndex(
-                                            agreementFailure->mConflicting
-                                                .mNodeIndex)});
-                            writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                            dumpTerminalExecution(
-                                std::cout, scenario, bundle, true);
-                            dumpedTerminalExecution = true;
-                        }
-                        return dpor::algo::TerminalExecutionAction::Stop;
-                    }
-                }
-
-                if (options.mFailOnFirstTerminal)
+            if (options.mCheckAgreement)
+            {
+                auto const agreementFailure =
+                    findAgreementFailure(scenario, execution);
+                if (agreementFailure)
                 {
                     std::lock_guard<std::recursive_mutex> guard(
                         terminalExecutionMutex);
                     if (!failureMessage)
                     {
-                        failureMessage = failOnFirstTerminalFailureMessage();
+                        std::ostringstream message;
+                        message
+                            << terminalExecutionKindName(execution.kind)
+                            << " execution has conflicting"
+                            << " EXTERNALIZE values between"
+                            << " node-index="
+                            << agreementFailure->mReference.mNodeIndex
+                            << " thread="
+                            << stellar::scpdpor::threadIdForNodeIndex(
+                                   agreementFailure->mReference.mNodeIndex)
+                            << " and node-index="
+                            << agreementFailure->mConflicting.mNodeIndex
+                            << " thread="
+                            << stellar::scpdpor::threadIdForNodeIndex(
+                                   agreementFailure->mConflicting.mNodeIndex);
+                        failureMessage = message.str();
                     }
                     if (!dumpedTerminalExecution)
                     {
                         auto const bundle = stellar::scpdpor::makeTraceBundle(
                             scenario, execution, options.mCommunicationModel,
                             stellar::scpdpor::TerminalMeta{
-                                .mKind =
-                                    dpor::algo::TerminalExecutionKind::Error,
+                                .mKind = execution.kind,
                                 .mFailureMessage = failureMessage,
-                                .mFocusNodeIndex = 0,
+                                .mFocusNodeIndex =
+                                    agreementFailure->mConflicting.mNodeIndex,
                                 .mFocusThreadID =
-                                    stellar::scpdpor::threadIdForNodeIndex(0)});
+                                    stellar::scpdpor::threadIdForNodeIndex(
+                                        agreementFailure->mConflicting
+                                            .mNodeIndex)});
                         writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                        dumpErrorExecution(std::cout, scenario, bundle);
+                        dumpTerminalExecution(std::cout, scenario, bundle,
+                                              true);
+                        dumpedTerminalExecution = true;
                     }
-                    dumpedTerminalExecution = true;
                     return dpor::algo::TerminalExecutionAction::Stop;
                 }
+            }
 
-                return dpor::algo::TerminalExecutionAction::Continue;
-            };
+            if (options.mFailOnFirstTerminal)
+            {
+                std::lock_guard<std::recursive_mutex> guard(
+                    terminalExecutionMutex);
+                if (!failureMessage)
+                {
+                    failureMessage = failOnFirstTerminalFailureMessage();
+                }
+                if (!dumpedTerminalExecution)
+                {
+                    auto const bundle = stellar::scpdpor::makeTraceBundle(
+                        scenario, execution, options.mCommunicationModel,
+                        stellar::scpdpor::TerminalMeta{
+                            .mKind = dpor::algo::TerminalExecutionKind::Error,
+                            .mFailureMessage = failureMessage,
+                            .mFocusNodeIndex = 0,
+                            .mFocusThreadID =
+                                stellar::scpdpor::threadIdForNodeIndex(0)});
+                    writeTraceBundleToTraceDir(options.mTraceDir, bundle);
+                    dumpErrorExecution(std::cout, scenario, bundle);
+                }
+                dumpedTerminalExecution = true;
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
+
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
         config.on_fatal_error =
             [](dpor::algo::FatalErrorContextT<
                 stellar::scpdpor::ScpDporValue> const& context) {
@@ -1434,16 +1451,16 @@ main(int argc, char* argv[])
                 catch (...)
                 {
                 }
-                std::cerr << "fatal-error: " << message << "\n"
-                          << dpor::model::format_graph(
-                                 context.graph,
-                                 [](stellar::scpdpor::ScpDporValue const&
-                                        value) {
-                                     std::ostringstream out;
-                                     out << value;
-                                     return out.str();
-                                 })
-                          << std::flush;
+                std::cerr
+                    << "fatal-error: " << message << "\n"
+                    << dpor::model::format_graph(
+                           context.graph,
+                           [](stellar::scpdpor::ScpDporValue const& value) {
+                               std::ostringstream out;
+                               out << value;
+                               return out.str();
+                           })
+                    << std::flush;
             };
 
         dpor::algo::ParallelVerifyOptions parallelOptions;

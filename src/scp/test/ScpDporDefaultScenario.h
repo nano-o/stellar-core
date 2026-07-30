@@ -13,8 +13,9 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
-#include <string>
+#include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -38,7 +39,7 @@ class ScpDporDefaultScenario
     enum class TxSetStatusMode : std::uint8_t
     {
         Valid,
-        Waiting,
+        Downloading,
         Invalid,
         Nondeterministic
     };
@@ -70,8 +71,9 @@ class ScpDporDefaultScenario
         bool mEnableBallotingTimeouts{false};
         DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::BelowThreshold};
         TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::Valid};
-        bool mNominationAlwaysWaiting{false};
-        bool mProtocolAllowsEmptyTxSetValues{true};
+        bool mNominationAlwaysDownloading{false};
+        bool mInjectEmptyTxSetProtocolGateFailureForTesting{false};
+        std::vector<std::vector<Value>> mOutrightInvalidValuesByNode;
         std::optional<uint32_t> mDownloadSucceedsInRound;
         uint32_t mInitialNominationTimeoutMS{1000};
         uint32_t mIncrementNominationTimeoutMS{1000};
@@ -118,8 +120,7 @@ class ScpDporDefaultScenario
         std::optional<std::string> mReplayErrorMessage;
     };
 
-    explicit ScpDporDefaultScenario(
-        Options options = makeDefaultOptions())
+    explicit ScpDporDefaultScenario(Options options = makeDefaultOptions())
         : mOptions(std::move(options))
         , mReplaySupport(mOptions.mValidators, mOptions.mQuorumSet,
                          mOptions.mSlotIndex, mOptions.mPreviousValue,
@@ -142,7 +143,8 @@ class ScpDporDefaultScenario
              ++nodeIndex)
         {
             ScenarioBaseline baseline;
-            auto const& nodeBaseline = mReplaySupport.getNodeBaseline(nodeIndex);
+            auto const& nodeBaseline =
+                mReplaySupport.getNodeBaseline(nodeIndex);
             baseline.mInitialPendingSends.reserve(
                 nodeBaseline.mInitialPendingEnvelopes.size() *
                 (mOptions.mValidators.size() - 1));
@@ -178,7 +180,8 @@ class ScpDporDefaultScenario
                 SecretKey::pseudoRandomForTestingFromSeed(1000 + nodeIndex));
         }
 
-        options.mQuorumSet.threshold = static_cast<uint32_t>(validatorCount - 1);
+        options.mQuorumSet.threshold =
+            static_cast<uint32_t>(validatorCount - 1);
         for (auto const& validator : options.mValidators)
         {
             options.mQuorumSet.validators.push_back(validator.getPublicKey());
@@ -218,8 +221,8 @@ class ScpDporDefaultScenario
             for (std::size_t nodeIndex = 0; nodeIndex < validatorCount;
                  ++nodeIndex)
             {
-                auto const valueName = std::string("x") +
-                                       std::to_string(nodeIndex);
+                auto const valueName =
+                    std::string("x") + std::to_string(nodeIndex);
                 values.push_back(makeValue(std::string_view(valueName)));
             }
             return values;
@@ -233,17 +236,15 @@ class ScpDporDefaultScenario
         ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
 
         Program program;
-        auto self =
-            std::make_shared<ScpDporDefaultScenario const>(
-                *this);
+        auto self = std::make_shared<ScpDporDefaultScenario const>(*this);
         for (std::size_t nodeIndex = 0; nodeIndex < mOptions.mValidators.size();
              ++nodeIndex)
         {
             auto const threadID = threadIdForNodeIndex(nodeIndex);
-            program.threads[threadID] = [self, nodeIndex](
-                                            ThreadTrace const& trace,
-                                            std::size_t step)
-                -> std::optional<EventLabel> {
+            program.threads[threadID] =
+                [self,
+                 nodeIndex](ThreadTrace const& trace,
+                            std::size_t step) -> std::optional<EventLabel> {
                 return self->captureNextEvent(nodeIndex, trace, step);
             };
         }
@@ -261,14 +262,14 @@ class ScpDporDefaultScenario
     }
 
     BoundaryInspection
-    inspectPrepareBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
+    inspectPrepareBoundary(std::size_t nodeIndex,
+                           ThreadTrace const& trace) const
     {
         auto prepareOptions = mOptions;
         prepareOptions.mStopOnPrepare = true;
         prepareOptions.mMaxNominationRound.reset();
         prepareOptions.mMaxBallotingRound.reset();
-        return ScpDporDefaultScenario(
-                   std::move(prepareOptions))
+        return ScpDporDefaultScenario(std::move(prepareOptions))
             .inspectBoundary(nodeIndex, trace);
     }
 
@@ -326,8 +327,7 @@ class ScpDporDefaultScenario
         {
             DporScpNode& mNode;
 
-            explicit ReplayDebugRecordingGuard(DporScpNode& node)
-                : mNode(node)
+            explicit ReplayDebugRecordingGuard(DporScpNode& node) : mNode(node)
             {
                 mNode.setReplayDebugRecordingEnabled(true);
             }
@@ -339,7 +339,8 @@ class ScpDporDefaultScenario
         } guard(node);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
-        auto pendingSends = mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
+        auto pendingSends =
+            mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
         std::size_t nextPendingSend = 0;
         std::size_t observedCount = 0;
         std::optional<int> selectedTimerID;
@@ -391,9 +392,12 @@ class ScpDporDefaultScenario
                 }
 
                 inspection.mSteps.push_back(ThreadReplayTraceStep{
-                    .mKind = ThreadReplayTraceStep::Kind::NondeterministicChoice,
-                    .mChoice = NondeterministicChoiceLabel{
-                        .value = choices.front(), .choices = std::move(choices)},
+                    .mKind =
+                        ThreadReplayTraceStep::Kind::NondeterministicChoice,
+                    .mChoice =
+                        NondeterministicChoiceLabel{.value = choices.front(),
+                                                    .choices =
+                                                        std::move(choices)},
                     .mObservedValue = observed});
                 selectedTimerID = timerID;
                 ++observedCount;
@@ -443,7 +447,8 @@ class ScpDporDefaultScenario
 
             observedCount += replayed.mConsumedTraceEntries;
             queuePendingEnvelopeSends(pendingSends, node, nodeIndex);
-            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
+            updateSelectedTimerAfterObservation(node, replayed,
+                                                selectedTimerID);
         }
 
         inspection.mReachedBoundary = node.hasReachedBoundary();
@@ -498,8 +503,31 @@ class ScpDporDefaultScenario
         for (std::size_t nodeIndex = 0; nodeIndex < options.mValidators.size();
              ++nodeIndex)
         {
-            config.mNodeIndexMap[options.mValidators.at(nodeIndex).getPublicKey()] =
-                nodeIndex + 1;
+            config.mNodeIndexMap[options.mValidators.at(nodeIndex)
+                                     .getPublicKey()] = nodeIndex + 1;
+        }
+        if (!options.mOutrightInvalidValuesByNode.empty() &&
+            options.mOutrightInvalidValuesByNode.size() !=
+                options.mValidators.size())
+        {
+            throw std::invalid_argument(
+                "outright-invalid value lists must match validator count");
+        }
+        for (std::size_t nodeIndex = 0;
+             nodeIndex < options.mOutrightInvalidValuesByNode.size();
+             ++nodeIndex)
+        {
+            auto const& values =
+                options.mOutrightInvalidValuesByNode.at(nodeIndex);
+            std::set<Value> uniqueValues(values.begin(), values.end());
+            if (uniqueValues.size() != values.size())
+            {
+                throw std::invalid_argument(
+                    "outright-invalid value lists must not contain duplicates");
+            }
+            config.mOutrightInvalidValuesByNode.emplace(
+                options.mValidators.at(nodeIndex).getPublicKey(),
+                std::move(uniqueValues));
         }
         if (options.mStopOnExternalize)
         {
@@ -527,32 +555,32 @@ class ScpDporDefaultScenario
             options.mIncrementNominationTimeoutMS;
         config.mInitialBallotTimeoutMS = options.mInitialBallotTimeoutMS;
         config.mIncrementBallotTimeoutMS = options.mIncrementBallotTimeoutMS;
-        config.mNominationAlwaysWaitingTxSetStatus =
-            options.mNominationAlwaysWaiting;
-        config.mProtocolAllowsEmptyTxSetValues =
-            options.mProtocolAllowsEmptyTxSetValues;
+        config.mNominationAlwaysDownloadingTxSetStatus =
+            options.mNominationAlwaysDownloading;
+        config.mInjectEmptyTxSetProtocolGateFailureForTesting =
+            options.mInjectEmptyTxSetProtocolGateFailureForTesting;
         switch (options.mTxSetStatusMode)
         {
         case TxSetStatusMode::Valid:
             config.mTxSetStatus = DporScpTxSetStatus::Valid;
             config.mNondeterministicTxSetStatus = true;
             config.mSupportedTxSetStatusChoices = {
-                DporScpTxSetStatus::Waiting, DporScpTxSetStatus::Valid};
+                DporScpTxSetStatus::Downloading, DporScpTxSetStatus::Valid};
             break;
-        case TxSetStatusMode::Waiting:
-            config.mTxSetStatus = DporScpTxSetStatus::Waiting;
+        case TxSetStatusMode::Downloading:
+            config.mTxSetStatus = DporScpTxSetStatus::Downloading;
             break;
         case TxSetStatusMode::Invalid:
             config.mTxSetStatus = DporScpTxSetStatus::Invalid;
             config.mNondeterministicTxSetStatus = true;
             config.mSupportedTxSetStatusChoices = {
-                DporScpTxSetStatus::Waiting, DporScpTxSetStatus::Invalid};
+                DporScpTxSetStatus::Downloading, DporScpTxSetStatus::Invalid};
             break;
         case TxSetStatusMode::Nondeterministic:
             config.mTxSetStatus = DporScpTxSetStatus::Valid;
             config.mNondeterministicTxSetStatus = true;
             config.mSupportedTxSetStatusChoices = {
-                DporScpTxSetStatus::Valid, DporScpTxSetStatus::Waiting,
+                DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading,
                 DporScpTxSetStatus::Invalid};
             break;
         }
@@ -561,14 +589,12 @@ class ScpDporDefaultScenario
         switch (options.mDownloadTimeMode)
         {
         case DownloadTimeMode::BelowThreshold:
-            config.mTxSetDownloadWaitTimes = {
-                std::chrono::milliseconds(
-                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
+            config.mTxSetDownloadWaitTimes = {std::chrono::milliseconds(
+                DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
             break;
         case DownloadTimeMode::AboveThreshold:
-            config.mTxSetDownloadWaitTimes = {
-                std::chrono::milliseconds(
-                    DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+            config.mTxSetDownloadWaitTimes = {std::chrono::milliseconds(
+                DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
             break;
         case DownloadTimeMode::Nondeterministic:
             config.mTxSetDownloadWaitTimes = {
@@ -608,28 +634,27 @@ class ScpDporDefaultScenario
     ReceiveLabel
     makeReceiveLabel(std::size_t) const
     {
-        auto const matcher = [slotIndex = mOptions.mSlotIndex](
-                                 ScpDporValue const& value) {
-            return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
-        };
+        auto const matcher =
+            [slotIndex = mOptions.mSlotIndex](ScpDporValue const& value) {
+                return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
+            };
         return dpor::model::make_receive_label<ScpDporValue>(matcher);
     }
 
     ReceiveLabel
     makeNonBlockingReceiveLabel(std::size_t) const
     {
-        auto const matcher = [slotIndex = mOptions.mSlotIndex](
-                                 ScpDporValue const& value) {
-            return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
-        };
+        auto const matcher =
+            [slotIndex = mOptions.mSlotIndex](ScpDporValue const& value) {
+                return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
+            };
         return dpor::model::make_nonblocking_receive_label<ScpDporValue>(
             matcher);
     }
 
     void
     fanOutEnvelope(std::vector<SendLabel>& pendingSends,
-                   std::size_t senderIndex,
-                   SCPEnvelope const& envelope) const
+                   std::size_t senderIndex, SCPEnvelope const& envelope) const
     {
         for (std::size_t receiverIndex = 0;
              receiverIndex < mOptions.mValidators.size(); ++receiverIndex)
@@ -638,17 +663,15 @@ class ScpDporDefaultScenario
             {
                 continue;
             }
-            pendingSends.push_back(
-                SendLabel{.destination = threadIdForNodeIndex(receiverIndex),
-                          .value = makeEnvelopeValue(mOptions.mSlotIndex,
-                                                     envelope)});
+            pendingSends.push_back(SendLabel{
+                .destination = threadIdForNodeIndex(receiverIndex),
+                .value = makeEnvelopeValue(mOptions.mSlotIndex, envelope)});
         }
     }
 
     void
     queuePendingEnvelopeSends(std::vector<SendLabel>& pendingSends,
-                              DporScpNode& node,
-                              std::size_t senderIndex) const
+                              DporScpNode& node, std::size_t senderIndex) const
     {
         for (auto const& envelope : node.takePendingEnvelopes())
         {
@@ -777,7 +800,8 @@ class ScpDporDefaultScenario
 
             observedIndex += replayed.mConsumedTraceEntries;
             static_cast<void>(node.takePendingEnvelopes());
-            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
+            updateSelectedTimerAfterObservation(node, replayed,
+                                                selectedTimerID);
         }
 
         ReplayInspection inspection;
@@ -797,7 +821,8 @@ class ScpDporDefaultScenario
         auto& node = mReplaySupport.acquireNode(nodeIndex);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
-        auto pendingSends = mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
+        auto pendingSends =
+            mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
         std::size_t nextPendingSend = 0;
         std::size_t eventCount = 0;
         std::size_t observedCount = 0;
@@ -835,11 +860,13 @@ class ScpDporDefaultScenario
                 if (eventCount == step)
                 {
                     return EventLabel{NondeterministicChoiceLabel{
-                        .value = choices.front(), .choices = std::move(choices)}};
+                        .value = choices.front(),
+                        .choices = std::move(choices)}};
                 }
                 ++eventCount;
 
-                if (observedCount >= trace.size() || trace.at(observedCount).is_bottom())
+                if (observedCount >= trace.size() ||
+                    trace.at(observedCount).is_bottom())
                 {
                     throw std::logic_error(
                         "trace does not contain a timer-choice observation");
@@ -865,10 +892,9 @@ class ScpDporDefaultScenario
 
             auto const nonBlocking =
                 selectedTimerID.has_value() || activeTimers.size() == 1;
-            auto receiveEvent = EventLabel{nonBlocking
-                                               ? makeNonBlockingReceiveLabel(
-                                                     nodeIndex)
-                                               : makeReceiveLabel(nodeIndex)};
+            auto receiveEvent =
+                EventLabel{nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
+                                       : makeReceiveLabel(nodeIndex)};
             if (eventCount == step)
             {
                 return receiveEvent;
@@ -878,7 +904,8 @@ class ScpDporDefaultScenario
             if (observedCount >= trace.size())
             {
                 throw std::logic_error(
-                    "trace does not contain enough observations to replay the requested step");
+                    "trace does not contain enough observations to replay the "
+                    "requested step");
             }
 
             auto timerToFire = selectedTimerID;
@@ -897,13 +924,15 @@ class ScpDporDefaultScenario
                     return replayed.mPendingEvent;
                 }
                 throw std::logic_error(
-                    "trace does not contain enough observations to replay the requested step");
+                    "trace does not contain enough observations to replay the "
+                    "requested step");
             }
 
             observedCount += replayed.mConsumedTraceEntries;
             eventCount += replayed.mConsumedStepCount;
             queuePendingEnvelopeSends(pendingSends, node, nodeIndex);
-            updateSelectedTimerAfterObservation(node, replayed, selectedTimerID);
+            updateSelectedTimerAfterObservation(node, replayed,
+                                                selectedTimerID);
         }
     }
 

@@ -88,8 +88,7 @@ requireBool(Json::Value const& value, std::string const& context)
     return value.asBool();
 }
 
-uint64_t
-requireUint64(Json::Value const& value, std::string const& context);
+uint64_t requireUint64(Json::Value const& value, std::string const& context);
 
 uint32_t
 requireUint32(Json::Value const& value, std::string const& context)
@@ -152,8 +151,7 @@ requireInt64(Json::Value const& value, std::string const& context)
     if (value.isUInt64())
     {
         auto const parsed = value.asUInt64();
-        if (parsed >
-            static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+        if (parsed > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
         {
             throw std::invalid_argument(context + " is out of int64 range");
         }
@@ -230,8 +228,8 @@ txSetStatusModeName(ScpDporDefaultScenario::TxSetStatusMode mode)
     {
     case ScpDporDefaultScenario::TxSetStatusMode::Valid:
         return "valid";
-    case ScpDporDefaultScenario::TxSetStatusMode::Waiting:
-        return "waiting";
+    case ScpDporDefaultScenario::TxSetStatusMode::Downloading:
+        return "downloading";
     case ScpDporDefaultScenario::TxSetStatusMode::Invalid:
         return "invalid";
     case ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic:
@@ -248,9 +246,9 @@ parseTxSetStatusMode(std::string_view mode)
     {
         return TxSetStatusMode::Valid;
     }
-    if (mode == "waiting")
+    if (mode == "downloading")
     {
-        return TxSetStatusMode::Waiting;
+        return TxSetStatusMode::Downloading;
     }
     if (mode == "invalid")
     {
@@ -356,14 +354,13 @@ encodeTxSetStatus(DporScpTxSetStatus status)
     {
     case DporScpTxSetStatus::Valid:
         return "valid";
-    case DporScpTxSetStatus::Waiting:
-        return "waiting";
+    case DporScpTxSetStatus::Downloading:
+        return "downloading";
     case DporScpTxSetStatus::Invalid:
         return "invalid";
     }
-    throw std::invalid_argument(
-        "unsupported txset status in trace value: " +
-        std::to_string(static_cast<unsigned>(status)));
+    throw std::invalid_argument("unsupported txset status in trace value: " +
+                                std::to_string(static_cast<unsigned>(status)));
 }
 
 int
@@ -387,9 +384,9 @@ parseTxSetStatus(std::string_view value)
     {
         return DporScpTxSetStatus::Valid;
     }
-    if (value == "waiting")
+    if (value == "downloading")
     {
-        return DporScpTxSetStatus::Waiting;
+        return DporScpTxSetStatus::Downloading;
     }
     if (value == "invalid")
     {
@@ -462,8 +459,8 @@ decodeBytes(std::string const& encoded, std::string const& context)
     }
     catch (std::exception const& ex)
     {
-        throw std::invalid_argument(context + " is not valid base64: " +
-                                    ex.what());
+        throw std::invalid_argument(context +
+                                    " is not valid base64: " + ex.what());
     }
     return bytes;
 }
@@ -506,9 +503,8 @@ terminalMetaFromJson(Json::Value const& value)
     auto const& object = requireObject(value, "terminal");
 
     TerminalMeta terminal;
-    terminal.mKind = parseTerminalKind(
-        requireString(requireMember(object, "kind", "terminal"),
-                      "terminal.kind"));
+    terminal.mKind = parseTerminalKind(requireString(
+        requireMember(object, "kind", "terminal"), "terminal.kind"));
 
     auto const& failureMessage =
         requireMember(object, "failure_message", "terminal");
@@ -518,13 +514,13 @@ terminalMetaFromJson(Json::Value const& value)
             requireString(failureMessage, "terminal.failure_message");
     }
 
-    terminal.mFocusNodeIndex = static_cast<std::size_t>(requireUint64(
-        requireMember(object, "focus_node_index", "terminal"),
-        "terminal.focus_node_index"));
+    terminal.mFocusNodeIndex = static_cast<std::size_t>(
+        requireUint64(requireMember(object, "focus_node_index", "terminal"),
+                      "terminal.focus_node_index"));
     static_assert(sizeof(dpor::model::ThreadId) <= sizeof(uint32_t));
-    terminal.mFocusThreadID = static_cast<dpor::model::ThreadId>(requireUint32(
-        requireMember(object, "focus_thread_id", "terminal"),
-        "terminal.focus_thread_id"));
+    terminal.mFocusThreadID = static_cast<dpor::model::ThreadId>(
+        requireUint32(requireMember(object, "focus_thread_id", "terminal"),
+                      "terminal.focus_thread_id"));
     return terminal;
 }
 
@@ -544,11 +540,11 @@ threadTraceRecordFromJson(Json::Value const& value)
     auto const& object = requireObject(value, "thread_trace record");
 
     ThreadTraceRecord record;
-    record.mThreadID = static_cast<dpor::model::ThreadId>(requireUint32(
-        requireMember(object, "thread", "thread_trace record"),
-        "thread_traces[].thread"));
-    record.mTrace =
-        threadTraceFromJson(requireMember(object, "trace", "thread_trace record"));
+    record.mThreadID = static_cast<dpor::model::ThreadId>(
+        requireUint32(requireMember(object, "thread", "thread_trace record"),
+                      "thread_traces[].thread"));
+    record.mTrace = threadTraceFromJson(
+        requireMember(object, "trace", "thread_trace record"));
 
     auto const observedCount = static_cast<std::size_t>(requireUint64(
         requireMember(object, "observed_count", "thread_trace record"),
@@ -564,7 +560,7 @@ threadTraceRecordFromJson(Json::Value const& value)
 void
 validateTraceBundle(TraceBundle const& bundle)
 {
-    if (bundle.mVersion != 1)
+    if (bundle.mVersion != TRACE_BUNDLE_VERSION)
     {
         throw std::invalid_argument("unsupported trace bundle version");
     }
@@ -648,9 +644,8 @@ ScpDporValue
 scpDporValueFromJson(Json::Value const& value)
 {
     auto const& object = requireObject(value, "ScpDporValue");
-    auto const kind =
-        requireString(requireMember(object, "kind", "ScpDporValue"),
-                      "ScpDporValue.kind");
+    auto const kind = requireString(
+        requireMember(object, "kind", "ScpDporValue"), "ScpDporValue.kind");
     auto const slotIndex =
         requireUint64(requireMember(object, "slot_index", "ScpDporValue"),
                       "ScpDporValue.slot_index");
@@ -677,10 +672,9 @@ scpDporValueFromJson(Json::Value const& value)
     if (kind == "timer")
     {
         return makeTimerChoiceValue(
-            slotIndex,
-            parseTimerID(requireString(
-                requireMember(object, "timer", "ScpDporValue"),
-                "ScpDporValue.timer")));
+            slotIndex, parseTimerID(requireString(
+                           requireMember(object, "timer", "ScpDporValue"),
+                           "ScpDporValue.timer")));
     }
     if (kind == "txset_wait_time")
     {
@@ -693,10 +687,9 @@ scpDporValueFromJson(Json::Value const& value)
     if (kind == "txset_status")
     {
         return makeTxSetStatusChoiceValue(
-            slotIndex,
-            parseTxSetStatus(requireString(
-                requireMember(object, "value", "ScpDporValue"),
-                "ScpDporValue.value")));
+            slotIndex, parseTxSetStatus(requireString(
+                           requireMember(object, "value", "ScpDporValue"),
+                           "ScpDporValue.value")));
     }
 
     throw std::invalid_argument("unknown ScpDporValue.kind: " + kind);
@@ -777,27 +770,39 @@ toJson(ScpDporDefaultScenario::Options const& options)
     root["stop_on_externalize"] = options.mStopOnExternalize;
     root["prepare_boundary_counter"] =
         static_cast<Json::UInt64>(options.mPrepareBoundaryCounter);
-    root["max_nomination_round"] = toJsonOptionalUint32(
-        options.mMaxNominationRound);
-    root["max_balloting_round"] = toJsonOptionalUint32(
-        options.mMaxBallotingRound);
-    root["max_nomination_timers_round"] = toJsonOptionalUint32(
-        options.mMaxNominationTimersRound);
-    root["max_balloting_timers_round"] = toJsonOptionalUint32(
-        options.mMaxBallotingTimersRound);
-    root["nomination_timer_set_limit"] = toJsonOptionalUint32(
-        options.mNominationTimerSetLimit);
+    root["max_nomination_round"] =
+        toJsonOptionalUint32(options.mMaxNominationRound);
+    root["max_balloting_round"] =
+        toJsonOptionalUint32(options.mMaxBallotingRound);
+    root["max_nomination_timers_round"] =
+        toJsonOptionalUint32(options.mMaxNominationTimersRound);
+    root["max_balloting_timers_round"] =
+        toJsonOptionalUint32(options.mMaxBallotingTimersRound);
+    root["nomination_timer_set_limit"] =
+        toJsonOptionalUint32(options.mNominationTimerSetLimit);
     root["enable_nomination_timeouts"] = options.mEnableNominationTimeouts;
     root["enable_balloting_timeouts"] = options.mEnableBallotingTimeouts;
     root["download_time_mode"] =
         std::string(downloadTimeModeName(options.mDownloadTimeMode));
     root["txset_status_mode"] =
         std::string(txSetStatusModeName(options.mTxSetStatusMode));
-    root["nomination_always_waiting"] = options.mNominationAlwaysWaiting;
-    root["protocol_allows_empty_tx_set_values"] =
-        options.mProtocolAllowsEmptyTxSetValues;
-    root["download_succeeds_in_round"] = toJsonOptionalUint32(
-        options.mDownloadSucceedsInRound);
+    root["nomination_always_downloading"] =
+        options.mNominationAlwaysDownloading;
+    root["inject_empty_tx_set_protocol_gate_failure_for_testing"] =
+        options.mInjectEmptyTxSetProtocolGateFailureForTesting;
+    auto& outrightInvalidValuesByNode = root["outright_invalid_values_by_node"];
+    outrightInvalidValuesByNode = Json::Value(Json::arrayValue);
+    for (auto const& invalidValues : options.mOutrightInvalidValuesByNode)
+    {
+        Json::Value encodedValues(Json::arrayValue);
+        for (auto const& invalidValue : invalidValues)
+        {
+            encodedValues.append(toJsonValueBytes(invalidValue));
+        }
+        outrightInvalidValuesByNode.append(std::move(encodedValues));
+    }
+    root["download_succeeds_in_round"] =
+        toJsonOptionalUint32(options.mDownloadSucceedsInRound);
     root["initial_nomination_timeout_ms"] =
         static_cast<Json::UInt64>(options.mInitialNominationTimeoutMS);
     root["increment_nomination_timeout_ms"] =
@@ -822,14 +827,12 @@ optionsFromJson(Json::Value const& value)
     options.mValidators.reserve(validators.size());
     for (auto const& validator : validators)
     {
-        options.mValidators.push_back(
-            SecretKey::fromStrKeySeed(
-                requireString(validator, "scenario.options.validators[]")));
+        options.mValidators.push_back(SecretKey::fromStrKeySeed(
+            requireString(validator, "scenario.options.validators[]")));
     }
 
-    options.mQuorumSet =
-        LocalNode::fromJson(requireMember(object, "quorum_set",
-                                          "scenario.options"));
+    options.mQuorumSet = LocalNode::fromJson(
+        requireMember(object, "quorum_set", "scenario.options"));
     options.mSlotIndex =
         requireUint64(requireMember(object, "slot_index", "scenario.options"),
                       "scenario.options.slot_index");
@@ -837,9 +840,9 @@ optionsFromJson(Json::Value const& value)
         requireMember(object, "previous_value", "scenario.options"),
         "scenario.options.previous_value");
 
-    auto const& initialValues =
-        requireArray(requireMember(object, "initial_values", "scenario.options"),
-                     "scenario.options.initial_values");
+    auto const& initialValues = requireArray(
+        requireMember(object, "initial_values", "scenario.options"),
+        "scenario.options.initial_values");
     options.mInitialValues.reserve(initialValues.size());
     for (auto const& initialValue : initialValues)
     {
@@ -847,19 +850,18 @@ optionsFromJson(Json::Value const& value)
             initialValue, "scenario.options.initial_values[]"));
     }
 
-    options.mStopOnPrepare =
-        requireBool(requireMember(object, "stop_on_prepare", "scenario.options"),
-                    "scenario.options.stop_on_prepare");
+    options.mStopOnPrepare = requireBool(
+        requireMember(object, "stop_on_prepare", "scenario.options"),
+        "scenario.options.stop_on_prepare");
     options.mStopOnCommit =
         requireBool(requireMember(object, "stop_on_commit", "scenario.options"),
                     "scenario.options.stop_on_commit");
     options.mStopOnExternalize = requireBool(
         requireMember(object, "stop_on_externalize", "scenario.options"),
         "scenario.options.stop_on_externalize");
-    options.mPrepareBoundaryCounter =
-        requireUint32(requireMember(object, "prepare_boundary_counter",
-                                    "scenario.options"),
-                      "scenario.options.prepare_boundary_counter");
+    options.mPrepareBoundaryCounter = requireUint32(
+        requireMember(object, "prepare_boundary_counter", "scenario.options"),
+        "scenario.options.prepare_boundary_counter");
     options.mMaxNominationRound = requireOptionalUint32(
         requireMember(object, "max_nomination_round", "scenario.options"),
         "scenario.options.max_nomination_round");
@@ -871,16 +873,13 @@ optionsFromJson(Json::Value const& value)
                       "scenario.options"),
         "scenario.options.max_nomination_timers_round");
     options.mMaxBallotingTimersRound = requireOptionalUint32(
-        requireMember(object, "max_balloting_timers_round",
-                      "scenario.options"),
+        requireMember(object, "max_balloting_timers_round", "scenario.options"),
         "scenario.options.max_balloting_timers_round");
     options.mNominationTimerSetLimit = requireOptionalUint32(
-        requireMember(object, "nomination_timer_set_limit",
-                      "scenario.options"),
+        requireMember(object, "nomination_timer_set_limit", "scenario.options"),
         "scenario.options.nomination_timer_set_limit");
     options.mEnableNominationTimeouts = requireBool(
-        requireMember(object, "enable_nomination_timeouts",
-                      "scenario.options"),
+        requireMember(object, "enable_nomination_timeouts", "scenario.options"),
         "scenario.options.enable_nomination_timeouts");
     options.mEnableBallotingTimeouts = requireBool(
         requireMember(object, "enable_balloting_timeouts", "scenario.options"),
@@ -891,36 +890,72 @@ optionsFromJson(Json::Value const& value)
     options.mTxSetStatusMode = parseTxSetStatusMode(requireString(
         requireMember(object, "txset_status_mode", "scenario.options"),
         "scenario.options.txset_status_mode"));
-    if (object.isMember("nomination_always_waiting"))
+    options.mNominationAlwaysDownloading =
+        requireBool(requireMember(object, "nomination_always_downloading",
+                                  "scenario.options"),
+                    "scenario.options.nomination_always_downloading");
+    options.mInjectEmptyTxSetProtocolGateFailureForTesting = requireBool(
+        requireMember(object,
+                      "inject_empty_tx_set_protocol_gate_failure_for_testing",
+                      "scenario.options"),
+        "scenario.options."
+        "inject_empty_tx_set_protocol_gate_failure_for_testing");
+
+    auto const& outrightInvalidValuesByNode =
+        requireArray(requireMember(object, "outright_invalid_values_by_node",
+                                   "scenario.options"),
+                     "scenario.options.outright_invalid_values_by_node");
+    if (!outrightInvalidValuesByNode.empty() &&
+        outrightInvalidValuesByNode.size() != validators.size())
     {
-        options.mNominationAlwaysWaiting = requireBool(
-            object["nomination_always_waiting"],
-            "scenario.options.nomination_always_waiting");
+        throw std::invalid_argument(
+            "scenario.options.outright_invalid_values_by_node must be empty "
+            "or match validator count");
     }
-    if (object.isMember("protocol_allows_empty_tx_set_values"))
+    options.mOutrightInvalidValuesByNode.reserve(
+        outrightInvalidValuesByNode.size());
+    for (auto const& invalidValuesValue : outrightInvalidValuesByNode)
     {
-        options.mProtocolAllowsEmptyTxSetValues = requireBool(
-            object["protocol_allows_empty_tx_set_values"],
-            "scenario.options.protocol_allows_empty_tx_set_values");
+        auto const& invalidValues =
+            requireArray(invalidValuesValue,
+                         "scenario.options.outright_invalid_values_by_node[]");
+        std::vector<Value> decodedValues;
+        std::set<Value> uniqueValues;
+        decodedValues.reserve(invalidValues.size());
+        for (auto const& invalidValue : invalidValues)
+        {
+            auto decoded = valueBytesFromJson(
+                invalidValue,
+                "scenario.options.outright_invalid_values_by_node[][]");
+            if (!uniqueValues.insert(decoded).second)
+            {
+                throw std::invalid_argument(
+                    "scenario.options.outright_invalid_values_by_node[] "
+                    "contains duplicate values");
+            }
+            decodedValues.push_back(std::move(decoded));
+        }
+        options.mOutrightInvalidValuesByNode.push_back(
+            std::move(decodedValues));
     }
     options.mDownloadSucceedsInRound = requireOptionalUint32(
-        requireMember(object, "download_succeeds_in_round",
-                      "scenario.options"),
+        requireMember(object, "download_succeeds_in_round", "scenario.options"),
         "scenario.options.download_succeeds_in_round");
-    options.mInitialNominationTimeoutMS = requireUint32(
-        requireMember(object, "initial_nomination_timeout_ms",
-                      "scenario.options"),
-        "scenario.options.initial_nomination_timeout_ms");
-    options.mIncrementNominationTimeoutMS = requireUint32(
-        requireMember(object, "increment_nomination_timeout_ms",
-                      "scenario.options"),
-        "scenario.options.increment_nomination_timeout_ms");
+    options.mInitialNominationTimeoutMS =
+        requireUint32(requireMember(object, "initial_nomination_timeout_ms",
+                                    "scenario.options"),
+                      "scenario.options.initial_nomination_timeout_ms");
+    options.mIncrementNominationTimeoutMS =
+        requireUint32(requireMember(object, "increment_nomination_timeout_ms",
+                                    "scenario.options"),
+                      "scenario.options.increment_nomination_timeout_ms");
     options.mInitialBallotTimeoutMS = requireUint32(
         requireMember(object, "initial_ballot_timeout_ms", "scenario.options"),
         "scenario.options.initial_ballot_timeout_ms");
-    options.mIncrementBallotTimeoutMS = requireUint32(
-        requireMember(object, "increment_ballot_timeout_ms", "scenario.options"),
-        "scenario.options.increment_ballot_timeout_ms");
+    options.mIncrementBallotTimeoutMS =
+        requireUint32(requireMember(object, "increment_ballot_timeout_ms",
+                                    "scenario.options"),
+                      "scenario.options.increment_ballot_timeout_ms");
     return options;
 }
 
@@ -955,21 +990,31 @@ traceBundleFromJson(Json::Value const& value)
     auto const& object = requireObject(value, "trace bundle");
 
     TraceBundle bundle;
-    auto const version = requireUint64(
-        requireMember(object, "version", "trace bundle"),
-        "trace bundle.version");
+    auto const version =
+        requireUint64(requireMember(object, "version", "trace bundle"),
+                      "trace bundle.version");
     if (version > static_cast<uint64_t>(std::numeric_limits<int>::max()))
     {
         throw std::invalid_argument("trace bundle.version is out of range");
     }
     bundle.mVersion = static_cast<int>(version);
+    if (bundle.mVersion == 1)
+    {
+        throw std::invalid_argument(
+            "trace bundle version 1 uses incompatible pre-CAP-0083 txset "
+            "status semantics; capture a version 2 trace");
+    }
+    if (bundle.mVersion != TRACE_BUNDLE_VERSION)
+    {
+        throw std::invalid_argument("unsupported trace bundle version");
+    }
 
     auto const& scenario =
         requireObject(requireMember(object, "scenario", "trace bundle"),
                       "trace bundle.scenario");
-    auto const scenarioKind = requireString(
-        requireMember(scenario, "kind", "trace bundle.scenario"),
-        "trace bundle.scenario.kind");
+    auto const scenarioKind =
+        requireString(requireMember(scenario, "kind", "trace bundle.scenario"),
+                      "trace bundle.scenario.kind");
     if (scenarioKind != "default")
     {
         throw std::invalid_argument("unsupported scenario kind: " +
@@ -977,15 +1022,15 @@ traceBundleFromJson(Json::Value const& value)
     }
     bundle.mOptions = optionsFromJson(
         requireMember(scenario, "options", "trace bundle.scenario"));
-    bundle.mTerminal = terminalMetaFromJson(
-        requireMember(object, "terminal", "trace bundle"));
+    bundle.mTerminal =
+        terminalMetaFromJson(requireMember(object, "terminal", "trace bundle"));
     bundle.mCommunicationModel = parseCommunicationModel(requireString(
         requireMember(object, "communication_model", "trace bundle"),
         "trace bundle.communication_model"));
 
-    auto const& threadTraces = requireArray(
-        requireMember(object, "thread_traces", "trace bundle"),
-        "trace bundle.thread_traces");
+    auto const& threadTraces =
+        requireArray(requireMember(object, "thread_traces", "trace bundle"),
+                     "trace bundle.thread_traces");
     bundle.mThreadTraces.reserve(threadTraces.size());
     for (auto const& record : threadTraces)
     {
@@ -997,11 +1042,10 @@ traceBundleFromJson(Json::Value const& value)
 }
 
 TraceBundle
-makeTraceBundle(
-    ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
-    dpor::model::CommunicationModel communicationModel,
-    TerminalMeta terminal)
+makeTraceBundle(ScpDporDefaultScenario const& scenario,
+                dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
+                dpor::model::CommunicationModel communicationModel,
+                TerminalMeta terminal)
 {
     TraceBundle bundle;
     bundle.mOptions = scenario.options();
@@ -1012,10 +1056,9 @@ makeTraceBundle(
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
         auto const threadID = threadIdForNodeIndex(nodeIndex);
-        bundle.mThreadTraces.push_back(
-            ThreadTraceRecord{
-                .mThreadID = threadID,
-                .mTrace = execution.graph.thread_trace(threadID)});
+        bundle.mThreadTraces.push_back(ThreadTraceRecord{
+            .mThreadID = threadID,
+            .mTrace = execution.graph.thread_trace(threadID)});
     }
     return bundle;
 }

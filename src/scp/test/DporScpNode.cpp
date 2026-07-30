@@ -41,7 +41,7 @@ std::vector<DporScpTxSetStatus> const&
 allTxSetStatusChoices()
 {
     static std::vector<DporScpTxSetStatus> const supportedChoices{
-        DporScpTxSetStatus::Valid, DporScpTxSetStatus::Waiting,
+        DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading,
         DporScpTxSetStatus::Invalid};
     return supportedChoices;
 }
@@ -54,7 +54,8 @@ consumeTxSetStatusChoice(
 {
     if (supportedChoices.empty())
     {
-        throw std::logic_error("supported txset status choices must not be empty");
+        throw std::logic_error(
+            "supported txset status choices must not be empty");
     }
     if (nextChoice >= pendingChoices.size())
     {
@@ -65,7 +66,8 @@ consumeTxSetStatusChoice(
     if (std::find(supportedChoices.begin(), supportedChoices.end(), status) ==
         supportedChoices.end())
     {
-        throw std::logic_error("preloaded txset status choice is not supported");
+        throw std::logic_error(
+            "preloaded txset status choice is not supported");
     }
     return status;
 }
@@ -88,10 +90,9 @@ validationLevelForTxSetStatus(DporScpTxSetStatus status)
     {
     case DporScpTxSetStatus::Valid:
         return SCPDriver::kFullyValidatedValue;
-    case DporScpTxSetStatus::Waiting:
-        return SCPDriver::kStructurallyValidValue;
     case DporScpTxSetStatus::Invalid:
-        return SCPDriver::kInvalidValue;
+    case DporScpTxSetStatus::Downloading:
+        return SCPDriver::kStructurallyValidValue;
     }
     throw std::logic_error("unknown txset status");
 }
@@ -238,22 +239,22 @@ DporScpNode::getTimer(uint64 slotIndex, int timerID) const
 bool
 DporScpNode::fireTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(
-        mTimers.begin(), mTimers.end(),
-        [slotIndex, timerID](TimerState const& timer) {
-            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
-        });
+    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
+                                 [slotIndex, timerID](TimerState const& timer) {
+                                     return timer.mSlotIndex == slotIndex &&
+                                            timer.mTimerID == timerID;
+                                 });
     if (it == mTimers.end())
     {
         return false;
     }
 
     auto cb = it->mCallback;
-    recordReplayDebugEvent(ReplayDebugEvent{
-        .mKind = ReplayDebugEvent::Kind::FireTimer,
-        .mSlotIndex = slotIndex,
-        .mTimerID = timerID,
-        .mTimeout = it->mTimeout});
+    recordReplayDebugEvent(
+        ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::FireTimer,
+                         .mSlotIndex = slotIndex,
+                         .mTimerID = timerID,
+                         .mTimeout = it->mTimeout});
     mTimers.erase(it);
     if (cb)
     {
@@ -306,7 +307,8 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
         slotSnapshot.mFullyValidated = slot->mFullyValidated;
         slotSnapshot.mGotVBlocking = slot->mGotVBlocking;
 
-        slotSnapshot.mStatementsHistory.reserve(slot->mStatementsHistory.size());
+        slotSnapshot.mStatementsHistory.reserve(
+            slot->mStatementsHistory.size());
         for (auto const& historicalStatement : slot->mStatementsHistory)
         {
             slotSnapshot.mStatementsHistory.push_back(
@@ -362,7 +364,8 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
             slotSnapshot.mNominationState.mLatestCompositeCandidate =
                 nomination.mLatestCompositeCandidate->getValue();
         }
-        slotSnapshot.mNominationState.mPreviousValue = nomination.mPreviousValue;
+        slotSnapshot.mNominationState.mPreviousValue =
+            nomination.mPreviousValue;
         slotSnapshot.mNominationState.mTimerExpCount =
             nomination.mTimerExpCount;
 
@@ -380,8 +383,7 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
         slotSnapshot.mBallotState.mHeardFromQuorum = ballot.mHeardFromQuorum;
         slotSnapshot.mBallotState.mCurrentBallot =
             snapshotBallot(ballot.mCurrentBallot);
-        slotSnapshot.mBallotState.mPrepared =
-            snapshotBallot(ballot.mPrepared);
+        slotSnapshot.mBallotState.mPrepared = snapshotBallot(ballot.mPrepared);
         slotSnapshot.mBallotState.mPreparedPrime =
             snapshotBallot(ballot.mPreparedPrime);
         slotSnapshot.mBallotState.mHighBallot =
@@ -435,9 +437,9 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
         mPendingTxSetDownloadStatusCounts;
     baseline.mLastTxSetDownloadWaitTimeByValue =
         mLastTxSetDownloadWaitTimeByValue;
-    baseline.mTxSetDownloadWaitTimeCallCount =
-        mTxSetDownloadWaitTimeCallCount;
-    baseline.mTxSetDownloadSucceeded = mTxSetDownloadSucceeded;
+    baseline.mTxSetDownloadWaitTimeCallCountsByValue =
+        mTxSetDownloadWaitTimeCallCountsByValue;
+    baseline.mTxSetDownloadsSucceeded = mTxSetDownloadsSucceeded;
     baseline.mHasReachedBoundary = mHasReachedBoundary;
     baseline.mBoundaryEnvelope = mBoundaryEnvelope;
     return baseline;
@@ -456,9 +458,9 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
         slot->mFullyValidated = slotSnapshot.mFullyValidated;
         slot->mGotVBlocking = slotSnapshot.mGotVBlocking;
         slot->mStatementsHistory.clear();
-        slot->mStatementsHistory.reserve(slotSnapshot.mStatementsHistory.size());
-        for (auto const& historicalStatement :
-             slotSnapshot.mStatementsHistory)
+        slot->mStatementsHistory.reserve(
+            slotSnapshot.mStatementsHistory.size());
+        for (auto const& historicalStatement : slotSnapshot.mStatementsHistory)
         {
             slot->mStatementsHistory.push_back(Slot::HistoricalStatement{
                 .mWhen = historicalStatement.mWhen,
@@ -527,7 +529,8 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
                     wrapValue(latestCompositeCandidate);
             }
         }
-        nomination.mPreviousValue = slotSnapshot.mNominationState.mPreviousValue;
+        nomination.mPreviousValue =
+            slotSnapshot.mNominationState.mPreviousValue;
         nomination.mTimerExpCount =
             slotSnapshot.mNominationState.mTimerExpCount;
 
@@ -581,27 +584,28 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
     mEmittedEnvelopes = baseline.mEmittedEnvelopes;
     for (auto const& timerSetCount : baseline.mTimerSetCounts)
     {
-        mTimerSetCounts.push_back(TimerSetCountEntry{
-            .mSlotIndex = timerSetCount.mSlotIndex,
-            .mTimerID = timerSetCount.mTimerID,
-            .mCount = timerSetCount.mCount});
+        mTimerSetCounts.push_back(
+            TimerSetCountEntry{.mSlotIndex = timerSetCount.mSlotIndex,
+                               .mTimerID = timerSetCount.mTimerID,
+                               .mCount = timerSetCount.mCount});
     }
     mLastTxSetStatusByValue = baseline.mLastTxSetStatusByValue;
     mPendingTxSetDownloadStatusCounts =
         baseline.mPendingTxSetDownloadStatusCounts;
     mLastTxSetDownloadWaitTimeByValue =
         baseline.mLastTxSetDownloadWaitTimeByValue;
-    mTxSetDownloadWaitTimeCallCount =
-        baseline.mTxSetDownloadWaitTimeCallCount;
-    mTxSetDownloadSucceeded = baseline.mTxSetDownloadSucceeded;
+    mTxSetDownloadWaitTimeCallCountsByValue =
+        baseline.mTxSetDownloadWaitTimeCallCountsByValue;
+    mTxSetDownloadsSucceeded = baseline.mTxSetDownloadsSucceeded;
     mHasReachedBoundary = baseline.mHasReachedBoundary;
     mBoundaryEnvelope = baseline.mBoundaryEnvelope;
 }
 
 void
-DporScpNode::installNominationReplayTimer(
-    uint64 slotIndex, std::chrono::milliseconds timeout, Value const& value,
-    Value const& previousValue)
+DporScpNode::installNominationReplayTimer(uint64 slotIndex,
+                                          std::chrono::milliseconds timeout,
+                                          Value const& value,
+                                          Value const& previousValue)
 {
     auto slot = mSCP.getSlot(slotIndex, true);
     auto wrappedValue = wrapValue(value);
@@ -612,14 +616,14 @@ DporScpNode::installNominationReplayTimer(
 }
 
 void
-DporScpNode::installBallotingReplayTimer(
-    uint64 slotIndex, std::chrono::milliseconds timeout)
+DporScpNode::installBallotingReplayTimer(uint64 slotIndex,
+                                         std::chrono::milliseconds timeout)
 {
     auto slot = mSCP.getSlot(slotIndex, true);
-    setTimer(TimerState{slotIndex, Slot::BALLOT_PROTOCOL_TIMER, timeout,
-                        [slot]() {
-                            slot->getBallotProtocol().ballotProtocolTimerExpired();
-                        }});
+    setTimer(
+        TimerState{slotIndex, Slot::BALLOT_PROTOCOL_TIMER, timeout, [slot]() {
+                       slot->getBallotProtocol().ballotProtocolTimerExpired();
+                   }});
 }
 
 bool
@@ -676,7 +680,8 @@ DporScpNode::isEnvelopeReady(SCPEnvelope const&) const
 std::optional<std::chrono::milliseconds>
 DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
 {
-    if (mTxSetDownloadSucceeded)
+    if (isOutrightInvalidValue(value) || isEmptyTxSetValue(value) ||
+        mTxSetDownloadsSucceeded.contains(value))
     {
         return std::nullopt;
     }
@@ -697,15 +702,15 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
             --mPendingTxSetDownloadStatusCounts[value];
         }
     }
-    else if (mTxSetStatus != DporScpTxSetStatus::Waiting)
+    else if (mTxSetStatus != DporScpTxSetStatus::Downloading)
     {
         return std::nullopt;
     }
 
-    auto const recordWaitTime = [this, &value](
-                                    std::chrono::milliseconds waitTime) {
+    auto const recordWaitTime = [this,
+                                 &value](std::chrono::milliseconds waitTime) {
         mLastTxSetDownloadWaitTimeByValue[value] = waitTime;
-        ++mTxSetDownloadWaitTimeCallCount;
+        ++mTxSetDownloadWaitTimeCallCountsByValue[value];
         recordReplayDebugEvent(ReplayDebugEvent{
             .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
             .mWaitTime = waitTime});
@@ -747,7 +752,7 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
         return recordWaitTime(timeout);
     }
 
-    auto index = mTxSetDownloadWaitTimeCallCount;
+    auto index = mTxSetDownloadWaitTimeCallCountsByValue[value];
     if (index >= mTxSetDownloadWaitTimes.size())
     {
         index = mTxSetDownloadWaitTimes.size() - 1;
@@ -778,9 +783,9 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
     }
 
     mEmittedEnvelopes.push_back(envelope);
-    if (shouldMarkTxSetDownloadSucceeded(envelope))
+    if (auto const value = txSetDownloadSucceededValue(envelope))
     {
-        markTxSetDownloadSucceeded();
+        markTxSetDownloadSucceeded(*value);
     }
     recordReplayDebugEvent(
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
@@ -795,15 +800,22 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
 SCPDriver::ValidationLevel
 DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
 {
+    if (isOutrightInvalidValue(value))
+    {
+        recordReplayDebugEvent(ReplayDebugEvent{
+            .mKind = ReplayDebugEvent::Kind::RejectOutrightInvalidValue});
+        return SCPDriver::kInvalidValue;
+    }
     if (isEmptyTxSetValue(value))
     {
-        return SCPDriver::kFullyValidatedValue;
+        return nomination ? SCPDriver::kInvalidValue
+                          : SCPDriver::kFullyValidatedValue;
     }
-    if (nomination && mNominationAlwaysWaitingTxSetStatus)
+    if (nomination && mNominationAlwaysDownloadingTxSetStatus)
     {
         return SCPDriver::kStructurallyValidValue;
     }
-    if (mTxSetDownloadSucceeded)
+    if (mTxSetDownloadsSucceeded.contains(value))
     {
         return SCPDriver::kFullyValidatedValue;
     }
@@ -812,7 +824,7 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     {
         auto const lastStatusIt = mLastTxSetStatusByValue.find(value);
         if (lastStatusIt != mLastTxSetStatusByValue.end() &&
-            lastStatusIt->second != DporScpTxSetStatus::Waiting)
+            lastStatusIt->second != DporScpTxSetStatus::Downloading)
         {
             status = lastStatusIt->second;
         }
@@ -825,7 +837,7 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     }
 
     mLastTxSetStatusByValue[value] = status;
-    if (status == DporScpTxSetStatus::Waiting)
+    if (status == DporScpTxSetStatus::Downloading)
     {
         ++mPendingTxSetDownloadStatusCounts[value];
     }
@@ -870,7 +882,7 @@ DporScpNode::isParallelTxSetDownloadEnabled() const
 bool
 DporScpNode::protocolAllowsEmptyTxSetValues() const
 {
-    return mProtocolAllowsEmptyTxSetValues;
+    return !mInjectEmptyTxSetProtocolGateFailureForTesting;
 }
 
 Hash
@@ -912,8 +924,7 @@ DporScpNode::computeHashNode(uint64 slotIndex, Value const& prev,
 }
 
 uint64
-DporScpNode::computeValueHash(uint64, Value const&, int32_t,
-                              Value const& value)
+DporScpNode::computeValueHash(uint64, Value const&, int32_t, Value const& value)
 {
     return mValueHash(value);
 }
@@ -1082,9 +1093,8 @@ DporScpNode::computeTimeout(uint32 roundNumber, bool isNomination)
 {
     auto const initialTimeoutMS =
         isNomination ? mInitialNominationTimeoutMS : mInitialBallotTimeoutMS;
-    auto const incrementTimeoutMS = isNomination
-                                        ? mIncrementNominationTimeoutMS
-                                        : mIncrementBallotTimeoutMS;
+    auto const incrementTimeoutMS = isNomination ? mIncrementNominationTimeoutMS
+                                                 : mIncrementBallotTimeoutMS;
     return std::chrono::milliseconds(initialTimeoutMS +
                                      (roundNumber - 1) * incrementTimeoutMS);
 }
@@ -1108,9 +1118,17 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mMaxBallotingRound = config.mMaxBallotingRound;
     mTxSetStatus = config.mTxSetStatus;
     mNondeterministicTxSetStatus = config.mNondeterministicTxSetStatus;
-    mNominationAlwaysWaitingTxSetStatus =
-        config.mNominationAlwaysWaitingTxSetStatus;
-    mProtocolAllowsEmptyTxSetValues = config.mProtocolAllowsEmptyTxSetValues;
+    mNominationAlwaysDownloadingTxSetStatus =
+        config.mNominationAlwaysDownloadingTxSetStatus;
+    mInjectEmptyTxSetProtocolGateFailureForTesting =
+        config.mInjectEmptyTxSetProtocolGateFailureForTesting;
+    mOutrightInvalidValues.clear();
+    auto const invalidValuesIt =
+        config.mOutrightInvalidValuesByNode.find(getNodeID());
+    if (invalidValuesIt != config.mOutrightInvalidValuesByNode.end())
+    {
+        mOutrightInvalidValues = invalidValuesIt->second;
+    }
     mSupportedTxSetStatusChoices.clear();
     if (mNondeterministicTxSetStatus)
     {
@@ -1158,22 +1176,22 @@ DporScpNode::applyConfiguration(Configuration const& config)
 DporScpNode::TimerState*
 DporScpNode::findTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(
-        mTimers.begin(), mTimers.end(),
-        [slotIndex, timerID](TimerState const& timer) {
-            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
-        });
+    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
+                                 [slotIndex, timerID](TimerState const& timer) {
+                                     return timer.mSlotIndex == slotIndex &&
+                                            timer.mTimerID == timerID;
+                                 });
     return it == mTimers.end() ? nullptr : &*it;
 }
 
 DporScpNode::TimerState const*
 DporScpNode::findTimer(uint64 slotIndex, int timerID) const
 {
-    auto const it = std::find_if(
-        mTimers.begin(), mTimers.end(),
-        [slotIndex, timerID](TimerState const& timer) {
-            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
-        });
+    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
+                                 [slotIndex, timerID](TimerState const& timer) {
+                                     return timer.mSlotIndex == slotIndex &&
+                                            timer.mTimerID == timerID;
+                                 });
     return it == mTimers.end() ? nullptr : &*it;
 }
 
@@ -1191,11 +1209,11 @@ DporScpNode::setTimer(TimerState timer)
 void
 DporScpNode::clearTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(
-        mTimers.begin(), mTimers.end(),
-        [slotIndex, timerID](TimerState const& timer) {
-            return timer.mSlotIndex == slotIndex && timer.mTimerID == timerID;
-        });
+    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
+                                 [slotIndex, timerID](TimerState const& timer) {
+                                     return timer.mSlotIndex == slotIndex &&
+                                            timer.mTimerID == timerID;
+                                 });
     if (it != mTimers.end())
     {
         mTimers.erase(it);
@@ -1240,39 +1258,50 @@ DporScpNode::clearReplayState()
     mLastTxSetDownloadWaitTimeByValue.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
-    mTxSetDownloadWaitTimeCallCount = 0;
+    mTxSetDownloadWaitTimeCallCountsByValue.clear();
     mReplayDebugEvents.clear();
-    mTxSetDownloadSucceeded = false;
+    mTxSetDownloadsSucceeded.clear();
     mHasReachedBoundary = false;
     mBoundaryEnvelope.reset();
 }
 
 void
-DporScpNode::markTxSetDownloadSucceeded()
+DporScpNode::markTxSetDownloadSucceeded(Value const& value)
 {
-    if (mTxSetDownloadSucceeded)
+    if (!mTxSetDownloadsSucceeded.insert(value).second)
     {
         return;
     }
 
-    mTxSetDownloadSucceeded = true;
-    mPendingTxSetStatusChoices.clear();
-    mNextPendingTxSetStatusChoice = 0;
-    mLastTxSetStatusByValue.clear();
-    mPendingTxSetDownloadStatusCounts.clear();
-    mLastTxSetDownloadWaitTimeByValue.clear();
-    mPendingTxSetDownloadWaitTimeChoices.clear();
-    mNextPendingTxSetDownloadWaitTimeChoice = 0;
+    mLastTxSetStatusByValue.erase(value);
+    mPendingTxSetDownloadStatusCounts.erase(value);
+    mLastTxSetDownloadWaitTimeByValue.erase(value);
+    mTxSetDownloadWaitTimeCallCountsByValue.erase(value);
+}
+
+std::optional<Value>
+DporScpNode::txSetDownloadSucceededValue(SCPEnvelope const& envelope) const
+{
+    if (!mDownloadSucceedsInBallotRound ||
+        envelope.statement.pledges.type() != SCP_ST_PREPARE)
+    {
+        return std::nullopt;
+    }
+
+    auto const& ballot = envelope.statement.pledges.prepare().ballot;
+    if (ballot.counter != *mDownloadSucceedsInBallotRound ||
+        isEmptyTxSetValue(ballot.value) ||
+        mTxSetDownloadsSucceeded.contains(ballot.value))
+    {
+        return std::nullopt;
+    }
+    return ballot.value;
 }
 
 bool
-DporScpNode::shouldMarkTxSetDownloadSucceeded(
-    SCPEnvelope const& envelope) const
+DporScpNode::isOutrightInvalidValue(Value const& value) const
 {
-    return !mTxSetDownloadSucceeded && mDownloadSucceedsInBallotRound &&
-           envelope.statement.pledges.type() == SCP_ST_PREPARE &&
-           envelope.statement.pledges.prepare().ballot.counter ==
-               *mDownloadSucceedsInBallotRound;
+    return mOutrightInvalidValues.contains(value);
 }
 
 bool
