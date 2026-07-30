@@ -23,13 +23,13 @@ struct ScpDporValue
 {
     enum class Kind : std::uint8_t
     {
-        EnvelopeDelivery = 0,
+        Envelope = 0,
         TimerChoice = 1,
         TxSetDownloadWaitTimeChoice = 2,
         TxSetStatusChoice = 3
     };
 
-    Kind mKind{Kind::EnvelopeDelivery};
+    Kind mKind{Kind::Envelope};
     uint64_t mSlotIndex{};
     SCPEnvelope mEnvelope{};
     int mTimerID{};
@@ -46,7 +46,7 @@ struct ScpDporValue
 
         switch (mKind)
         {
-        case Kind::EnvelopeDelivery:
+        case Kind::Envelope:
             return mEnvelope == other.mEnvelope;
         case Kind::TimerChoice:
             return mTimerID == other.mTimerID;
@@ -72,7 +72,7 @@ struct ScpDporValue
 
         switch (mKind)
         {
-        case Kind::EnvelopeDelivery:
+        case Kind::Envelope:
             return mEnvelope < other.mEnvelope;
         case Kind::TimerChoice:
             return mTimerID < other.mTimerID;
@@ -116,7 +116,7 @@ struct hash<stellar::scpdpor::ScpDporValue>
 
         switch (value.mKind)
         {
-        case stellar::scpdpor::ScpDporValue::Kind::EnvelopeDelivery:
+        case stellar::scpdpor::ScpDporValue::Kind::Envelope:
         {
             auto const opaque = xdr::xdr_to_opaque(value.mEnvelope);
             for (auto const byte : opaque)

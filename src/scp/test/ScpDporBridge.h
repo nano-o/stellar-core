@@ -31,7 +31,7 @@ inline ScpDporValue
 makeEnvelopeValue(uint64_t slotIndex, SCPEnvelope const& envelope)
 {
     ScpDporValue value;
-    value.mKind = ScpDporValue::Kind::EnvelopeDelivery;
+    value.mKind = ScpDporValue::Kind::Envelope;
     value.mSlotIndex = slotIndex;
     value.mEnvelope = envelope;
     return value;
@@ -71,7 +71,7 @@ makeTxSetStatusChoiceValue(uint64_t slotIndex, DporScpTxSetStatus status)
 inline bool
 isEnvelopeValue(ScpDporValue const& value)
 {
-    return value.mKind == ScpDporValue::Kind::EnvelopeDelivery;
+    return value.mKind == ScpDporValue::Kind::Envelope;
 }
 
 inline bool
@@ -175,7 +175,7 @@ operator<<(std::ostream& out, ScpDporValue const& value)
 {
     switch (value.mKind)
     {
-    case ScpDporValue::Kind::EnvelopeDelivery:
+    case ScpDporValue::Kind::Envelope:
         return out << "env(slot=" << value.mSlotIndex << ", "
                    << xdr::xdr_to_string(value.mEnvelope.statement, "statement")
                    << ")";

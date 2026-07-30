@@ -621,7 +621,7 @@ toJson(ScpDporValue const& value)
 
     switch (value.mKind)
     {
-    case ScpDporValue::Kind::EnvelopeDelivery:
+    case ScpDporValue::Kind::Envelope:
         root["kind"] = "envelope";
         root["envelope_xdr"] = encodeBytes(xdr::xdr_to_opaque(value.mEnvelope));
         root["annotation"] = formatWithStream(value);
