@@ -119,6 +119,32 @@ make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
 
+## Generating compile commands with compiledb
+
+Optionally, use
+[`compiledb`](https://github.com/nickdiego/compiledb) to generate
+`compile_commands.json` from Make's dry-run output. Run it from the configured
+build root:
+
+```bash
+compiledb -f -n -d "$PWD/src" make -C src \
+  stellar-core-dpor-tests scp-dpor-investigation
+```
+
+`-f` replaces any existing database, while `-d "$PWD/src"` gives the parser
+the initial directory for commands emitted by `make -C src`. The two DPOR
+targets pull in the required library dependency commands, so a separate
+`make -C lib` pass is unnecessary. `compiledb -n` does not execute the build,
+so this workflow does not require `make clean`, a rebuild, or `-j`. It
+recognizes `sccache` as a compiler wrapper and emits the underlying compiler
+command, so keep `--enable-nsc-sccache` enabled if that is the desired build
+configuration.
+
+For an in-tree build, the build root is the repository root. For an
+out-of-tree build, it is the separate build directory, and the compilation
+database is written there. Rerun the command after reconfiguring or after
+changing build wiring or source lists; no clean build is required.
+
 ## Important: always use `make -C src`
 
 DPOR binaries use `EXTRA_PROGRAMS` and are not built by the default `make`

@@ -133,6 +133,7 @@ min-testcases/
 /src/util/xdrquery/stack.hh
 
 __pycache__
+/.venv/
 
 # DPOR
 /src/stellar-core-dpor-tests

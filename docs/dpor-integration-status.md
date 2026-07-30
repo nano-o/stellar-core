@@ -176,7 +176,7 @@ it after confirming no build is active), then rerun configure.
 
 - [`src/scp/test/ScpDporTypes.h`](../src/scp/test/ScpDporTypes.h) defines
   `ScpDporValue` and the DPOR aliases. The value kinds are:
-  - envelope delivery
+  - envelope
   - timer choice
   - txset validation-status choice
   - txset download wait-time choice
