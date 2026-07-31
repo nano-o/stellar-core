@@ -38,10 +38,9 @@ class ScpDporDefaultScenario
 
     enum class TxSetStatusMode : std::uint8_t
     {
-        Valid,
-        Downloading,
-        Invalid,
-        Nondeterministic
+        AlwaysValid,
+        DownloadingThenValid,
+        AlwaysDownloading
     };
 
     enum class InitialValueMode : std::uint8_t
@@ -70,7 +69,7 @@ class ScpDporDefaultScenario
         bool mEnableNominationTimeouts{false};
         bool mEnableBallotingTimeouts{false};
         DownloadTimeMode mDownloadTimeMode{DownloadTimeMode::BelowThreshold};
-        TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::Valid};
+        TxSetStatusMode mTxSetStatusMode{TxSetStatusMode::AlwaysValid};
         bool mNominationAlwaysDownloading{false};
         bool mInjectEmptyTxSetProtocolGateFailureForTesting{false};
         std::vector<std::vector<Value>> mOutrightInvalidValuesByNode;
@@ -561,27 +560,17 @@ class ScpDporDefaultScenario
             options.mInjectEmptyTxSetProtocolGateFailureForTesting;
         switch (options.mTxSetStatusMode)
         {
-        case TxSetStatusMode::Valid:
+        case TxSetStatusMode::AlwaysValid:
+            config.mTxSetStatus = DporScpTxSetStatus::Valid;
+            break;
+        case TxSetStatusMode::DownloadingThenValid:
             config.mTxSetStatus = DporScpTxSetStatus::Valid;
             config.mNondeterministicTxSetStatus = true;
             config.mSupportedTxSetStatusChoices = {
                 DporScpTxSetStatus::Downloading, DporScpTxSetStatus::Valid};
             break;
-        case TxSetStatusMode::Downloading:
+        case TxSetStatusMode::AlwaysDownloading:
             config.mTxSetStatus = DporScpTxSetStatus::Downloading;
-            break;
-        case TxSetStatusMode::Invalid:
-            config.mTxSetStatus = DporScpTxSetStatus::Invalid;
-            config.mNondeterministicTxSetStatus = true;
-            config.mSupportedTxSetStatusChoices = {
-                DporScpTxSetStatus::Downloading, DporScpTxSetStatus::Invalid};
-            break;
-        case TxSetStatusMode::Nondeterministic:
-            config.mTxSetStatus = DporScpTxSetStatus::Valid;
-            config.mNondeterministicTxSetStatus = true;
-            config.mSupportedTxSetStatusChoices = {
-                DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading,
-                DporScpTxSetStatus::Invalid};
             break;
         }
         config.mDownloadSucceedsInBallotRound =

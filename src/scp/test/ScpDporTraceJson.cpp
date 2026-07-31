@@ -226,14 +226,12 @@ txSetStatusModeName(ScpDporDefaultScenario::TxSetStatusMode mode)
 {
     switch (mode)
     {
-    case ScpDporDefaultScenario::TxSetStatusMode::Valid:
-        return "valid";
-    case ScpDporDefaultScenario::TxSetStatusMode::Downloading:
-        return "downloading";
-    case ScpDporDefaultScenario::TxSetStatusMode::Invalid:
-        return "invalid";
-    case ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic:
-        return "nondet";
+    case ScpDporDefaultScenario::TxSetStatusMode::AlwaysValid:
+        return "always-valid";
+    case ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid:
+        return "downloading-then-valid";
+    case ScpDporDefaultScenario::TxSetStatusMode::AlwaysDownloading:
+        return "always-downloading";
     }
     throw std::logic_error("unknown txset-status mode");
 }
@@ -242,21 +240,17 @@ ScpDporDefaultScenario::TxSetStatusMode
 parseTxSetStatusMode(std::string_view mode)
 {
     using TxSetStatusMode = ScpDporDefaultScenario::TxSetStatusMode;
-    if (mode == "valid")
+    if (mode == "always-valid")
     {
-        return TxSetStatusMode::Valid;
+        return TxSetStatusMode::AlwaysValid;
     }
-    if (mode == "downloading")
+    if (mode == "downloading-then-valid")
     {
-        return TxSetStatusMode::Downloading;
+        return TxSetStatusMode::DownloadingThenValid;
     }
-    if (mode == "invalid")
+    if (mode == "always-downloading")
     {
-        return TxSetStatusMode::Invalid;
-    }
-    if (mode == "nondet")
-    {
-        return TxSetStatusMode::Nondeterministic;
+        return TxSetStatusMode::AlwaysDownloading;
     }
     throw std::invalid_argument("unknown txset_status_mode: " +
                                 std::string(mode));
@@ -356,8 +350,6 @@ encodeTxSetStatus(DporScpTxSetStatus status)
         return "valid";
     case DporScpTxSetStatus::Downloading:
         return "downloading";
-    case DporScpTxSetStatus::Invalid:
-        return "invalid";
     }
     throw std::invalid_argument("unsupported txset status in trace value: " +
                                 std::to_string(static_cast<unsigned>(status)));
@@ -387,10 +379,6 @@ parseTxSetStatus(std::string_view value)
     if (value == "downloading")
     {
         return DporScpTxSetStatus::Downloading;
-    }
-    if (value == "invalid")
-    {
-        return DporScpTxSetStatus::Invalid;
     }
     throw std::invalid_argument("unknown txset status value: " +
                                 std::string(value));
@@ -1002,7 +990,14 @@ traceBundleFromJson(Json::Value const& value)
     {
         throw std::invalid_argument(
             "trace bundle version 1 uses incompatible pre-CAP-0083 txset "
-            "status semantics; capture a version 2 trace");
+            "status semantics; capture a version 4 trace");
+    }
+    if (bundle.mVersion == 2 || bundle.mVersion == 3)
+    {
+        throw std::invalid_argument(
+            "trace bundle versions 2 and 3 may contain removed "
+            "downloaded-invalid or nondeterministic txset status modes; "
+            "capture a version 4 trace");
     }
     if (bundle.mVersion != TRACE_BUNDLE_VERSION)
     {

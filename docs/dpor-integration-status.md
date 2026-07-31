@@ -1,6 +1,6 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-07-23 for branch `dpor-on-master`, based on
+Status snapshot as of 2026-07-30 for branch `dpor-on-master`, based on
 upstream `master` (`f8b9c6eb2`, which includes the merged CAP-0083
 empty-tx-set feature), against DPOR library commit `d2c06e7` (functionally
 identical to the `b238b19` pin previously recorded here; the commits in
@@ -11,8 +11,9 @@ only**. It must be configured with
 `--enable-next-protocol-version-unsafe-for-production` so that `CAP_0083` is
 defined globally and the empty-tx-set code path is compiled in. The earlier
 pre-CAP-0083 build shape (with `CAP_0083` compiled out) is no longer a
-supported configuration. The scenario layer models both CAP-0083 replacement
-routes and keeps outright SCP-value invalidity separate from txset status.
+supported configuration. The scenario layer models CAP-0083 timeout
+replacement and keeps outright SCP-value invalidity separate from txset
+status.
 
 This branch is the port of the DPOR work from `skip-ledgers-p26-dpor` onto
 master. The old branch's 18 skip-ledgers feature commits were dropped
@@ -228,19 +229,18 @@ it after confirming no build is active), then rerun configure.
   - nomination-timer and balloting-timer firing caps
   - timer-set limits
   - txset download wait-time modes: `below`, `above`, and `nondet`
-  - txset validation-status modes: `valid`, `downloading`, `invalid`, and
-    `nondet`
-    - in `valid` mode, status choices explore `downloading` and `valid`
-    - in `invalid` mode, status choices explore `downloading` and `invalid`
-    - in `nondet` mode, status choices explore `valid`, `downloading`, and
-      `invalid`
-    - in the branching modes above, status choices reoccur only while the last
-      result for a value is `downloading`; once a value resolves to `valid` or
-      `invalid`, later queries on that node reuse the same result without
-      another DPOR choice
-    - `invalid` means a downloaded-invalid txset: validation remains
-      structurally valid, the download wait hook returns no value, and SCP
-      immediately ballots on the derived empty-tx-set value
+  - txset validation-status modes: `always-valid`,
+    `downloading-then-valid`, and `always-downloading`
+    - `always-valid` and `always-downloading` return their named status
+      deterministically without a DPOR choice
+    - in `downloading-then-valid` mode, status choices explore `downloading`
+      and `valid`
+    - choices reoccur only while the last result for a value is `downloading`;
+      once a value resolves to `valid`, later queries on that node reuse the
+      same result without another DPOR choice
+    - downloaded-invalid txsets are not modeled, so a downloading status stays
+      eligible for a download wait time rather than resolving to a missing
+      wait time
   - nomination-only forced downloading for txset validation, so
     nomination-path queries return structurally valid without consuming a
     txset-status choice while
@@ -286,7 +286,6 @@ it after confirming no build is active), then rerun configure.
   - `--download-time`
   - `--txset-status`
   - `--nomination-always-downloading`
-    - `--nomination-always-waiting` remains a compatibility alias
   - `--invalid-proposer N`
     - with unique initial values, every other node rejects proposer `N`'s
       value as outright invalid while the proposer can still emit it
@@ -294,6 +293,10 @@ it after confirming no build is active), then rerun configure.
   - `--fifo`
   - `--parallel` / `--workers`
   - `--print-stats`
+  - `--fail-on-first-blocked`
+    - continues past full executions, then stops at the first blocked
+      execution, writes a JSON trace focused on the first blocked node, dumps
+      replay traces, and exits nonzero
   - `--fail-on-first-terminal`
   - `--trace-dir DIR`
     - directory for auto-named JSON trace files written when the runner stops
@@ -308,15 +311,19 @@ it after confirming no build is active), then rerun configure.
   with file:line context rather than aborting the process.
 - The investigation runner now wraps thread-step exceptions as DPOR error
   executions, dumps replay lead-ins for all scenario threads with the failing
-  thread first, can fail fast on the first terminal execution for smoke-test
-  workflows, can write the first captured terminal execution as a structured
-  JSON artifact into `--trace-dir` (default `dpor-traces`), prints the chosen
-  path as `trace-json=...`, can reload that artifact for deterministic replay
-  without rerunning DPOR, and exits nonzero with the original exception
-  message.
+  thread first, can fail fast on either the first blocked execution or the
+  first terminal execution, can write the first captured terminal execution
+  as a structured JSON artifact into `--trace-dir` (default `dpor-traces`),
+  prints the chosen path as `trace-json=...`, can reload that artifact for
+  deterministic replay without rerunning DPOR, and exits nonzero with the
+  recorded failure message.
 - The summary line and `--print-stats` progress lines report the blocked
   count (`blocked=` / `blocked_executions=`) alongside full, error, and
   depth-limit counts, and trace bundles serialize the `blocked` terminal kind.
+- A node's first boundary envelope is fanned out before its scenario thread
+  stops. This is especially important at the externalize boundary: peers can
+  consume the `EXTERNALIZE` message needed to finish instead of becoming
+  artificially blocked after the sender reaches its local boundary.
 - The investigation runner registers the library's `on_fatal_error` hook and
   prints the fatal exception message plus a `format_graph` rendering of the
   in-progress execution graph to stderr before the exception propagates.
@@ -347,10 +354,11 @@ it after confirming no build is active), then rerun configure.
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
-  - JSON version-2 round-trips for scenario options, per-node
+  - JSON version-4 round-trips for scenario options, per-node
     outright-invalid mappings, and raw per-thread traces
-  - explicit rejection of semantically incompatible version-1 traces
-  - timeout-driven and downloaded-invalid empty-txset replacement
+  - explicit rejection of semantically incompatible version-1 through
+    version-3 traces
+  - timeout-driven empty-txset replacement
   - outright-invalid nomination and ballot rejection without replacement
   - empty-txset nomination-versus-ballot validation
   - per-value txset download resolution
@@ -369,32 +377,37 @@ Verified directly in this tree with the post-CAP-0083 configure and build:
   `--enable-next-protocol-version-unsafe-for-production` failed with
   `--enable-dpor requires
   --enable-next-protocol-version-unsafe-for-production`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 251
-  assertions in 39 test cases.
-- `./src/scp-dpor-investigation --txset-status invalid --stop-on-prepare
-  --depth 12` reported
-  `kind=all-explored executions=16 full=0 blocked=0 error=0 depth-limit=16`.
-- `./src/scp-dpor-investigation --txset-status downloading --download-time
-  above --stop-on-prepare --depth 12` reported
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 233
+  assertions in 40 test cases.
+- `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
+  reported
+  `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.
+- `./src/scp-dpor-investigation --txset-status downloading-then-valid
+  --depth 6` reported
+  `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
+- `./src/scp-dpor-investigation --txset-status always-downloading
+  --download-time above --stop-on-prepare --depth 12` reported
   `kind=all-explored executions=4 full=0 blocked=1 error=0 depth-limit=3`.
-- `./src/scp-dpor-investigation --txset-status downloading --download-time
-  below --depth 12` reported
+- `./src/scp-dpor-investigation --txset-status always-downloading
+  --download-time below --depth 12` reported
   `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --init unique --invalid-proposer 0 --depth 12`
   reported
   `kind=all-explored executions=1 full=0 blocked=1 error=0 depth-limit=0`.
-- `./src/scp-dpor-investigation --txset-status nondet --download-time nondet
-  --depth 12` reported
-  `kind=all-explored executions=46 full=0 blocked=0 error=0 depth-limit=46`.
-- The same nondeterministic command with `--parallel --workers 4` reported
-  identical counts.
-- `--txset-status waiting` and `--nomination-always-waiting` remain accepted as
-  CLI compatibility aliases, while `--invalid-proposer 0` without
-  `--init unique` fails with the intended validation error.
-- `--fail-on-first-terminal --trace-dir ... --txset-status invalid --depth 12`
-  wrote a version-2 trace bundle, and
+- The obsolete `--txset-status valid`, `downloading`, `invalid`, `waiting`,
+  `downloading-then-invalid`, and `nondet` values and
+  `--nomination-always-waiting` flag are rejected, while
+  `--invalid-proposer 0` without `--init unique` fails with the intended
+  validation error.
+- `--fail-on-first-terminal --trace-dir ... --txset-status
+  downloading-then-valid --depth 12` wrote a version-4 trace bundle, and
   `--replay-trace-json ... --replay-node all` reloaded and replayed every node
   successfully.
+- `--fail-on-first-blocked --trace-dir ... --txset-status always-downloading
+  --download-time above --stop-on-prepare --depth 12` stopped on a blocked
+  execution, exited nonzero, and wrote a version-4 trace focused on the first
+  blocked node; `--replay-trace-json ... --replay-node all` replayed every
+  node successfully.
 
 ## Current limitations
 

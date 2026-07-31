@@ -22,6 +22,15 @@ This mode is intentionally a fail-fast runner check rather than a general
 terminal-capture workflow. For debugger-oriented capture and later replay, use
 the JSON trace flow described below.
 
+## `scp-dpor-investigation --fail-on-first-blocked`
+
+The `--fail-on-first-blocked` mode continues past full, error-free executions
+and stops at the first blocked execution. It writes the blocked execution's
+JSON replay bundle to `--trace-dir`, focuses the bundle on the first node whose
+thread ended at an unsatisfied blocking receive, dumps replay traces, and exits
+nonzero. The bundle preserves `blocked` as its terminal kind rather than
+rewriting it as an error execution.
+
 ## JSON Trace Capture And Replay
 
 `scp-dpor-investigation` persists the first captured terminal execution as a
@@ -35,17 +44,19 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus thread
 - one raw `ThreadTrace` per thread
 
-Trace bundles use schema version 2. Version 2 gives txset status `invalid` its
-post-CAP-0083 meaning (a structurally valid SCP value whose downloaded txset
-is invalid), uses `downloading` as the canonical unresolved status spelling,
-and stores deterministic per-node outright-invalid value lists separately.
-It also stores the explicitly named test-only empty-txset protocol-gate fault
-used by error-capture fixtures.
+Trace bundles use schema version 4. Version 4 stores the txset-status modes as
+`always-valid`, `downloading-then-valid`, or `always-downloading`, and txset
+status choices can contain only `valid` or `downloading`.
+
+Version-2 and version-3 bundles are rejected before their scenario options or
+trace observations are parsed because they may contain the removed
+downloaded-invalid status or nondeterministic status mode. Replaying either
+under the reduced version-4 model would change the explored behavior.
 
 Version-1 bundles are rejected before scenario options or trace observations
 are parsed. Their `invalid` status meant outright SCP-value invalidity, so
-silently loading them under the version-2 meaning would replay a different
-protocol execution.
+loading them under any later schema would replay a different protocol
+execution.
 
 This matches the existing replay seam:
 
@@ -98,8 +109,9 @@ For the default configuration:
 - the prepare boundary is the first `SCP_ST_PREPARE` with ballot counter
   `>= 1`
 
-Once a node reaches that boundary, the scenario stops producing further events
-for that thread.
+Once a node reaches that boundary, the scenario broadcasts the envelope that
+reached it and then stops producing further events for that thread. Envelopes
+emitted after the boundary are suppressed.
 
 So a terminal execution in this runner means "all scenario threads reached
 their local stop condition", not "the model checker consumed the entire depth
@@ -151,7 +163,7 @@ Each `NodeBaseline` contains:
 - replay-boundary state
 
 The configured per-node outright-invalid value sets are immutable scenario
-configuration rather than mutable replay state. Loading a version-2 bundle
+configuration rather than mutable replay state. Loading a version-4 bundle
 reconstructs those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.

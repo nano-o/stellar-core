@@ -26,8 +26,7 @@ namespace stellar
 enum class DporScpTxSetStatus : std::uint8_t
 {
     Valid,
-    Downloading,
-    Invalid
+    Downloading
 };
 
 class DporScpNode : public SCPDriver

@@ -64,10 +64,11 @@ struct CommandLineOptions
         mDownloadTimeMode{stellar::scpdpor::ScpDporDefaultScenario::
                               DownloadTimeMode::BelowThreshold};
     stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mTxSetStatusMode{
-        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::Valid};
+        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode::AlwaysValid};
     bool mNominationAlwaysDownloading{false};
     std::optional<std::size_t> mInvalidProposerIndex;
     std::optional<uint32_t> mDownloadSucceedsInRound;
+    bool mFailOnFirstBlocked{false};
     bool mFailOnFirstTerminal{false};
     bool mSerializeTerminalCallbacks{false};
     std::optional<std::chrono::seconds> mPrintStatsInterval;
@@ -143,14 +144,12 @@ txSetStatusModeName(
         stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
     switch (mode)
     {
-    case TxSetStatusMode::Valid:
-        return "valid";
-    case TxSetStatusMode::Downloading:
-        return "downloading";
-    case TxSetStatusMode::Invalid:
-        return "invalid";
-    case TxSetStatusMode::Nondeterministic:
-        return "nondet";
+    case TxSetStatusMode::AlwaysValid:
+        return "always-valid";
+    case TxSetStatusMode::DownloadingThenValid:
+        return "downloading-then-valid";
+    case TxSetStatusMode::AlwaysDownloading:
+        return "always-downloading";
     }
     throw std::logic_error("unknown txset-status mode");
 }
@@ -275,13 +274,12 @@ printUsage(char const* argv0)
               << " download timeout; nondet re-chooses while below-threshold"
               << " and latches once timed out (default: "
               << downloadTimeModeName(defaults.mDownloadTimeMode) << ")\n"
-              << "  --txset-status valid|downloading|invalid|nondet\n"
-              << "      Tx-set status mode; valid explores"
-              << " {downloading,valid}, invalid explores"
-              << " {downloading,invalid}, nondet explores"
-              << " {valid,downloading,invalid}; branching repeats only while"
-              << " downloading and latches once resolved (waiting is accepted"
-              << " as a compatibility alias)"
+              << "  --txset-status always-valid|downloading-then-valid"
+              << "|always-downloading\n"
+              << "      Tx-set status mode; downloading-then-valid explores"
+              << " {downloading,valid}. Branching repeats only while"
+              << " downloading and latches once valid;"
+              << " always-valid and always-downloading do not branch"
               << " (default: " << txSetStatusModeName(defaults.mTxSetStatusMode)
               << ")\n"
               << "  --nomination-always-downloading\n"
@@ -304,6 +302,10 @@ printUsage(char const* argv0)
               << "  --print-stats N\n"
               << "      Print progress every N seconds"
               << " (default: disabled)\n"
+              << "  --fail-on-first-blocked\n"
+              << "      Stop at the first blocked execution, write its JSON"
+              << " trace, dump replay traces, and fail the command"
+              << " (default: off)\n"
               << "  --fail-on-first-terminal\n"
               << "      Smoke-test mode: stop at the first terminal"
               << " execution, dump replay traces, and fail the command"
@@ -354,21 +356,17 @@ parseTxSetStatusMode(std::string_view value)
     using TxSetStatusMode =
         stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
 
-    if (value == "valid")
+    if (value == "always-valid")
     {
-        return TxSetStatusMode::Valid;
+        return TxSetStatusMode::AlwaysValid;
     }
-    if (value == "downloading" || value == "waiting")
+    if (value == "downloading-then-valid")
     {
-        return TxSetStatusMode::Downloading;
+        return TxSetStatusMode::DownloadingThenValid;
     }
-    if (value == "invalid")
+    if (value == "always-downloading")
     {
-        return TxSetStatusMode::Invalid;
-    }
-    if (value == "nondet")
-    {
-        return TxSetStatusMode::Nondeterministic;
+        return TxSetStatusMode::AlwaysDownloading;
     }
     throw std::invalid_argument("unknown txset-status mode: " +
                                 std::string(value));
@@ -1016,6 +1014,18 @@ dumpReplayBundle(std::ostream& out, CommandLineOptions const& options,
 }
 
 std::string
+failOnFirstBlockedFailureMessage(
+    stellar::scpdpor::InvestigationBlockedExecution const& blocked)
+{
+    std::ostringstream message;
+    message << "stopped at first blocked execution because "
+            << "--fail-on-first-blocked was set"
+            << " (node-index=" << blocked.mNodeIndex
+            << " thread=" << blocked.mThreadID << ")";
+    return message.str();
+}
+
+std::string
 failOnFirstTerminalFailureMessage()
 {
     return "stopped at first terminal execution because "
@@ -1160,8 +1170,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mTxSetStatusMode = parseTxSetStatusMode(argv[++i]);
             continue;
         }
-        if (arg == "--nomination-always-downloading" ||
-            arg == "--nomination-always-waiting")
+        if (arg == "--nomination-always-downloading")
         {
             options.mNominationAlwaysDownloading = true;
             continue;
@@ -1186,6 +1195,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--fail-on-first-terminal")
         {
             options.mFailOnFirstTerminal = true;
+            continue;
+        }
+        if (arg == "--fail-on-first-blocked")
+        {
+            options.mFailOnFirstBlocked = true;
             continue;
         }
         if (arg == "--serialize-terminal-callbacks")
@@ -1400,6 +1414,38 @@ main(int argc, char* argv[])
                                     stellar::scpdpor::threadIdForNodeIndex(
                                         agreementFailure->mConflicting
                                             .mNodeIndex)});
+                        writeTraceBundleToTraceDir(options.mTraceDir, bundle);
+                        dumpTerminalExecution(std::cout, scenario, bundle,
+                                              true);
+                        dumpedTerminalExecution = true;
+                    }
+                    return dpor::algo::TerminalExecutionAction::Stop;
+                }
+            }
+
+            if (options.mFailOnFirstBlocked)
+            {
+                auto const blockedExecution =
+                    stellar::scpdpor::findBlockedExecution(
+                        scenario.options().mValidators.size(), execution);
+                if (blockedExecution)
+                {
+                    std::lock_guard<std::recursive_mutex> guard(
+                        terminalExecutionMutex);
+                    if (!failureMessage)
+                    {
+                        failureMessage =
+                            failOnFirstBlockedFailureMessage(*blockedExecution);
+                    }
+                    if (!dumpedTerminalExecution)
+                    {
+                        auto const bundle = stellar::scpdpor::makeTraceBundle(
+                            scenario, execution, options.mCommunicationModel,
+                            stellar::scpdpor::TerminalMeta{
+                                .mKind = execution.kind,
+                                .mFailureMessage = failureMessage,
+                                .mFocusNodeIndex = blockedExecution->mNodeIndex,
+                                .mFocusThreadID = blockedExecution->mThreadID});
                         writeTraceBundleToTraceDir(options.mTraceDir, bundle);
                         dumpTerminalExecution(std::cout, scenario, bundle,
                                               true);

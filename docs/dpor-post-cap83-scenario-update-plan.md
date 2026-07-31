@@ -98,8 +98,7 @@ Changes:
 - Latch both `Valid` and `Invalid`.
 - Update diagnostic formatting and error messages to use `downloading`.
 
-The investigation CLI should use `downloading` as its canonical spelling but
-may accept `waiting` as a compatibility alias.
+The investigation CLI should accept only `downloading` for this status.
 
 ### 2. Add deterministic outright-invalid values to `DporScpNode`
 

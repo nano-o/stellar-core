@@ -41,8 +41,7 @@ std::vector<DporScpTxSetStatus> const&
 allTxSetStatusChoices()
 {
     static std::vector<DporScpTxSetStatus> const supportedChoices{
-        DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading,
-        DporScpTxSetStatus::Invalid};
+        DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading};
     return supportedChoices;
 }
 
@@ -90,7 +89,6 @@ validationLevelForTxSetStatus(DporScpTxSetStatus status)
     {
     case DporScpTxSetStatus::Valid:
         return SCPDriver::kFullyValidatedValue;
-    case DporScpTxSetStatus::Invalid:
     case DporScpTxSetStatus::Downloading:
         return SCPDriver::kStructurallyValidValue;
     }
@@ -791,7 +789,11 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
         ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
                          .mEnvelope = envelope,
                          .mBoundary = reachesBoundaryNow});
-    if (!alreadyReachedBoundary && !reachesBoundaryNow)
+    // The envelope that reaches the boundary is still a protocol message and
+    // must be delivered to peers. The scenario drains pending sends before it
+    // stops a boundary thread. Suppress only envelopes emitted after the
+    // boundary.
+    if (!alreadyReachedBoundary)
     {
         mPendingEnvelopes.push_back(envelope);
     }

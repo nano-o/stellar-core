@@ -23,6 +23,12 @@ struct InvestigationErrorExecution
     std::string mMessage;
 };
 
+struct InvestigationBlockedExecution
+{
+    std::size_t mNodeIndex{};
+    dpor::model::ThreadId mThreadID{};
+};
+
 // Full and Blocked partition the maximal executions: Full means every thread
 // completed, Blocked means at least one thread ended waiting on a blocking
 // receive no message can satisfy. Checks over complete interleavings (missing
@@ -102,6 +108,36 @@ findErrorExecution(
             return InvestigationErrorExecution{.mNodeIndex = nodeIndex,
                                                .mThreadID = threadID,
                                                .mMessage = error->message};
+        }
+    }
+
+    return std::nullopt;
+}
+
+inline std::optional<InvestigationBlockedExecution>
+findBlockedExecution(
+    std::size_t validatorCount,
+    dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)
+{
+    if (!execution.is_blocked_execution())
+    {
+        return std::nullopt;
+    }
+
+    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
+    {
+        auto const threadID = threadIdForNodeIndex(nodeIndex);
+        auto const lastEventID = execution.graph.last_event_id(threadID);
+        if (lastEventID == ExplorationGraph::kNoSource)
+        {
+            continue;
+        }
+
+        if (dpor::model::as_block(execution.graph.event(lastEventID)) !=
+            nullptr)
+        {
+            return InvestigationBlockedExecution{.mNodeIndex = nodeIndex,
+                                                 .mThreadID = threadID};
         }
     }
 

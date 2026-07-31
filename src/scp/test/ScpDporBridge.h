@@ -135,7 +135,6 @@ decodeTxSetStatusChoice(ScpDporValue const& value)
     {
     case DporScpTxSetStatus::Valid:
     case DporScpTxSetStatus::Downloading:
-    case DporScpTxSetStatus::Invalid:
         return static_cast<DporScpTxSetStatus>(value.mTxSetStatus);
     }
     throw std::logic_error("value does not encode a supported txset status");
@@ -164,8 +163,6 @@ txSetStatusName(DporScpTxSetStatus status)
         return "valid";
     case DporScpTxSetStatus::Downloading:
         return "downloading";
-    case DporScpTxSetStatus::Invalid:
-        return "invalid";
     }
     return "unknown";
 }

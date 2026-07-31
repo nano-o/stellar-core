@@ -17,6 +17,7 @@
 #include <string>
 #include <system_error>
 #include <unistd.h>
+#include <utility>
 
 namespace stellar::scpdpor
 {
@@ -286,6 +287,21 @@ makeTestPrepareEnvelope(NodeID const& nodeID, Hash const& qSetHash,
     return envelope;
 }
 
+SCPEnvelope
+makeTestExternalizeEnvelope(NodeID const& nodeID, Hash const& qSetHash,
+                            uint64 slotIndex, SCPBallot const& ballot)
+{
+    SCPEnvelope envelope;
+    envelope.statement.nodeID = nodeID;
+    envelope.statement.slotIndex = slotIndex;
+    envelope.statement.pledges.type(SCP_ST_EXTERNALIZE);
+    auto& externalize = envelope.statement.pledges.externalize();
+    externalize.commit = ballot;
+    externalize.nH = ballot.counter;
+    externalize.commitQuorumSetHash = qSetHash;
+    return envelope;
+}
+
 // Owns a temp file path unique to this process, so concurrent test runs on
 // one machine cannot race on the same file; removes it on scope exit even
 // when the test body throws.
@@ -478,7 +494,7 @@ TEST_CASE("scp dpor trace json round-trips scenario options",
     options.mDownloadTimeMode =
         ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     options.mNominationAlwaysDownloading = true;
     options.mInjectEmptyTxSetProtocolGateFailureForTesting = true;
     options.mOutrightInvalidValuesByNode.resize(options.mValidators.size());
@@ -496,6 +512,19 @@ TEST_CASE("scp dpor trace json round-trips scenario options",
 
     auto const fourNodeOptions = ScpDporDefaultScenario::makeDefaultOptions(4);
     REQUIRE(optionsFromJson(toJson(fourNodeOptions)) == fourNodeOptions);
+
+    using TxSetStatusMode = ScpDporDefaultScenario::TxSetStatusMode;
+    std::vector<std::pair<TxSetStatusMode, std::string>> const statusModes{
+        {TxSetStatusMode::AlwaysValid, "always-valid"},
+        {TxSetStatusMode::DownloadingThenValid, "downloading-then-valid"},
+        {TxSetStatusMode::AlwaysDownloading, "always-downloading"}};
+    for (auto const& [mode, name] : statusModes)
+    {
+        options.mTxSetStatusMode = mode;
+        auto const encoded = toJson(options);
+        REQUIRE(encoded["txset_status_mode"].asString() == name);
+        REQUIRE(optionsFromJson(encoded).mTxSetStatusMode == mode);
+    }
 }
 
 TEST_CASE("scp dpor rejects malformed outright-invalid scenario mappings",
@@ -514,6 +543,19 @@ TEST_CASE("scp dpor rejects malformed outright-invalid scenario mappings",
                       std::invalid_argument);
 }
 
+TEST_CASE("scp dpor trace json rejects removed txset status modes",
+          "[scp][dpor][smoke]")
+{
+    for (auto const version : {2, 3})
+    {
+        Json::Value root(Json::objectValue);
+        root["version"] = version;
+        REQUIRE_THROWS_WITH(
+            traceBundleFromJson(root),
+            Catch::Contains("removed downloaded-invalid or nondeterministic"));
+    }
+}
+
 TEST_CASE("scp dpor trace json round-trips thread traces", "[scp][dpor][smoke]")
 {
     ScpDporDefaultScenario scenario;
@@ -530,8 +572,6 @@ TEST_CASE("scp dpor trace json round-trips thread traces", "[scp][dpor][smoke]")
         scenario.options().mSlotIndex, std::chrono::milliseconds(1500))});
     trace.push_back(ObservedValue{makeTxSetStatusChoiceValue(
         scenario.options().mSlotIndex, DporScpTxSetStatus::Downloading)});
-    trace.push_back(ObservedValue{makeTxSetStatusChoiceValue(
-        scenario.options().mSlotIndex, DporScpTxSetStatus::Invalid)});
 
     auto const roundTripped = threadTraceFromJson(toJson(trace));
 
@@ -598,6 +638,42 @@ TEST_CASE("scp dpor investigation wraps thread throws as error executions",
     REQUIRE(errorExecution->mMessage.find("boom") != std::string::npos);
 }
 
+TEST_CASE("scp dpor investigation identifies the first blocked node",
+          "[scp][dpor][smoke]")
+{
+    Program program;
+    auto const tid = threadIdForNodeIndex(0);
+    program.threads[tid] = [](ThreadTrace const&,
+                              std::size_t) -> std::optional<EventLabel> {
+        auto matcher = [](ScpDporValue const&) { return true; };
+        return EventLabel{
+            dpor::model::make_receive_label<ScpDporValue>(matcher)};
+    };
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = std::move(program);
+    config.max_depth = 2;
+
+    std::optional<InvestigationBlockedExecution> blockedExecution;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto candidate = findBlockedExecution(1, execution);
+            if (candidate)
+            {
+                blockedExecution = candidate;
+                return dpor::algo::TerminalExecutionAction::Stop;
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.blocked_executions_explored == 1);
+    REQUIRE(blockedExecution.has_value());
+    REQUIRE(blockedExecution->mNodeIndex == 0);
+    REQUIRE(blockedExecution->mThreadID == tid);
+}
+
 TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
           "[scp][dpor][smoke]")
 {
@@ -609,7 +685,7 @@ TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     options.mInjectEmptyTxSetProtocolGateFailureForTesting = true;
     ScpDporDefaultScenario scenario(std::move(options));
 
@@ -662,7 +738,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     options.mInjectEmptyTxSetProtocolGateFailureForTesting = true;
     ScpDporDefaultScenario scenario(std::move(options));
 
@@ -742,7 +818,7 @@ TEST_CASE("scp dpor captures an SCP releaseAssert as an error execution",
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = false;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     options.mInjectEmptyTxSetProtocolGateFailureForTesting = true;
     ScpDporDefaultScenario scenario(std::move(options));
 
@@ -782,13 +858,14 @@ TEST_CASE("scp dpor exploration finds a prepare boundary", "[scp][dpor][smoke]")
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = true;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     ScpDporDefaultScenario scenario(std::move(options));
     bool foundPrepareBoundary = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = scenario.makeProgram();
-    config.max_depth = 12;
+    // Reaching the boundary also fans the boundary envelope out to both peers.
+    config.max_depth = 14;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
             auto const leaderTrace =
@@ -816,7 +893,7 @@ TEST_CASE("scp dpor exploration witnesses timeout empty-txset replacement",
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = true;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Downloading;
+        ScpDporDefaultScenario::TxSetStatusMode::AlwaysDownloading;
     options.mDownloadTimeMode =
         ScpDporDefaultScenario::DownloadTimeMode::AboveThreshold;
     ScpDporDefaultScenario scenario(std::move(options));
@@ -855,54 +932,6 @@ TEST_CASE("scp dpor exploration witnesses timeout empty-txset replacement",
     auto const result = dpor::algo::verify(config);
     REQUIRE(result.error_executions_explored == 0);
     REQUIRE(foundReplacement);
-}
-
-TEST_CASE(
-    "scp dpor exploration witnesses downloaded-invalid empty-txset replacement",
-    "[scp][dpor][smoke]")
-{
-    auto options = ScpDporDefaultScenario::makeDefaultOptions();
-    options.mStopOnPrepare = true;
-    options.mTxSetStatusMode = ScpDporDefaultScenario::TxSetStatusMode::Invalid;
-    ScpDporDefaultScenario scenario(std::move(options));
-    bool foundReplacementWithoutWait = false;
-
-    dpor::algo::DporConfigT<ScpDporValue> config;
-    config.program = scenario.makeProgram();
-    config.max_depth = 12;
-    config.communication_model = dpor::model::CommunicationModel::FifoP2P;
-    config.on_terminal_execution =
-        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
-            for (std::size_t nodeIndex = 0;
-                 nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
-            {
-                auto const inspection = scenario.inspectThreadReplayTrace(
-                    nodeIndex, execution.graph.thread_trace(
-                                   threadIdForNodeIndex(nodeIndex)));
-                if (inspection.mBoundaryEnvelope &&
-                    inspection.mBoundaryEnvelope->statement.pledges.type() ==
-                        SCP_ST_PREPARE &&
-                    isTestEmptyTxSetValue(
-                        inspection.mBoundaryEnvelope->statement.pledges
-                            .prepare()
-                            .ballot.value) &&
-                    hasTxSetStatusObservation(inspection,
-                                              scenario.options().mSlotIndex,
-                                              DporScpTxSetStatus::Invalid) &&
-                    !hasReplayDebugEvent(inspection,
-                                         DporScpNode::ReplayDebugEvent::Kind::
-                                             UseTxSetDownloadWaitTime))
-                {
-                    foundReplacementWithoutWait = true;
-                    return dpor::algo::TerminalExecutionAction::Stop;
-                }
-            }
-            return dpor::algo::TerminalExecutionAction::Continue;
-        };
-
-    auto const result = dpor::algo::verify(config);
-    REQUIRE(result.error_executions_explored == 0);
-    REQUIRE(foundReplacementWithoutWait);
 }
 
 TEST_CASE("scp dpor exploration witnesses outright-invalid proposer rejection",
@@ -948,12 +977,12 @@ TEST_CASE("scp dpor exploration witnesses outright-invalid proposer rejection",
     REQUIRE(foundRejection);
 }
 
-TEST_CASE("scp dpor bounded nondeterministic txsets have no error executions",
+TEST_CASE("scp dpor bounded eventually-valid txsets have no error executions",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     options.mDownloadTimeMode =
         ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
     ScpDporDefaultScenario scenario(std::move(options));
@@ -1062,13 +1091,42 @@ TEST_CASE("scp dpor node detects the balloting round boundary",
     REQUIRE_FALSE(node.getBoundaryEnvelope());
 }
 
+TEST_CASE("scp dpor node queues its first boundary envelope for broadcast",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mBoundaryMode = DporScpNode::BoundaryMode::Externalize;
+
+    auto const& validator = options.mValidators.at(0);
+    DporScpNode node(validator, options.mQuorumSet, config);
+    SCPBallot ballot{1, options.mInitialValues.at(0)};
+    auto const envelope = makeTestExternalizeEnvelope(
+        validator.getPublicKey(),
+        sha256(xdr::xdr_to_opaque(options.mQuorumSet)), options.mSlotIndex,
+        ballot);
+
+    node.emitEnvelope(envelope);
+
+    REQUIRE(node.hasReachedBoundary());
+    REQUIRE(node.getBoundaryEnvelope() != nullptr);
+    REQUIRE(*node.getBoundaryEnvelope() == envelope);
+    auto const pending = node.takePendingEnvelopes();
+    REQUIRE(pending.size() == 1);
+    REQUIRE(pending.front() == envelope);
+
+    node.emitEnvelope(envelope);
+    REQUIRE(node.takePendingEnvelopes().empty());
+}
+
 TEST_CASE("scp dpor replay trace captures emitted envelopes",
           "[scp][dpor][smoke]")
 {
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = true;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     ScpDporDefaultScenario scenario(std::move(options));
     bool sawEmittedEnvelope = false;
     bool sawBoundaryPrepare = false;
@@ -1130,15 +1188,13 @@ TEST_CASE("scp dpor emitted envelopes expose missing externalize",
     auto options = ScpDporDefaultScenario::makeDefaultOptions();
     options.mStopOnPrepare = true;
     options.mTxSetStatusMode =
-        ScpDporDefaultScenario::TxSetStatusMode::Nondeterministic;
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
     ScpDporDefaultScenario scenario(std::move(options));
     std::size_t maximalExecutionsChecked = 0;
     bool foundMissingExternalize = false;
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = scenario.makeProgram();
-    // The third txset-status branch adds enough observations that reaching a
-    // maximal all-node PREPARE boundary now needs a slightly deeper bound.
     config.max_depth = 20;
     config.on_terminal_execution =
         [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
@@ -1263,8 +1319,7 @@ TEST_CASE("scp dpor node separates outright invalidity from txset status",
     auto const otherValue = makeTestValue("y");
 
     for (auto const status :
-         {DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading,
-          DporScpTxSetStatus::Invalid})
+         {DporScpTxSetStatus::Valid, DporScpTxSetStatus::Downloading})
     {
         DporScpNode::Configuration config;
         config.mTxSetStatus = status;
@@ -1276,7 +1331,6 @@ TEST_CASE("scp dpor node separates outright invalidity from txset status",
 
         REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
                 SCPDriver::kInvalidValue);
-        REQUIRE_FALSE(node.getTxSetDownloadWaitTime(value).has_value());
     }
 
     DporScpNode::Configuration nondeterministicConfig;
@@ -1381,7 +1435,7 @@ TEST_CASE("scp dpor rejects outright-invalid peer values without replacement",
     }
 }
 
-TEST_CASE("scp dpor post-CAP txset replacement distinguishes all routes",
+TEST_CASE("scp dpor post-CAP txset replacement distinguishes timeout routes",
           "[scp][dpor][smoke]")
 {
     auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2100);
@@ -1417,21 +1471,6 @@ TEST_CASE("scp dpor post-CAP txset replacement distinguishes all routes",
         REQUIRE(requireBallotValue(node.getEmittedEnvelopes()) ==
                 node.makeEmptyTxSetValueFromValue(value));
         REQUIRE(countWaitTimeDebugEvents(node.takeReplayDebugEvents()) == 1);
-    }
-
-    SECTION("downloaded-invalid replaces immediately without a wait time")
-    {
-        config.mTxSetStatus = DporScpTxSetStatus::Invalid;
-        DporScpNode node(validator, qSet, config);
-        REQUIRE(node.validateValue(0, value, false) ==
-                SCPDriver::kStructurallyValidValue);
-        REQUIRE_FALSE(node.getTxSetDownloadWaitTime(value).has_value());
-        node.setReplayDebugRecordingEnabled(true);
-
-        REQUIRE(node.startBalloting(0, value));
-        REQUIRE(requireBallotValue(node.getEmittedEnvelopes()) ==
-                node.makeEmptyTxSetValueFromValue(value));
-        REQUIRE(countWaitTimeDebugEvents(node.takeReplayDebugEvents()) == 0);
     }
 }
 
@@ -1624,22 +1663,6 @@ TEST_CASE("scp dpor node latches txset status once a value is resolved",
                       DporScpNode::TxSetStatusChoiceRequired);
 
     node.restoreReplayBaseline(checkpoint);
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
-    auto const chosenInvalidLevel =
-        node.validateValue(options.mSlotIndex, otherValue, false);
-    REQUIRE(chosenInvalidLevel == SCPDriver::kStructurallyValidValue);
-    auto const latchedInvalidLevel =
-        node.validateValue(options.mSlotIndex, otherValue, false);
-    REQUIRE(latchedInvalidLevel == SCPDriver::kStructurallyValidValue);
-    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(otherValue).has_value());
-    auto const invalidCheckpoint =
-        node.snapshotReplayBaseline(options.mSlotIndex);
-    node.restoreReplayBaseline(invalidCheckpoint);
-    REQUIRE(node.validateValue(options.mSlotIndex, otherValue, false) ==
-            SCPDriver::kStructurallyValidValue);
-    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(otherValue).has_value());
-
-    node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
     auto const chosenWaitingLevel =
         node.validateValue(options.mSlotIndex, value, false);
@@ -1694,49 +1717,6 @@ TEST_CASE("scp dpor node can model eventual valid txset resolution",
     auto const latchedLevel =
         node.validateValue(options.mSlotIndex, value, false);
     REQUIRE(latchedLevel == SCPDriver::kFullyValidatedValue);
-}
-
-TEST_CASE("scp dpor node can model eventual invalid txset resolution",
-          "[scp][dpor][smoke]")
-{
-    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
-
-    DporScpNode::Configuration config;
-    config.mTxSetStatus = DporScpTxSetStatus::Invalid;
-    config.mNondeterministicTxSetStatus = true;
-    config.mSupportedTxSetStatusChoices = {DporScpTxSetStatus::Downloading,
-                                           DporScpTxSetStatus::Invalid};
-
-    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
-    Value value;
-    value.push_back('x');
-
-    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
-
-    auto const initialChoices =
-        requireTxSetStatusChoices(node, options.mSlotIndex, value);
-    REQUIRE(initialChoices == config.mSupportedTxSetStatusChoices);
-
-    node.restoreReplayBaseline(checkpoint);
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
-    auto const waitingLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(waitingLevel == SCPDriver::kStructurallyValidValue);
-    auto const waitingCheckpoint =
-        node.snapshotReplayBaseline(options.mSlotIndex);
-    auto const rebranchedChoices =
-        requireTxSetStatusChoices(node, options.mSlotIndex, value);
-    REQUIRE(rebranchedChoices == config.mSupportedTxSetStatusChoices);
-
-    node.restoreReplayBaseline(waitingCheckpoint);
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
-    auto const resolvedLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(resolvedLevel == SCPDriver::kStructurallyValidValue);
-    auto const latchedLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(latchedLevel == SCPDriver::kStructurallyValidValue);
-    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(value).has_value());
 }
 
 TEST_CASE("scp dpor node can force downloading txset status during nomination",
@@ -1807,11 +1787,11 @@ TEST_CASE(
     REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
                       DporScpNode::TxSetStatusChoiceRequired);
 
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Invalid);
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
     auto const otherValueLevel =
         node.validateValue(options.mSlotIndex, otherValue, false);
     REQUIRE(otherValueLevel == SCPDriver::kStructurallyValidValue);
-    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(otherValue).has_value());
+    REQUIRE(node.getTxSetDownloadWaitTime(otherValue).has_value());
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     node.restoreReplayBaseline(checkpoint);
@@ -1855,7 +1835,7 @@ TEST_CASE(
     ThreadTrace trace;
     trace.emplace_back(ObservedValue::bottom());
     trace.emplace_back(
-        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Invalid));
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Valid));
     trace.emplace_back(ObservedValue::bottom());
 
     auto const progress = replaySupport.replayObservation(
@@ -1867,7 +1847,7 @@ TEST_CASE(
     REQUIRE(progress.mObservedBottom);
 
     std::vector<SCPDriver::ValidationLevel> const expectedStatuses{
-        SCPDriver::kStructurallyValidValue, SCPDriver::kStructurallyValidValue};
+        SCPDriver::kFullyValidatedValue, SCPDriver::kFullyValidatedValue};
     REQUIRE(seenStatuses == expectedStatuses);
 }
 
