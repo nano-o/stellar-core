@@ -31,6 +31,16 @@ thread ended at an unsatisfied blocking receive, dumps replay traces, and exits
 nonzero. The bundle preserves `blocked` as its terminal kind rather than
 rewriting it as an error execution.
 
+If exploration finishes without reaching any blocked execution, the mode wrote
+no bundle, so it also exits nonzero and says so, reporting the execution count,
+the `--depth` used, and how many executions hit the depth limit. Treat that as
+"the depth was too shallow to reach a blocked execution", not as a pass. The
+depth needed depends on the scenario: with `--stop-on-prepare
+--txset-status always-downloading --download-time above`, boundary envelopes
+are broadcast before a boundary thread stops, which lengthens every execution
+enough that blocked executions only appear from `--depth 18`. `--depth 12`
+explores nothing but depth-limited executions there.
+
 ## JSON Trace Capture And Replay
 
 `scp-dpor-investigation` persists the first captured terminal execution as a

@@ -934,6 +934,51 @@ TEST_CASE("scp dpor exploration witnesses timeout empty-txset replacement",
     REQUIRE(foundReplacement);
 }
 
+TEST_CASE("scp dpor stop-on-prepare reaches a blocked execution",
+          "[scp][dpor][smoke]")
+{
+    // Pins the depth budget the stop-on-prepare scenario needs to reach a
+    // blocked execution. Boundary envelopes are broadcast before a boundary
+    // thread stops, which lengthens every execution here, so a depth that is
+    // merely enough to reach the boundary is not enough to reach the blocking
+    // receive beyond it. Without this test a too-shallow depth silently
+    // explores only depth-limited executions and finds nothing.
+    auto makeScenarioOptions = []() {
+        auto options = ScpDporDefaultScenario::makeDefaultOptions();
+        options.mStopOnPrepare = true;
+        options.mTxSetStatusMode =
+            ScpDporDefaultScenario::TxSetStatusMode::AlwaysDownloading;
+        options.mDownloadTimeMode =
+            ScpDporDefaultScenario::DownloadTimeMode::AboveThreshold;
+        return options;
+    };
+
+    // At depth 12 every execution is cut off by the depth limit before it can
+    // block, so a blocked-execution check there is vacuous.
+    {
+        ScpDporDefaultScenario scenario(makeScenarioOptions());
+        dpor::algo::DporConfigT<ScpDporValue> config;
+        config.program = scenario.makeProgram();
+        config.max_depth = 12;
+        auto const result = dpor::algo::verify(config);
+        REQUIRE(result.blocked_executions_explored == 0);
+        REQUIRE(result.depth_limit_executions_explored > 0);
+        REQUIRE(result.error_executions_explored == 0);
+    }
+
+    // Depth 18 is the smallest budget that actually reaches a blocked
+    // execution, and it is what any blocked-execution workflow must use.
+    {
+        ScpDporDefaultScenario scenario(makeScenarioOptions());
+        dpor::algo::DporConfigT<ScpDporValue> config;
+        config.program = scenario.makeProgram();
+        config.max_depth = 18;
+        auto const result = dpor::algo::verify(config);
+        REQUIRE(result.blocked_executions_explored > 0);
+        REQUIRE(result.error_executions_explored == 0);
+    }
+}
+
 TEST_CASE("scp dpor exploration witnesses outright-invalid proposer rejection",
           "[scp][dpor][smoke]")
 {

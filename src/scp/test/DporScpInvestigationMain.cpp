@@ -304,11 +304,13 @@ printUsage(char const* argv0)
               << " (default: disabled)\n"
               << "  --fail-on-first-blocked\n"
               << "      Stop at the first blocked execution, write its JSON"
-              << " trace, dump replay traces, and fail the command"
-              << " (default: off)\n"
+              << " trace, dump replay traces, and fail the command."
+              << " Also fails if no blocked execution is found, since that"
+              << " captures nothing (default: off)\n"
               << "  --fail-on-first-terminal\n"
               << "      Smoke-test mode: stop at the first terminal"
-              << " execution, dump replay traces, and fail the command"
+              << " execution, dump replay traces, and fail the command."
+              << " Also fails if no terminal execution is found"
               << " (default: off)\n"
               << "  --serialize-terminal-callbacks\n"
               << "      Diagnostic mode: run terminal observer bodies under"
@@ -1547,6 +1549,29 @@ main(int argc, char* argv[])
         if (failureMessage)
         {
             std::cout << "error: " << *failureMessage << "\n" << std::flush;
+            return 1;
+        }
+        // A capture mode that never fired explored the whole space without
+        // finding what it was asked to stop on, so it wrote no trace. Exiting 0
+        // there is indistinguishable from a clean run, which lets a too-shallow
+        // --depth silently turn the check into a no-op.
+        if (options.mFailOnFirstBlocked || options.mFailOnFirstTerminal)
+        {
+            char const* const requested = options.mFailOnFirstBlocked
+                                              ? "--fail-on-first-blocked"
+                                              : "--fail-on-first-terminal";
+            std::cout << "error: " << requested
+                      << " was set but no matching execution was found in "
+                      << result.executions_explored << " executions at --depth "
+                      << options.mDepth << ", so no trace was captured";
+            if (options.mFailOnFirstBlocked &&
+                result.depth_limit_executions_explored > 0)
+            {
+                std::cout << "; " << result.depth_limit_executions_explored
+                          << " execution(s) hit the depth limit, so a greater"
+                             " --depth may reach a blocked execution";
+            }
+            std::cout << "\n" << std::flush;
             return 1;
         }
         return 0;

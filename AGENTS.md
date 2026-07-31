@@ -58,17 +58,18 @@ The project is **C++20** (`AX_CXX_COMPILE_STDCXX(20, noext, mandatory)` in
 configure.ac bakes `-std=c++20` into `CXX`), which is the standard DPOR
 requires anyway. DPOR targets still carry their own flags via `DPOR_CXXFLAGS`,
 defaulting to `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`. The
-`-std=c++20` is now redundant with the baseline but harmless; the
-`-DFMT_CONSTEVAL=` workaround is still required because the vendored
-fmt/spdlog headers are not safe under C++20 without it.
+`-std=c++20` is now redundant with the baseline but harmless.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 since upstream's "Ungate CAP-0083 and CAP-0085, bump to protocol 28" (#5397) is
 just plain `master`. `CAP_0083` no longer exists as an automake conditional or
 a preprocessor define and empty-tx-set support is unconditional, so
 `--enable-dpor` **no longer requires**
-`--enable-next-protocol-version-unsafe-for-production`. That flag now only
-selects Soroban `next` features and is orthogonal to DPOR.
+`--enable-next-protocol-version-unsafe-for-production`. That flag remains the
+whole-build next-protocol switch: among other effects, it defines
+`ENABLE_NEXT_PROTOCOL_VERSION_UNSAFE_FOR_PRODUCTION`, advances
+`Config::CURRENT_LEDGER_PROTOCOL_VERSION`, and enables Soroban `next` features.
+Those effects are orthogonal to DPOR's empty-tx-set build contract.
 
 The rule that flag existed to enforce still applies to any future protocol
 define that alters the `SCPDriver` vtable: it must stay global in
@@ -114,6 +115,12 @@ Notes:
   - `./src/scp-dpor-investigation --depth 12`
   - `./src/scp-dpor-investigation --fail-on-first-terminal --trace-dir "$PWD/dpor-traces" --depth 12`
   - `./src/scp-dpor-investigation --replay-trace-json PATH --replay-node N|all`
+- `--fail-on-first-blocked` / `--fail-on-first-terminal` exit nonzero both when
+  they capture a matching execution and when they find none, so an exit code of
+  0 from them is never a silent "nothing to see". The blocked variant needs a
+  depth deep enough to reach a blocking receive: for `--stop-on-prepare
+  --txset-status always-downloading --download-time above` that is `--depth 18`,
+  not 12.
 
 ## DPOR dependency
 

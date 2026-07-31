@@ -295,7 +295,11 @@ it after confirming no build is active), then rerun configure.
     - continues past full executions, then stops at the first blocked
       execution, writes a JSON trace focused on the first blocked node, dumps
       replay traces, and exits nonzero
+    - also exits nonzero, with a diagnostic naming the depth and the
+      depth-limit count, if no blocked execution is found at all -- that run
+      captured nothing and must not look like a pass
   - `--fail-on-first-terminal`
+    - likewise exits nonzero if no terminal execution is found
   - `--trace-dir DIR`
     - directory for auto-named JSON trace files written when the runner stops
       on a captured failure path
@@ -376,8 +380,9 @@ post-CAP-0083-ungating master), with a clean reconfigure and rebuild:
   `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`, contain no
   `-DCAP_0083` anywhere in the build, and pick up master's new global
   `-DXDRPP_STRONG_ORDER=1`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 233
-  assertions in 40 test cases (unchanged by the rebase).
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 238
+  assertions in 41 test cases (233 in 40 before adding the blocked-depth
+  regression test described below; the rebase itself changed neither).
 - `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
   reported
   `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.
@@ -429,9 +434,38 @@ post-CAP-0083-ungating master), with a clean reconfigure and rebuild:
   `kind=stopped executions=52 full=2 blocked=1 error=0 depth-limit=49`, exited
   1, and wrote a version-4 trace focused on the first blocked node;
   `--replay-trace-json ... --replay-node all` replayed every node
-  successfully (exit 0). At the previously documented `--depth 12` this
-  invocation now finds no blocked execution and exits 0 -- see the depth note
-  above.
+  successfully (exit 0).
+- At the previously documented `--depth 12` that same invocation finds no
+  blocked execution. It now reports
+  `error: --fail-on-first-blocked was set but no matching execution was found
+  in 4 executions at --depth 12, so no trace was captured; 4 execution(s) hit
+  the depth limit, so a greater --depth may reach a blocked execution` and
+  exits 1. Previously it exited 0, which made a too-shallow depth
+  indistinguishable from a clean run -- see "Capture modes fail when they
+  capture nothing" below.
+
+### Capture modes fail when they capture nothing
+
+`--fail-on-first-blocked` and `--fail-on-first-terminal` are capture tools:
+each stops at the first matching execution, writes its JSON trace, and exits
+nonzero. If exploration completes without ever matching, nothing is written --
+and the runner used to exit 0, which is indistinguishable from a clean run. A
+depth too shallow to reach the target state therefore turned the whole check
+into a silent no-op.
+
+Both modes now exit 1 with an explicit diagnostic when they match nothing,
+naming the flag, the execution count, and the depth; the blocked variant also
+reports how many executions hit the depth limit, since that is the usual
+reason a blocked execution is out of reach. Runs with no capture flag are
+unaffected and still exit 0.
+
+The depth budget itself is pinned by the smoke test `scp dpor stop-on-prepare
+reaches a blocked execution`, which asserts that the stop-on-prepare scenario
+finds no blocked execution at depth 12 (only depth-limited ones) and does find
+one at depth 18. That guards against the failure mode that produced the stale
+number above: boundary-envelope broadcasting lengthened these executions, and
+nothing caught that the documented depth had stopped reaching the blocked
+state.
 
 ## Current limitations
 

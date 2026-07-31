@@ -13,9 +13,12 @@ herder sources, and empty-tx-set support is compiled in unconditionally.
 
 Consequently `--enable-dpor` **no longer requires**
 `--enable-next-protocol-version-unsafe-for-production`, and `configure` no
-longer enforces that pairing. The flag still exists but now only selects
-Soroban `next` features; it is orthogonal to DPOR, and the `configure`
-invocations below omit it.
+longer enforces that pairing. The flag remains the whole-build next-protocol
+switch: among other effects, it defines
+`ENABLE_NEXT_PROTOCOL_VERSION_UNSAFE_FOR_PRODUCTION`, advances
+`Config::CURRENT_LEDGER_PROTOCOL_VERSION`, and enables Soroban `next` features.
+Those effects are orthogonal to DPOR's empty-tx-set build contract, so the
+`configure` invocations below omit it.
 
 > **Historical note.** While `CAP_0083` was a real define it had to live in the
 > **global** `AM_CPPFLAGS` and never in the DPOR target flags alone, because it
