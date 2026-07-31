@@ -193,7 +193,7 @@ sccache --show-stats | head            # compile requests / hit rate
 Upstream: `https://github.com/nano-o/CPP-DPOR.git` (branch `main`)
 
 DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
-commit `d2c06e7`. Initialize the revision selected by `stellar-core` before
+commit `23e1998`. Initialize the revision selected by `stellar-core` before
 configuring:
 ```bash
 git submodule update --init external/dpor

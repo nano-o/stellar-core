@@ -1,9 +1,8 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-07-30 for branch `dpor-on-master`, rebased onto
-upstream `master` (`4c0d88c75`), against DPOR library commit `d2c06e7`
-(functionally identical to the `b238b19` pin previously recorded here; the
-commits in between are comment/doc-only).
+Status snapshot as of 2026-07-31 for branch `dpor-on-master` at `4c89f7a03`,
+rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
+DPOR library commit `23e1998`.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -87,7 +86,7 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `d2c06e7`. The
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `23e1998`. The
   `--with-dpor-dir` override remains available for development against another
   checkout.
 - Configure no longer couples `--enable-dpor` to the next-protocol option.
@@ -96,7 +95,7 @@ library or harness errors.
 - The configure invocation for the DPOR build is:
 
   ```bash
-  ./configure --enable-dpor CC=clang-20 CXX=clang++-20
+  ./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20
   ```
 - The checked-in build still requires tests to remain enabled.
   `--disable-tests --enable-dpor` errors out in `configure.ac`, and the DPOR
@@ -180,21 +179,31 @@ it after confirming no build is active), then rerun configure.
   - txset validation-status choice
   - txset download wait-time choice
 - `ScpDporValue` provides `operator==`, `operator<`, and `std::hash`, and it
-  remains payload-only.
+  remains payload-only. Envelope values share an immutable envelope payload
+  with a precomputed content digest, so copying a graph value is normally a
+  reference-count increment rather than a deep copy. A null payload retains
+  the old semantics of a default-constructed inline envelope for equality,
+  ordering, and hashing.
 - [`src/scp/test/ScpDporBridge.h`](../src/scp/test/ScpDporBridge.h) owns the
   encode/decode helpers and pretty-printing between SCP objects and
   `ScpDporValue`.
 - [`src/scp/test/DporScpNode.h`](../src/scp/test/DporScpNode.h) and
   [`src/scp/test/DporScpNode.cpp`](../src/scp/test/DporScpNode.cpp) implement
   the deterministic `SCPDriver` used by DPOR. The node snapshots and restores
-  slot state, tracks emitted envelopes, tracks timers and timer-set counts,
-  exposes boundary detection, and surfaces txset validation-status and
-  wait-time nondeterminism to the scenario layer.
+  slot state, tracks pending and optionally recorded emitted envelopes, tracks
+  timers and timer-set counts, exposes boundary detection, and surfaces txset
+  validation-status and wait-time nondeterminism to the scenario layer.
+  Repeated restores reuse immutable wrapped baseline values keyed by a snapshot
+  identity, and quorum-set lookup has a single-entry memo invalidated by
+  `storeQuorumSet()`.
 - [`src/scp/test/ScpDporReplaySupport.h`](../src/scp/test/ScpDporReplaySupport.h)
   and
   [`src/scp/test/ScpDporReplaySupport.cpp`](../src/scp/test/ScpDporReplaySupport.cpp)
-  provide stored baselines, thread-local cached nodes, and replay helpers for
-  observed traces, including hidden txset status and wait-time choices. Replay
+  provide stored baselines, per-worker caches of partially replayed nodes, and
+  replay helpers for observed traces, including hidden txset status and
+  wait-time choices. Valid replay cursors resume the longest matching consumed
+  prefix and memoize the label at their stopping step; a partially applied
+  nondeterministic-choice step deliberately invalidates its cursor. Replay
   semantics are also described in
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
 - [`src/scp/test/ScpDporTraceJson.h`](../src/scp/test/ScpDporTraceJson.h) and
@@ -334,9 +343,16 @@ it after confirming no build is active), then rerun configure.
   noticeably because the envelope payloads are persisted as exact base64 XDR.
   Reload uses the stored scenario options and thread traces with the existing
   harness replay seam rather than reconstructing a DPOR schedule.
+- [`src/scp/test/bench-dpor.sh`](../src/scp/test/bench-dpor.sh) is the checked-in
+  performance and correctness harness. Its `check` mode prints exact final
+  execution counts for 13 scenarios; those lines are a semantic fingerprint
+  and must match byte-for-byte across a performance-only change. `bench` times
+  four terminating workloads, and `head` reports throughput over a time-boxed
+  externalize-boundary run.
 - [`src/scp/test/SCPDporSmokeTests.cpp`](../src/scp/test/SCPDporSmokeTests.cpp)
   contains DPOR smoke tests. The checked-in coverage exercises:
   - deterministic first-step generation
+  - payload-less envelope value equality, ordering, and hash compatibility
   - initial envelope fanout
   - prepare-boundary discovery
   - commit-boundary exploration
@@ -368,10 +384,28 @@ it after confirming no build is active), then rerun configure.
   - capturing an SCP `releaseAssert` as a DPOR error execution with file:line
     context
 
+## Performance status
+
+Commit `4c89f7a03`, together with the pinned engine commit `5f48e8b`, removes
+the dominant replay and graph-materialization costs without changing the
+explored execution set. On the three-node FIFO externalize workload used by
+`bench-dpor.sh head` (`downloading-then-valid`, nomination forced downloading,
+nondeterministic download time, depth 200, eight workers), paired same-session
+medians moved from about 14.5k to about 140k executions/second. Parallel CPU
+utilization remained about 782% out of 800%.
+
+The headline improvement combines two layers: prefix-resuming SCP replay and
+shared envelope payloads in stellar-core, plus masked FIFO tiebreaking, cheaper
+restriction/revisit paths, CSR PORF adjacency, flat vector clocks, and reusable
+scratch storage in the engine. Throughput measurements are machine-sensitive;
+the execution-count fingerprint is not and must remain exact.
+
 ## Verification in this workspace
 
-Verified directly in this tree after rebasing onto `4c0d88c75` (upstream
-post-CAP-0083-ungating master), with a clean reconfigure and rebuild:
+The build shape was verified with a clean reconfigure after rebasing onto
+`4c0d88c75` (upstream post-CAP-0083-ungating master). The runtime suites and
+execution fingerprint were rerun at `4c89f7a03` with the optimized `5f48e8b`
+engine:
 
 - `./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20`
   (no next-protocol flag), `make clean`, `make -C lib`, then
@@ -380,9 +414,14 @@ post-CAP-0083-ungating master), with a clean reconfigure and rebuild:
   `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`, contain no
   `-DCAP_0083` anywhere in the build, and pick up master's new global
   `-DXDRPP_STRONG_ORDER=1`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 238
-  assertions in 41 test cases (233 in 40 before adding the blocked-depth
-  regression test described below; the rebase itself changed neither).
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 246
+  assertions in 42 test cases.
+- `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,931 assertions in
+  52 test cases.
+- The standalone DPOR suite passed 279/279 tests in the current engine
+  checkout, including the follow-up sparse ordered-import regressions.
+- `./src/scp/test/bench-dpor.sh check` reproduced the complete 13-scenario
+  execution-count fingerprint exactly.
 - `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
   reported
   `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.

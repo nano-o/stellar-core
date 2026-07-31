@@ -78,6 +78,11 @@ The JSON trace therefore preserves the exact per-thread observed-value input
 needed for debugger-oriented replay without encoding DPOR reads-from edges or
 global insertion order.
 
+Consequently this format does not import `ExecutionGraphT` event ids and does
+not call the engine's `add_event_with_index()` API. That API's monotonic
+per-thread index requirement protects low-level graph importers but does not
+change the version-4 SCP trace schema or ordinary model-checking replay.
+
 Replay defaults to the stored `focus_node_index`. `--replay-node N` overrides
 that to one node, and `--replay-node all` replays every node in focus-first
 order.
@@ -145,7 +150,7 @@ Also, thread 0's single observed envelope in the default terminal trace is not
 the first nomination emitted by a peer. It is already a later peer `NOMINATE`
 that reflects earlier off-screen work.
 
-## Replay Support: Baselines, Cache, And Choice Decoding
+## Replay Support: Baselines, Prefix Cursors, And Choice Decoding
 
 `ScpDporReplaySupport` uses three mechanisms for managing replay state.
 
@@ -177,20 +182,58 @@ configuration rather than mutable replay state. Loading a version-4 bundle
 reconstructs those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.
+Each snapshot receives a content identity that is preserved by copies. A
+`DporScpNode` uses that identity to reuse the immutable SCP value and envelope
+wrappers built for repeated restores of the same baseline. The identity is a
+counter rather than a baseline address because baselines are copied and moved;
+equal snapshot copies must share the cache key even when their addresses do
+not.
 
-### 2. Thread-Local Cached Nodes
+### 2. Thread-Local Prefix-Resume Cache
 
-`acquireNode()` keeps a thread-local cache of live `DporScpNode` objects,
-keyed by:
+Exploration calls `acquireReplayState(nodeIndex, trace, step)`, which keeps a
+thread-local bucket of partially replayed `DporScpNode` objects for each
+validator. Each `ScpDporReplaySupport` construction or copy has a distinct
+generation, so stale cache entries cannot be reused by a later scenario even
+if an object address is recycled.
 
-- `ScpDporReplaySupport*`
-- `nodeIndex`
+Each cache entry contains a node and a `ReplayCursor`. A valid cursor records:
 
-The cache is only a performance optimization. It avoids reconstructing a fresh
-`DporScpNode` object graph for every replay query.
+- the exact observed trace prefix already consumed
+- the pending-send vector and its next unread position
+- the DPOR event count reached by that prefix
+- the currently selected timer, if any
+- the event label published at the stopping step
 
-The cached node is not trusted to hold the correct replay state between calls.
-Before use, callers restore it back to the appropriate stored baseline.
+`mValid` is the sole resume certificate. When it is true, the node state is
+exactly the stored baseline plus `mConsumedTrace`, and all scenario-loop fields
+in the cursor describe that same point. When it is false, the cache makes no
+claim about the node and will not resume it.
+
+The cache selects the valid entry with the longest consumed prefix that the
+incoming trace extends and that has not passed `step`. Replay continues from
+there instead of restoring the baseline and replaying the whole trace. If the
+previous call stopped at exactly the requested step, its memoized label is
+returned directly. Depth-first siblings commonly share such prefixes, so this
+changes repeated thread-function evaluation from quadratic replay toward the
+amount of newly appended trace work.
+
+Up to 64 entries are retained per validator per worker thread. If no prefix
+matches, a new entry is allocated until that limit; after that, the
+least-recently-used entry is invalidated and restored to the baseline. The
+limit is only a performance policy and does not change replay semantics.
+
+`captureNextEvent()` invalidates the selected cursor before advancing it and
+marks it valid only at a publish point. Every published send, receive, timer
+choice, completion, or error label depends only on the consumed prefix, never
+on the unconsumed trace suffix. If replay discovers a new nondeterministic
+choice part-way through an envelope, or throws before reaching a publish
+point, the node is mid-step and the cursor remains invalid. The next call must
+therefore restore a baseline rather than resume that partial state.
+
+Inspection paths still use `acquireNode()`, clear the current thread's cache,
+and restore the requested baseline explicitly. Prefix cursors are an
+exploration optimization, not persisted replay data.
 
 ### 3. Upfront Choice Decoding
 
@@ -245,13 +288,21 @@ upfront choice decoding, which avoids the snapshot/restore cost entirely.
 
 They are side effects of finishing the current SCP step:
 
-- `emitEnvelope()` records the emitted envelope, and the scenario later turns
-  pending envelopes into future DPOR send events
+- `emitEnvelope()` always updates boundary/download state and queues the
+  envelope for the scenario to turn into future DPOR send events
 - `setupTimer()` records timer state, and the scenario later exposes enabled
   timers as future timer-choice / timer-firing behavior
 
 They do not require the current step to suspend and ask DPOR for a new choice.
 That is why they do not need the exception mechanism.
+
+The separate emitted-envelope history is not read by exploration, so
+`captureNextEvent()` disables recording it to avoid deep-copying every emitted
+envelope. Replay inspection, boundary inspection, and other diagnostic paths
+re-enable the history before restoring and running a node. Replay-debug events
+are likewise constructed only while debug recording is enabled. Neither
+optimization suppresses pending sends, boundary detection, download-success
+tracking, or timer state.
 
 ## On Modeling Txset Choices As DPOR Choices
 
@@ -272,9 +323,13 @@ replays the event with the choice preloaded.
 The simplest way to think about the current replay loop is:
 
 - stored baselines define the starting point for replay
-- cached nodes are reusable scratch objects
+- valid prefix cursors certify the exact state of cached nodes and allow replay
+  to resume from the longest matching trace prefix
+- labels memoized at a cursor's stopping step depend only on that consumed
+  prefix
 - before replaying an observed event, known txset choices from the trace are
   decoded and preloaded into the node
 - if replay discovers a new txset choice mid-step, the node throws an
-  exception and replay returns a pending DPOR event; on the next call the
-  choice is in the trace and gets preloaded upfront
+  exception and replay returns a pending DPOR event while leaving the cursor
+  invalid; on the next call the choice is in the trace, the node is restored,
+  and the choice gets preloaded upfront

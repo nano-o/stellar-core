@@ -22,8 +22,9 @@ several configurable parameters.
 The scenario runs 3 nodes by default with a 2-out-of-3 qset. Using
 `--nodes 4` switches to 4 nodes and a 3-out-of-4 qset.
 
-The scenario assume the empty-txset feature (CAP 83) is on, and the
-build enforces this.
+The scenario assumes empty-txset support (CAP 83). That support is
+unconditional on current `master`; there is no separate DPOR feature define or
+next-protocol configure requirement.
 
 The scenario explores SCP behavior in a single slot (slot `0`). It
 starts each node by calling `SCP::nominate()` and then lets the slot
@@ -179,8 +180,10 @@ harness:
 
 - `emitEnvelope(...)`
 
-  Records the native envelope, detects configured stopping boundaries,
-  and queues it for the scenario to fan out as later DPOR send events.
+  Detects configured stopping boundaries and queues the native envelope for
+  the scenario to fan out as later DPOR send events. Inspection and replay
+  paths also record an emitted-envelope history; ordinary exploration disables
+  that separate history because it never reads it.
 
 - `setupTimer(...)`, `stopTimer(...)`
 
@@ -276,8 +279,11 @@ The possible events are:
 
   A modeled node sends an exact `SCPEnvelope` to one other node. The
   payload is a `ScpDporValue` of kind
-  `ScpDporValue::Kind::Envelope`. Broadcasting one native
-  envelope therefore produces one send event per receiving node.
+  `ScpDporValue::Kind::Envelope`. Broadcasting one native envelope therefore
+  produces one send event per receiving node, but those values share one
+  immutable in-memory envelope payload and its precomputed content digest.
+  This representation does not change equality, ordering, hashing, or the XDR
+  stored in a version-4 trace.
 
 - Receive (`ReceiveLabel`)
 
@@ -315,3 +321,35 @@ Initial nomination, `SCPDriver::emitEnvelope(...)`, and timer
 installation are not themselves DPOR events. They update the saved or
 replayed node state; the scenario subsequently exposes their effects as
 send, receive, or choice events.
+
+## Correctness fingerprint and benchmarking
+
+[`src/scp/test/bench-dpor.sh`](../src/scp/test/bench-dpor.sh) drives the
+repeatable investigation workloads and can be invoked from any directory:
+
+```bash
+./src/scp/test/bench-dpor.sh check
+./src/scp/test/bench-dpor.sh bench
+./src/scp/test/bench-dpor.sh head
+```
+
+- `check` prints exact final execution counts for 13 scenarios. Treat its
+  complete output as a semantic fingerprint: a performance-only change must
+  not alter any line.
+- `bench` times four terminating scenarios and reports the best of three runs.
+- `head` time-boxes the three-node FIFO externalize workload and reports its
+  steady-window and overall execution rates.
+
+The script defaults to `src/scp-dpor-investigation`, eight workers, and a
+60-second `head` window. Use `BIN` for an out-of-tree binary, `W` to replace
+the worker arguments, and `SECS` to change the `head` duration. It exits
+nonzero if any scenario process fails, including a `head` run that emits no
+progress sample.
+
+Final summary counts are exact even when parallel progress lines say
+`counts_exact=false`. Performance measurements are noisier: compare old and
+new binaries back to back in one session, preferably on terminating workloads.
+On the shared `pop-os-desktop` host, differences below 20% are noise.
+
+The optional restriction-based oracle for the masked FIFO tiebreaker is
+documented in [`dpor-build.md`](./dpor-build.md#differentially-checking-the-masked-fifo-tiebreaker).

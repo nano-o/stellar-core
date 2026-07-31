@@ -44,7 +44,7 @@ git submodule update --init --recursive
 
 # Configure with DPOR enabled (post-CAP-0083 target — see "Build target" above)
 ./autogen.sh
-./configure --enable-dpor CC=clang-20 CXX=clang++-20
+./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20
 
 # Build library dependencies first (required on a clean tree)
 make -C lib -j"$(nproc)"
@@ -75,18 +75,85 @@ The output should begin with a space. A leading `+` means the checkout is at a
 different commit; rerun `git submodule update --init external/dpor` to restore
 the pinned revision.
 
-## Building with Namespace-backed sccache
+## Correctness and performance harness
 
-To cache the normal C/C++ object graph, the DPOR-specific C++20 objects, and
-Rust compilation, authenticate `nsc` and confirm that the `sccache` selected
-from `PATH` has WebDAV support:
+[`src/scp/test/bench-dpor.sh`](../src/scp/test/bench-dpor.sh) is runnable from
+any directory and defaults to the in-tree `src/scp-dpor-investigation` binary.
+Set `BIN=/path/to/scp-dpor-investigation` for an out-of-tree build.
+
+```bash
+# Exact final counts for 13 scenarios. Performance-only changes must not alter
+# any output line.
+./src/scp/test/bench-dpor.sh check
+
+# Best-of-three wall-clock timings for four terminating workloads.
+./src/scp/test/bench-dpor.sh bench
+
+# Time-boxed throughput for the headline externalize workload.
+./src/scp/test/bench-dpor.sh head
+```
+
+The script exits nonzero if any scenario process fails. The `check` output is a
+correctness fingerprint, so it has no tolerance: compare it byte-for-byte with
+a known-good run. Timing is different. Measure old and new binaries back to
+back in the same session and use several runs; on the shared
+`pop-os-desktop` host, differences below 20% are noise.
+
+### Differentially checking the masked FIFO tiebreaker
+
+The engine retains its previous restriction-based FIFO tiebreaker as a debug
+oracle. Defining `DPOR_VERIFY_MASKED_TIEBREAKER` makes every masked verdict
+cross-check that reference implementation. The mode costs roughly 2.2x and
+must never be left in the default `DPOR_CXXFLAGS`.
+
+Configure a temporary verification build with the complete normal flag set
+plus the define:
+
+```bash
+DPOR_CXXFLAGS='-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING -DDPOR_VERIFY_MASKED_TIEBREAKER' \
+  ./configure --enable-dpor --enable-nsc-sccache \
+  CC=clang-20 CXX=clang++-20
+
+# Automake does not notice a target-flag-only change reliably.
+touch external/dpor/include/dpor/algo/dpor.hpp
+make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
+
+# Confirm that the reference template was instantiated in the binary.
+nm -C src/scp-dpor-investigation | grep via_restriction
+./src/scp/test/bench-dpor.sh check
+```
+
+After the differential run, reconfigure without the define, touch `dpor.hpp`
+again, and rebuild both DPOR binaries. Confirm that `DPOR_CXXFLAGS` in the
+generated Makefiles no longer contains `DPOR_VERIFY_MASKED_TIEBREAKER`; do not
+reuse the verification binary for normal measurements.
+
+### Checking execution-graph insertion invariants
+
+`DPOR_VERIFY_GRAPH_INVARIANTS` verifies the preconditions of the
+execution-graph append hot path — thread storage present, event index unused,
+event index not preceding the thread's last one. The engine's own CMake build
+enables it by default, but this repository never does: `configure.ac` does not
+define `NDEBUG`, so anything wired to a plain `assert` would run in these `-O2`
+binaries, and one of these checks is the used-index probe the append path
+exists to avoid. Enable it the same way as the tiebreaker oracle, touching
+`external/dpor/include/dpor/model/execution_graph.hpp` instead of `dpor.hpp`,
+when changing insertion or replay/import code. Leave it out of the default
+`DPOR_CXXFLAGS`.
+
+## Compiler cache: always use Namespace-backed sccache
+
+Pass `--enable-nsc-sccache` to every configure invocation in this repository,
+including in-tree and out-of-tree DPOR builds. To cache the normal C/C++ object
+graph, the DPOR-specific C++20 objects, and Rust compilation, authenticate
+`nsc` and confirm that the `sccache` selected from `PATH` has WebDAV support:
 
 ```bash
 nsc auth check-login
 sccache --help | sed -n '/Enabled features:/,$p'
 ```
 
-Then add `--enable-nsc-sccache` when configuring:
+Then configure with `--enable-nsc-sccache`:
 
 ```bash
 ./autogen.sh
@@ -109,7 +176,8 @@ directory to keep the source tree clean:
 
 ```bash
 mkdir -p /path/to/build && cd /path/to/build
-/path/to/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
+/path/to/stellar-core/configure --enable-dpor --enable-nsc-sccache \
+  CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
