@@ -3,38 +3,35 @@
 DPOR is an opt-in, test-only build target for SCP model-checking. It requires
 C++20 and an external header-only dependency.
 
-## Build target: post-CAP-0083 only
+## Build target: post-CAP-0083 (now just `master`)
 
-The DPOR build targets post-CAP-0083 (empty-tx-set) `stellar-core` only, so
-every `configure` invocation below includes
-`--enable-next-protocol-version-unsafe-for-production`. That flag defines
-`CAP_0083` in the **global** `AM_CPPFLAGS`, which compiles in the empty-tx-set
-code path and — critically — keeps the DPOR-rebuilt SCP subset and the linked
-non-DPOR objects agreeing on the `SCPDriver` vtable layout. Never add
-`-DCAP_0083` to the DPOR target flags alone: that produces a silent vtable/ODR
-mismatch, not a build error. See
-[`dpor-integration-status.md`](./dpor-integration-status.md) for the rationale.
+The DPOR build targets post-CAP-0083 (empty-tx-set) `stellar-core`. Upstream's
+"Ungate CAP-0083 and CAP-0085, bump to protocol 28" (#5397) made that the
+default: `CAP_0083` no longer exists as an automake conditional or a
+preprocessor define, the `#ifdef CAP_0083` guards are gone from the SCP and
+herder sources, and empty-tx-set support is compiled in unconditionally.
 
-Because this flag changes both preprocessor defines and generated XDR, turn it
-on (or off) with a clean rebuild — run `make clean` first; an incremental
-`make` will not reliably pick up the change.
+Consequently `--enable-dpor` **no longer requires**
+`--enable-next-protocol-version-unsafe-for-production`, and `configure` no
+longer enforces that pairing. The flag still exists but now only selects
+Soroban `next` features; it is orthogonal to DPOR, and the `configure`
+invocations below omit it.
 
-`configure` enforces this build contract: `--enable-dpor` without
-`--enable-next-protocol-version-unsafe-for-production` fails with a direct
-configuration error. The fast-development profile also satisfies the
-requirement because it enables the next protocol version before the check.
+> **Historical note.** While `CAP_0083` was a real define it had to live in the
+> **global** `AM_CPPFLAGS` and never in the DPOR target flags alone, because it
+> changed the `SCPDriver` vtable layout while the DPOR binaries link non-DPOR
+> objects from the normal build — a DPOR-only `-DCAP_0083` produced a silent
+> vtable/ODR mismatch rather than a build error. That rule still governs any
+> **future** protocol define that touches the `SCPDriver` vtable, and toggling
+> such a define still warrants a clean rebuild (`make clean` first), since an
+> incremental `make` will not reliably pick up a define or generated-XDR change.
+> See [`dpor-integration-status.md`](./dpor-integration-status.md).
 
-> **This recipe is expected to change as stellar-core development
-> progresses.** The empty-tx-set feature is gated behind the "next protocol
-> version" switch only until that protocol version ships. Once it is released,
-> `CAP_0083` stops living behind
-> `--enable-next-protocol-version-unsafe-for-production` (it becomes always-on
-> and the `CAP_0083` conditional may be retired), while that flag advances to a
-> still-newer protocol version. The build-flag layout also shifts periodically
-> on its own (e.g. the recent addition of
-> `--enable-fastdev-unsafe-for-production`). Re-check the flag and update these
-> docs when the empty-tx-set protocol version is released or the flag layout
-> changes again.
+> **This recipe is still expected to drift as stellar-core develops.** The
+> build-flag layout shifts periodically on its own (e.g. the addition of
+> `--enable-fastdev-unsafe-for-production`, and this CAP-0083 ungating).
+> Re-check the flags and update these docs whenever a protocol version ships
+> or the flag layout changes again.
 
 ## Quick start
 
@@ -44,9 +41,7 @@ git submodule update --init --recursive
 
 # Configure with DPOR enabled (post-CAP-0083 target — see "Build target" above)
 ./autogen.sh
-./configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
-  CC=clang-20 CXX=clang++-20
+./configure --enable-dpor CC=clang-20 CXX=clang++-20
 
 # Build library dependencies first (required on a clean tree)
 make -C lib -j"$(nproc)"
@@ -93,7 +88,6 @@ Then add `--enable-nsc-sccache` when configuring:
 ```bash
 ./autogen.sh
 ./configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
   --enable-nsc-sccache \
   CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
@@ -112,9 +106,7 @@ directory to keep the source tree clean:
 
 ```bash
 mkdir -p /path/to/build && cd /path/to/build
-/path/to/stellar-core/configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
-  CC=clang-20 CXX=clang++-20
+/path/to/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```

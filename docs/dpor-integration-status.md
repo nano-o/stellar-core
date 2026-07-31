@@ -1,19 +1,20 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-07-30 for branch `dpor-on-master`, based on
-upstream `master` (`f8b9c6eb2`, which includes the merged CAP-0083
-empty-tx-set feature), against DPOR library commit `d2c06e7` (functionally
-identical to the `b238b19` pin previously recorded here; the commits in
-between are comment/doc-only).
+Status snapshot as of 2026-07-30 for branch `dpor-on-master`, rebased onto
+upstream `master` (`4c0d88c75`), against DPOR library commit `d2c06e7`
+(functionally identical to the `b238b19` pin previously recorded here; the
+commits in between are comment/doc-only).
 
-The DPOR build now targets **post-CAP-0083 (empty-tx-set) `stellar-core`
-only**. It must be configured with
-`--enable-next-protocol-version-unsafe-for-production` so that `CAP_0083` is
-defined globally and the empty-tx-set code path is compiled in. The earlier
-pre-CAP-0083 build shape (with `CAP_0083` compiled out) is no longer a
-supported configuration. The scenario layer models CAP-0083 timeout
-replacement and keeps outright SCP-value invalidity separate from txset
-status.
+The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
+is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
+protocol 28" (#5397) removed the `CAP_0083` automake conditional, the
+`-DCAP_0083` define, and every `#ifdef CAP_0083` guard, so the empty-tx-set
+code path is compiled in unconditionally. `--enable-dpor` therefore no longer
+requires `--enable-next-protocol-version-unsafe-for-production`, and
+`configure` no longer enforces that pairing; the pre-CAP-0083 build shape is
+not merely unsupported but no longer expressible. The scenario layer models
+CAP-0083 timeout replacement and keeps outright SCP-value invalidity separate
+from txset status.
 
 This branch is the port of the DPOR work from `skip-ledgers-p26-dpor` onto
 master. The old branch's 18 skip-ledgers feature commits were dropped
@@ -21,9 +22,10 @@ master. The old branch's 18 skip-ledgers feature commits were dropped
 port adapted the harness to master's renamed driver API:
 
 - `makeSkipLedgerValueFromValue` / `isSkipLedgerValue` became
-  `makeEmptyTxSetValueFromValue` (only present under `#ifdef CAP_0083`,
-  mirroring `SCPDriver.h`) and `isEmptyTxSetValue`, with an `EMPTY:` payload
-  prefix in `DporScpNode`.
+  `makeEmptyTxSetValueFromValue` and `isEmptyTxSetValue`, with an `EMPTY:`
+  payload prefix in `DporScpNode`. Both are now unconditional pure virtuals in
+  `SCPDriver.h`; the `#ifdef CAP_0083` that once wrapped the first one was
+  removed when upstream ungated CAP-0083.
 - `SCPDriver::validateValue` lost the old branch's `ValidationExtraInfo`
   out-parameter, and the `kAwaitingDownload` validation level is now
   `kStructurallyValidValue` (same ordinal and semantics).
@@ -42,19 +44,17 @@ port adapted the harness to master's renamed driver API:
   SCP's `releaseAssert(protocolAllowsEmptyTxSetValues())` fire
   deterministically once a ballot envelope validates as only structurally
   valid. Normal scenarios do not expose or toggle this fault.
-- Build target: the DPOR build targets post-CAP-0083 `stellar-core` only and
-  is configured with `--enable-next-protocol-version-unsafe-for-production`,
-  which defines `CAP_0083` globally. With `CAP_0083` defined,
-  `BallotProtocol::maybeReplaceValueWithEmptyTxSet` and the rest of the
-  empty-tx-set path are compiled in rather than stubbed out. `CAP_0083` must
-  stay global: the DPOR binaries link non-DPOR objects from the normal build,
-  and `CAP_0083` changes the `SCPDriver` vtable layout, so a
-  DPOR-target-only `-DCAP_0083` would produce a silent vtable/ODR mismatch,
-  not a build error. The configure flag routes the define through the global
-  `AM_CPPFLAGS`, which the DPOR targets inherit
-  (`..._CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)`), keeping the rebuilt SCP
-  subset and the linked objects consistent. Do not hand-add `-DCAP_0083` to
-  `DPOR_CXXFLAGS`.
+- Build target: the DPOR build targets post-CAP-0083 `stellar-core`, which is
+  now plain `master` — `BallotProtocol::maybeReplaceValueWithEmptyTxSet` and
+  the rest of the empty-tx-set path are compiled in unconditionally, with no
+  configure flag required. The invariant that motivated the old
+  `--enable-next-protocol-version-unsafe-for-production` requirement still
+  applies to any **future** protocol define that alters the `SCPDriver` vtable:
+  it must be routed through the global `AM_CPPFLAGS`, which the DPOR targets
+  inherit (`..._CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)`), and never added
+  to `DPOR_CXXFLAGS` alone. The DPOR binaries link non-DPOR objects from the
+  normal build, so a DPOR-target-only vtable-affecting define produces a silent
+  vtable/ODR mismatch rather than a build error.
 
 This note describes how DPOR is currently integrated into `stellar-core`. The
 short version is that DPOR now exists as an opt-in SCP-only build island with
@@ -90,15 +90,13 @@ library or harness errors.
 - `external/dpor` is a submodule pinned to CPP-DPOR commit `d2c06e7`. The
   `--with-dpor-dir` override remains available for development against another
   checkout.
-- Configure rejects `--enable-dpor` unless the next-protocol option is active,
-  enforcing the post-CAP-0083 vtable/build contract.
-- The required configure invocation for the DPOR build (post-CAP-0083 target)
-  is:
+- Configure no longer couples `--enable-dpor` to the next-protocol option.
+  That check existed only to guarantee `CAP_0083` was defined; with CAP-0083
+  ungated upstream there is nothing left to enforce.
+- The configure invocation for the DPOR build is:
 
   ```bash
-  ./configure --enable-dpor \
-    --enable-next-protocol-version-unsafe-for-production \
-    CC=clang-20 CXX=clang++-20
+  ./configure --enable-dpor CC=clang-20 CXX=clang++-20
   ```
 - The checked-in build still requires tests to remain enabled.
   `--disable-tests --enable-dpor` errors out in `configure.ac`, and the DPOR
@@ -115,10 +113,11 @@ library or harness errors.
   because they are declared as `..._CPPFLAGS = $(AM_CPPFLAGS) $(DPOR_CPPFLAGS)`
   they also inherit the global `AM_CPPFLAGS`. DPOR's own flags are not added to
   global `AM_CPPFLAGS`, and no DPOR sources are added to
-  `stellar_core_SOURCES`. `CAP_0083` is deliberately the exception: it is a
-  whole-build feature define that lives in global `AM_CPPFLAGS` (via the
-  configure flag) precisely so the DPOR and non-DPOR objects agree on the
-  `SCPDriver` vtable.
+  `stellar_core_SOURCES`. Whole-build feature defines that affect the
+  `SCPDriver` vtable are the deliberate exception to that isolation: they must
+  live in global `AM_CPPFLAGS` precisely so the DPOR and non-DPOR objects
+  agree on the vtable. `CAP_0083` used to be one; upstream has since ungated
+  it, so there is currently no such define in play.
 - The DPOR binaries rebuild a small SCP subset under C++20
   (`BallotProtocol.cpp`, `LocalNode.cpp`, `NominationProtocol.cpp`,
   `QuorumSetUtils.cpp`, `SCP.cpp`, `SCPDriver.cpp`, and `Slot.cpp`) and link
@@ -159,7 +158,6 @@ Then configure and build:
 ```bash
 ./autogen.sh
 ./configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
   --enable-nsc-sccache \
   CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"

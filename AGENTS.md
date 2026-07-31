@@ -54,24 +54,30 @@ Key files:
   sources into `SRC_CXX_FILES`, `SRC_TEST_CXX_FILES`, etc.
 - `common.mk` — shared `AM_CPPFLAGS` and `AM_CXXFLAGS`
 
-The project is **C++17** (`AX_CXX_COMPILE_STDCXX(17)` in configure.ac bakes
-`-std=c++17` into `CXX`). DPOR requires **C++20**. DPOR targets must use
-per-target flags exported via `DPOR_CXXFLAGS` to override the baseline. Unless
-a local build proves otherwise, `DPOR_CXXFLAGS` should include
-`-std=c++20 -DFMT_CONSTEVAL=`. The `-DFMT_CONSTEVAL=` workaround is required
-because the vendored fmt/spdlog headers are not currently safe under C++20
-without it.
+The project is **C++20** (`AX_CXX_COMPILE_STDCXX(20, noext, mandatory)` in
+configure.ac bakes `-std=c++20` into `CXX`), which is the standard DPOR
+requires anyway. DPOR targets still carry their own flags via `DPOR_CXXFLAGS`,
+defaulting to `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`. The
+`-std=c++20` is now redundant with the baseline but harmless; the
+`-DFMT_CONSTEVAL=` workaround is still required because the vendored
+fmt/spdlog headers are not safe under C++20 without it.
 
-The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core` only**.
-Configure it with `--enable-next-protocol-version-unsafe-for-production`, which
-defines `CAP_0083` in the global `AM_CPPFLAGS`. `CAP_0083` must stay global
-(never a DPOR-target-only flag): it changes the `SCPDriver` vtable layout, and
-the DPOR binaries link non-DPOR objects from the normal build, so a DPOR-only
-define would silently corrupt the vtable rather than fail to build. Do not add
-`-DCAP_0083` to `DPOR_CXXFLAGS`. Toggling this flag needs a clean rebuild
-(`make clean` first). See [docs/dpor-build.md](docs/dpor-build.md) and
+The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
+since upstream's "Ungate CAP-0083 and CAP-0085, bump to protocol 28" (#5397) is
+just plain `master`. `CAP_0083` no longer exists as an automake conditional or
+a preprocessor define and empty-tx-set support is unconditional, so
+`--enable-dpor` **no longer requires**
+`--enable-next-protocol-version-unsafe-for-production`. That flag now only
+selects Soroban `next` features and is orthogonal to DPOR.
+
+The rule that flag existed to enforce still applies to any future protocol
+define that alters the `SCPDriver` vtable: it must stay global in
+`AM_CPPFLAGS` and never become a DPOR-target-only flag, because the DPOR
+binaries link non-DPOR objects from the normal build, so a DPOR-only define
+would silently corrupt the vtable rather than fail to build. Toggling such a
+flag needs a clean rebuild (`make clean` first). See
+[docs/dpor-build.md](docs/dpor-build.md) and
 [docs/dpor-integration-status.md](docs/dpor-integration-status.md) for details.
-(The scenario/code layer has not yet been updated for this target.)
 
 Normal build:
 ```bash
@@ -88,9 +94,7 @@ Current DPOR build workflow:
 ```bash
 git submodule update --init --recursive
 ./autogen.sh
-./configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
-  CC=clang-20 CXX=clang++-20
+./configure --enable-dpor CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
@@ -200,9 +204,7 @@ make -j"$(nproc)"
 Out-of-tree DPOR build:
 ```bash
 cd /home/dev/stellar-core-build
-/home/dev/stellar-core/configure --enable-dpor \
-  --enable-next-protocol-version-unsafe-for-production \
-  CC=clang-20 CXX=clang++-20
+/home/dev/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```

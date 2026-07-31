@@ -397,6 +397,15 @@ Add replay assertions that:
 
 ## Build-Contract Hardening
 
+> **Superseded.** This section was carried out as written, and then undone by
+> upstream: "Ungate CAP-0083 and CAP-0085, bump to protocol 28" (#5397)
+> retired the `CAP_0083` conditional and define entirely, so the configure
+> check described below had nothing left to guard and was removed. Kept for
+> historical context. See
+> [`dpor-build.md`](./dpor-build.md) and
+> [`dpor-integration-status.md`](./dpor-integration-status.md) for the current
+> build contract.
+
 Update `configure.ac` after parsing the next-protocol option.
 
 Reject `--enable-dpor` unless
