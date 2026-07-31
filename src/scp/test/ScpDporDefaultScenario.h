@@ -322,6 +322,7 @@ class ScpDporDefaultScenario
         ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
 
         auto& node = mReplaySupport.acquireNode(nodeIndex);
+        node.setEmittedEnvelopeRecordingEnabled(true);
         struct ReplayDebugRecordingGuard
         {
             DporScpNode& mNode;
@@ -645,6 +646,9 @@ class ScpDporDefaultScenario
     fanOutEnvelope(std::vector<SendLabel>& pendingSends,
                    std::size_t senderIndex, SCPEnvelope const& envelope) const
     {
+        // One shared payload for every receiver: the fan-out copies only a
+        // refcount instead of deep-copying the envelope per destination.
+        auto const value = makeEnvelopeValue(mOptions.mSlotIndex, envelope);
         for (std::size_t receiverIndex = 0;
              receiverIndex < mOptions.mValidators.size(); ++receiverIndex)
         {
@@ -652,9 +656,9 @@ class ScpDporDefaultScenario
             {
                 continue;
             }
-            pendingSends.push_back(SendLabel{
-                .destination = threadIdForNodeIndex(receiverIndex),
-                .value = makeEnvelopeValue(mOptions.mSlotIndex, envelope)});
+            pendingSends.push_back(
+                SendLabel{.destination = threadIdForNodeIndex(receiverIndex),
+                          .value = value});
         }
     }
 
@@ -742,6 +746,7 @@ class ScpDporDefaultScenario
         ScpDporReplaySupport::clearThreadLocalCacheForCurrentThread();
 
         auto& node = mReplaySupport.acquireNode(nodeIndex);
+        node.setEmittedEnvelopeRecordingEnabled(true);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
         std::optional<int> selectedTimerID;
@@ -803,40 +808,65 @@ class ScpDporDefaultScenario
         return inspection;
     }
 
+    // Every label this returns is a function of the node state reached by
+    // consuming `trace[0, observedCount)` only -- never of the trace beyond
+    // that point -- which is what makes both the resume and the memo below
+    // sound. The one exception is the nondeterministic-choice event surfaced
+    // by `replayObservation`, which is raised from inside a partially applied
+    // envelope; that path deliberately leaves the cursor invalid.
     std::optional<EventLabel>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,
                      std::size_t step) const
     {
-        auto& node = mReplaySupport.acquireNode(nodeIndex);
-        mReplaySupport.restoreBaseline(node, nodeIndex);
+        // A valid cursor here is guaranteed to have consumed a prefix of
+        // `trace` and to have stopped at or before `step`.
+        auto replayState =
+            mReplaySupport.acquireReplayState(nodeIndex, trace, step);
+        auto& node = replayState.mNode;
+        auto& cursor = replayState.mCursor;
+        node.setEmittedEnvelopeRecordingEnabled(false);
 
-        auto pendingSends =
-            mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
-        std::size_t nextPendingSend = 0;
-        std::size_t eventCount = 0;
-        std::size_t observedCount = 0;
-        std::optional<int> selectedTimerID;
+        if (cursor.mValid && cursor.mEventCount == step)
+        {
+            return cursor.mLabel;
+        }
+
+        if (!cursor.mValid)
+        {
+            mReplaySupport.restoreBaseline(node, nodeIndex);
+            cursor.reset(mScenarioBaselines.at(nodeIndex).mInitialPendingSends);
+        }
+        cursor.mValid = false;
+
+        auto const publish =
+            [&cursor](std::optional<EventLabel> label)
+            -> std::optional<EventLabel> {
+            cursor.mLabel = std::move(label);
+            cursor.mValid = true;
+            return cursor.mLabel;
+        };
 
         while (true)
         {
-            if (nextPendingSend < pendingSends.size())
+            if (cursor.mNextPendingSend < cursor.mPendingSends.size())
             {
-                auto nextSend = EventLabel{pendingSends.at(nextPendingSend++)};
-                if (eventCount == step)
+                if (cursor.mEventCount == step)
                 {
-                    return nextSend;
+                    return publish(EventLabel{
+                        cursor.mPendingSends.at(cursor.mNextPendingSend)});
                 }
-                ++eventCount;
+                ++cursor.mNextPendingSend;
+                ++cursor.mEventCount;
                 continue;
             }
 
             if (node.hasReachedBoundary())
             {
-                return std::nullopt;
+                return publish(std::nullopt);
             }
 
             auto const activeTimers = enabledTimerIDs(node);
-            if (!selectedTimerID && activeTimers.size() > 1)
+            if (!cursor.mSelectedTimerID && activeTimers.size() > 1)
             {
                 std::vector<ScpDporValue> choices;
                 choices.reserve(activeTimers.size());
@@ -846,14 +876,15 @@ class ScpDporDefaultScenario
                         makeTimerChoiceValue(mOptions.mSlotIndex, timerID));
                 }
 
-                if (eventCount == step)
+                if (cursor.mEventCount == step)
                 {
-                    return EventLabel{NondeterministicChoiceLabel{
+                    return publish(EventLabel{NondeterministicChoiceLabel{
                         .value = choices.front(),
-                        .choices = std::move(choices)}};
+                        .choices = std::move(choices)}});
                 }
-                ++eventCount;
+                ++cursor.mEventCount;
 
+                auto const observedCount = cursor.mConsumedTrace.size();
                 if (observedCount >= trace.size() ||
                     trace.at(observedCount).is_bottom())
                 {
@@ -874,22 +905,22 @@ class ScpDporDefaultScenario
                     throw std::logic_error(
                         "trace selected a timer that is not active");
                 }
-                selectedTimerID = timerID;
-                ++observedCount;
+                cursor.mSelectedTimerID = timerID;
+                cursor.consume(trace.at(observedCount));
                 continue;
             }
 
             auto const nonBlocking =
-                selectedTimerID.has_value() || activeTimers.size() == 1;
-            auto receiveEvent =
-                EventLabel{nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
-                                       : makeReceiveLabel(nodeIndex)};
-            if (eventCount == step)
+                cursor.mSelectedTimerID.has_value() || activeTimers.size() == 1;
+            if (cursor.mEventCount == step)
             {
-                return receiveEvent;
+                return publish(EventLabel{
+                    nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
+                                : makeReceiveLabel(nodeIndex)});
             }
-            ++eventCount;
+            ++cursor.mEventCount;
 
+            auto const observedCount = cursor.mConsumedTrace.size();
             if (observedCount >= trace.size())
             {
                 throw std::logic_error(
@@ -897,7 +928,7 @@ class ScpDporDefaultScenario
                     "requested step");
             }
 
-            auto timerToFire = selectedTimerID;
+            auto timerToFire = cursor.mSelectedTimerID;
             if (!timerToFire && activeTimers.size() == 1)
             {
                 timerToFire = activeTimers.front();
@@ -907,8 +938,11 @@ class ScpDporDefaultScenario
                 node, nodeIndex, trace, observedCount, timerToFire);
             if (replayed.mPendingEvent)
             {
-                eventCount += replayed.mConsumedStepCount;
-                if (eventCount == step)
+                // The node stopped part-way through an envelope, so the cursor
+                // cannot describe its state; leave it invalid so the next call
+                // replays from the baseline.
+                cursor.mEventCount += replayed.mConsumedStepCount;
+                if (cursor.mEventCount == step)
                 {
                     return replayed.mPendingEvent;
                 }
@@ -917,11 +951,14 @@ class ScpDporDefaultScenario
                     "requested step");
             }
 
-            observedCount += replayed.mConsumedTraceEntries;
-            eventCount += replayed.mConsumedStepCount;
-            queuePendingEnvelopeSends(pendingSends, node, nodeIndex);
+            for (std::size_t i = 0; i < replayed.mConsumedTraceEntries; ++i)
+            {
+                cursor.consume(trace.at(observedCount + i));
+            }
+            cursor.mEventCount += replayed.mConsumedStepCount;
+            queuePendingEnvelopeSends(cursor.mPendingSends, node, nodeIndex);
             updateSelectedTimerAfterObservation(node, replayed,
-                                                selectedTimerID);
+                                                cursor.mSelectedTimerID);
         }
     }
 

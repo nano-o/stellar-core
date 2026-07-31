@@ -170,6 +170,11 @@ class DporScpNode : public SCPDriver
 
     struct ReplayBaseline
     {
+        // Identity of the snapshot's contents, assigned by
+        // snapshotReplayBaseline(). Copies share it, because they are equal.
+        // Zero means "not produced by snapshotReplayBaseline", which suppresses
+        // the wrapped-form cache below.
+        uint64 mSnapshotId{0};
         std::optional<SlotStateSnapshot> mSlotState;
         std::vector<SCPEnvelope> mEmittedEnvelopes;
         std::vector<ReplayTimerSnapshot> mTimers;
@@ -251,6 +256,11 @@ class DporScpNode : public SCPDriver
     void enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
 
     void setReplayDebugRecordingEnabled(bool enabled);
+
+    // Exploration never reads the emitted-envelope log -- only the inspection
+    // and replay entry points do -- and appending to it deep-copies an envelope
+    // per emission. Callers that only need boundary state can switch it off.
+    void setEmittedEnvelopeRecordingEnabled(bool enabled);
 
     std::vector<ReplayDebugEvent> takeReplayDebugEvents();
 
@@ -385,11 +395,36 @@ class DporScpNode : public SCPDriver
     mutable std::map<Value, std::size_t>
         mTxSetDownloadWaitTimeCallCountsByValue;
     bool mReplayDebugRecordingEnabled{false};
+    bool mEmittedEnvelopeRecordingEnabled{true};
     mutable std::vector<ReplayDebugEvent> mReplayDebugEvents;
     std::optional<uint32_t> mNominationTimerSetLimit;
     std::optional<uint32_t> mBallotingTimerSetLimit;
 
+    // Restoring a baseline used to rebuild every SCP value/envelope wrapper it
+    // mentions, and a node restores the same baseline over and over during
+    // exploration. The wrappers are immutable, so they are built once per
+    // snapshot identity and reused.
+    struct WrappedBaseline
+    {
+        uint64 mSnapshotId{0};
+        ValueWrapperPtrSet mVotes;
+        ValueWrapperPtrSet mAccepted;
+        ValueWrapperPtrSet mCandidates;
+        std::set<NodeID> mRoundLeaders;
+        std::map<NodeID, SCPEnvelopeWrapperPtr> mLatestNominations;
+        std::map<NodeID, SCPEnvelopeWrapperPtr> mLatestEnvelopes;
+        SCPEnvelopeWrapperPtr mNominationLastEnvelope;
+        ValueWrapperPtr mLatestCompositeCandidate;
+        ValueWrapperPtr mValueOverride;
+        SCPEnvelopeWrapperPtr mBallotLastEnvelope;
+        SCPEnvelopeWrapperPtr mBallotLastEnvelopeEmit;
+    };
+
+    WrappedBaseline mWrappedBaseline;
+
     std::map<Hash, SCPQuorumSetPtr> mQuorumSets;
+    mutable Hash mLastQSetLookupHash{};
+    mutable SCPQuorumSetPtr mLastQSetLookup;
     std::vector<SCPEnvelope> mEmittedEnvelopes;
     std::vector<SCPEnvelope> mPendingEnvelopes;
     std::vector<TimerState> mTimers;

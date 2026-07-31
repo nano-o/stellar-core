@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -325,6 +326,26 @@ struct TraceJsonTempFile
 };
 
 } // namespace
+
+TEST_CASE("scp dpor value hashing agrees with equality on empty envelopes",
+          "[scp][dpor][smoke]")
+{
+    // A value with no shared payload compares equal to one carrying a
+    // default-constructed envelope, so it has to hash and order like one too.
+    ScpDporValue withoutPayload;
+    REQUIRE(withoutPayload.mKind == ScpDporValue::Kind::Envelope);
+    REQUIRE_FALSE(static_cast<bool>(withoutPayload.mEnvelope));
+
+    auto const withPayload = makeEnvelopeValue(0, SCPEnvelope{});
+    REQUIRE(static_cast<bool>(withPayload.mEnvelope));
+
+    REQUIRE(withoutPayload == withPayload);
+    REQUIRE(withoutPayload.envelopeDigest() == withPayload.envelopeDigest());
+    REQUIRE(std::hash<ScpDporValue>{}(withoutPayload) ==
+            std::hash<ScpDporValue>{}(withPayload));
+    REQUIRE_FALSE(withoutPayload < withPayload);
+    REQUIRE_FALSE(withPayload < withoutPayload);
+}
 
 TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
 {

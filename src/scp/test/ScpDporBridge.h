@@ -33,7 +33,7 @@ makeEnvelopeValue(uint64_t slotIndex, SCPEnvelope const& envelope)
     ScpDporValue value;
     value.mKind = ScpDporValue::Kind::Envelope;
     value.mSlotIndex = slotIndex;
-    value.mEnvelope = envelope;
+    value.mEnvelope = std::make_shared<ScpDporEnvelopePayload const>(envelope);
     return value;
 }
 
@@ -99,7 +99,7 @@ decodeEnvelope(ScpDporValue const& value)
     {
         throw std::logic_error("value does not encode an SCP envelope");
     }
-    return value.mEnvelope;
+    return value.envelope();
 }
 
 inline int
@@ -174,7 +174,7 @@ operator<<(std::ostream& out, ScpDporValue const& value)
     {
     case ScpDporValue::Kind::Envelope:
         return out << "env(slot=" << value.mSlotIndex << ", "
-                   << xdr::xdr_to_string(value.mEnvelope.statement, "statement")
+                   << xdr::xdr_to_string(value.envelope().statement, "statement")
                    << ")";
     case ScpDporValue::Kind::TimerChoice:
         return out << "timer(slot=" << value.mSlotIndex

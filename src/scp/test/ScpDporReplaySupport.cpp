@@ -4,7 +4,9 @@
 
 #include "scp/test/ScpDporReplaySupport.h"
 
+#include <algorithm>
 #include <atomic>
+#include <iterator>
 #include <vector>
 
 namespace stellar::scpdpor
@@ -20,18 +22,58 @@ nextReplaySupportGeneration()
     return ++generationCounter;
 }
 
+// Number of partially-replayed nodes kept per validator, per worker thread.
+// Depth-first exploration backtracks a few events at a time, so a handful of
+// slots captures almost all of the reuse; beyond that the per-call prefix scan
+// costs more than the replays it saves.
+constexpr std::size_t REPLAY_SLOTS_PER_NODE = 64;
+
 struct ReplayStateCacheEntry
 {
     uint64_t mGeneration{};
     std::size_t mNodeIndex{};
     std::unique_ptr<DporScpNode> mNode;
+    ScpDporReplaySupport::ReplayCursor mCursor;
+    uint64_t mLastUsed{0};
 };
 
-std::vector<ReplayStateCacheEntry>&
+uint64_t&
+threadLocalReplayClock()
+{
+    static thread_local uint64_t clock{0};
+    return clock;
+}
+
+// Slots are bucketed by validator index so selecting one only scans that
+// validator's slots rather than every cached node on the thread.
+struct NodeSlotBucket
+{
+    uint64_t mGeneration{0};
+    std::vector<ReplayStateCacheEntry> mSlots;
+};
+
+std::vector<NodeSlotBucket>&
 threadLocalReplayStateCache()
 {
-    static thread_local std::vector<ReplayStateCacheEntry> cache;
-    return cache;
+    static thread_local std::vector<NodeSlotBucket> buckets;
+    return buckets;
+}
+
+NodeSlotBucket&
+bucketFor(uint64_t generation, std::size_t nodeIndex)
+{
+    auto& buckets = threadLocalReplayStateCache();
+    if (nodeIndex >= buckets.size())
+    {
+        buckets.resize(nodeIndex + 1);
+    }
+    auto& bucket = buckets[nodeIndex];
+    if (bucket.mGeneration != generation)
+    {
+        bucket.mSlots.clear();
+        bucket.mGeneration = generation;
+    }
+    return bucket;
 }
 
 void
@@ -144,22 +186,102 @@ ScpDporReplaySupport::getNodeBaseline(std::size_t nodeIndex) const
     return mReplayBaselines.at(nodeIndex);
 }
 
+namespace
+{
+
+ReplayStateCacheEntry&
+acquireCacheEntry(uint64_t generation, std::size_t nodeIndex,
+                  SecretKey const& validator, SCPQuorumSet const& qSet,
+                  DporScpNode::Configuration const& config)
+{
+    auto& bucket = bucketFor(generation, nodeIndex);
+    if (bucket.mSlots.empty())
+    {
+        bucket.mSlots.push_back(ReplayStateCacheEntry{
+            generation, nodeIndex,
+            std::make_unique<DporScpNode>(validator, qSet, config),
+            {},
+            0});
+    }
+    return bucket.mSlots.front();
+}
+
+} // namespace
+
 DporScpNode&
 ScpDporReplaySupport::acquireNode(std::size_t nodeIndex) const
 {
-    auto& cache = threadLocalReplayStateCache();
-    for (auto& entry : cache)
+    return *acquireCacheEntry(mGeneration, nodeIndex, mValidators.at(nodeIndex),
+                              mQSet, mConfig)
+                .mNode;
+}
+
+ScpDporReplaySupport::ReplayState
+ScpDporReplaySupport::acquireReplayState(std::size_t nodeIndex,
+                                         ThreadTrace const& trace,
+                                         std::size_t step) const
+{
+    auto& slots = bucketFor(mGeneration, nodeIndex).mSlots;
+
+    ReplayStateCacheEntry* best = nullptr;
+    ReplayStateCacheEntry* leastRecentlyUsed = nullptr;
+    std::size_t bestEventCount = 0;
+
+    for (auto& entry : slots)
     {
-        if (entry.mGeneration == mGeneration && entry.mNodeIndex == nodeIndex)
+        if (!leastRecentlyUsed || entry.mLastUsed < leastRecentlyUsed->mLastUsed)
         {
-            return *entry.mNode;
+            leastRecentlyUsed = &entry;
+        }
+
+        auto const& cursor = entry.mCursor;
+        if (!cursor.mValid || cursor.mEventCount > step ||
+            cursor.mConsumedTrace.size() > trace.size())
+        {
+            continue;
+        }
+        if (best && cursor.mEventCount <= bestEventCount)
+        {
+            continue;
+        }
+        // Compared back-to-front: after a rollback the traces diverge near
+        // their tail, so this rejects a stale cursor immediately instead of
+        // walking the whole shared prefix first.
+        if (!std::equal(cursor.mConsumedTrace.rbegin(),
+                        cursor.mConsumedTrace.rend(),
+                        std::make_reverse_iterator(
+                            trace.begin() +
+                            static_cast<std::ptrdiff_t>(
+                                cursor.mConsumedTrace.size()))))
+        {
+            continue;
+        }
+        best = &entry;
+        bestEventCount = cursor.mEventCount;
+    }
+
+    auto* chosen = best;
+    if (!chosen)
+    {
+        if (slots.size() < REPLAY_SLOTS_PER_NODE)
+        {
+            slots.push_back(ReplayStateCacheEntry{
+                mGeneration, nodeIndex,
+                std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet,
+                                              mConfig),
+                {},
+                0});
+            chosen = &slots.back();
+        }
+        else
+        {
+            chosen = leastRecentlyUsed;
+            chosen->mCursor.mValid = false;
         }
     }
 
-    cache.push_back(ReplayStateCacheEntry{
-        mGeneration, nodeIndex,
-        std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet, mConfig)});
-    return *cache.back().mNode;
+    chosen->mLastUsed = ++threadLocalReplayClock();
+    return ReplayState{*chosen->mNode, chosen->mCursor};
 }
 
 void

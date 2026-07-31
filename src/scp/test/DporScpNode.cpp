@@ -10,6 +10,7 @@
 #include "xdrpp/marshal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <string>
 
@@ -23,6 +24,13 @@ Hash
 getQSetHash(SCPQuorumSet const& qSet)
 {
     return sha256(xdr::xdr_to_opaque(qSet));
+}
+
+uint64
+nextReplayBaselineSnapshotId()
+{
+    static std::atomic<uint64> counter{0};
+    return ++counter;
 }
 
 uint64
@@ -164,6 +172,7 @@ void
 DporScpNode::storeQuorumSet(SCPQuorumSet const& qSet)
 {
     mQuorumSets[getQSetHash(qSet)] = std::make_shared<SCPQuorumSet>(qSet);
+    mLastQSetLookup.reset();
 }
 
 SCPQuorumSetPtr
@@ -275,6 +284,12 @@ DporScpNode::enqueueTxSetDownloadWaitTimeChoice(
 }
 
 void
+DporScpNode::setEmittedEnvelopeRecordingEnabled(bool enabled)
+{
+    mEmittedEnvelopeRecordingEnabled = enabled;
+}
+
+void
 DporScpNode::setReplayDebugRecordingEnabled(bool enabled)
 {
     mReplayDebugRecordingEnabled = enabled;
@@ -295,6 +310,7 @@ DporScpNode::takeReplayDebugEvents()
 DporScpNode::ReplayBaseline
 DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
 {
+    // Identity for the wrapped-form cache in restoreReplayBaseline().
     ReplayBaseline baseline;
 
     auto slot = const_cast<SCP&>(mSCP).getSlot(slotIndex, false);
@@ -440,6 +456,7 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
     baseline.mTxSetDownloadsSucceeded = mTxSetDownloadsSucceeded;
     baseline.mHasReachedBoundary = mHasReachedBoundary;
     baseline.mBoundaryEnvelope = mBoundaryEnvelope;
+    baseline.mSnapshotId = nextReplayBaselineSnapshotId();
     return baseline;
 }
 
@@ -456,8 +473,11 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
         slot->mFullyValidated = slotSnapshot.mFullyValidated;
         slot->mGotVBlocking = slotSnapshot.mGotVBlocking;
         slot->mStatementsHistory.clear();
+        // Headroom, not the exact snapshot size: replay appends to this vector
+        // as it processes envelopes, and an exact reserve made every one of
+        // those appends reallocate.
         slot->mStatementsHistory.reserve(
-            slotSnapshot.mStatementsHistory.size());
+            slotSnapshot.mStatementsHistory.size() + 32);
         for (auto const& historicalStatement : slotSnapshot.mStatementsHistory)
         {
             slot->mStatementsHistory.push_back(Slot::HistoricalStatement{
@@ -487,46 +507,80 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
                 return restored;
             };
 
-        auto& nomination = slot->mNominationProtocol;
-        nomination.mRoundNumber = slotSnapshot.mNominationState.mRoundNumber;
-        nomination.mVotes =
-            restoreValueSet(slotSnapshot.mNominationState.mVotes);
-        nomination.mAccepted =
-            restoreValueSet(slotSnapshot.mNominationState.mAccepted);
-        nomination.mCandidates =
-            restoreValueSet(slotSnapshot.mNominationState.mCandidates);
-        nomination.mLatestNominations = restoreEnvelopeMap(
-            slotSnapshot.mNominationState.mLatestNominations);
-        nomination.mLastEnvelope.reset();
-        if (slotSnapshot.mNominationState.mLastEnvelope)
+        // Rebuild the wrapped forms only when this is a different snapshot; the
+        // wrappers are immutable, so a repeat restore just re-shares them.
+        if (baseline.mSnapshotId == 0 ||
+            mWrappedBaseline.mSnapshotId != baseline.mSnapshotId)
         {
-            nomination.mLastEnvelope =
-                wrapEnvelope(*slotSnapshot.mNominationState.mLastEnvelope);
-        }
-        nomination.mRoundLeaders = std::set<NodeID>(
-            slotSnapshot.mNominationState.mRoundLeaders.begin(),
-            slotSnapshot.mNominationState.mRoundLeaders.end());
-        nomination.mNominationStarted =
-            slotSnapshot.mNominationState.mNominationStarted;
-        nomination.mLatestCompositeCandidate.reset();
-        if (slotSnapshot.mNominationState.mLatestCompositeCandidate)
-        {
-            auto const& latestCompositeCandidate =
-                *slotSnapshot.mNominationState.mLatestCompositeCandidate;
-            for (auto const& candidate : nomination.mCandidates)
+            auto const& nominationState = slotSnapshot.mNominationState;
+            auto const& ballotState = slotSnapshot.mBallotState;
+
+            mWrappedBaseline = WrappedBaseline{};
+            mWrappedBaseline.mVotes = restoreValueSet(nominationState.mVotes);
+            mWrappedBaseline.mAccepted =
+                restoreValueSet(nominationState.mAccepted);
+            mWrappedBaseline.mCandidates =
+                restoreValueSet(nominationState.mCandidates);
+            mWrappedBaseline.mRoundLeaders =
+                std::set<NodeID>(nominationState.mRoundLeaders.begin(),
+                                 nominationState.mRoundLeaders.end());
+            mWrappedBaseline.mLatestNominations =
+                restoreEnvelopeMap(nominationState.mLatestNominations);
+            mWrappedBaseline.mLatestEnvelopes =
+                restoreEnvelopeMap(ballotState.mLatestEnvelopes);
+            if (nominationState.mLastEnvelope)
             {
-                if (candidate->getValue() == latestCompositeCandidate)
+                mWrappedBaseline.mNominationLastEnvelope =
+                    wrapEnvelope(*nominationState.mLastEnvelope);
+            }
+            if (nominationState.mLatestCompositeCandidate)
+            {
+                auto const& composite =
+                    *nominationState.mLatestCompositeCandidate;
+                for (auto const& candidate : mWrappedBaseline.mCandidates)
                 {
-                    nomination.mLatestCompositeCandidate = candidate;
-                    break;
+                    if (candidate->getValue() == composite)
+                    {
+                        mWrappedBaseline.mLatestCompositeCandidate = candidate;
+                        break;
+                    }
+                }
+                if (!mWrappedBaseline.mLatestCompositeCandidate)
+                {
+                    mWrappedBaseline.mLatestCompositeCandidate =
+                        wrapValue(composite);
                 }
             }
-            if (!nomination.mLatestCompositeCandidate)
+            if (ballotState.mValueOverride)
             {
-                nomination.mLatestCompositeCandidate =
-                    wrapValue(latestCompositeCandidate);
+                mWrappedBaseline.mValueOverride =
+                    wrapValue(*ballotState.mValueOverride);
             }
+            if (ballotState.mLastEnvelope)
+            {
+                mWrappedBaseline.mBallotLastEnvelope =
+                    wrapEnvelope(*ballotState.mLastEnvelope);
+            }
+            if (ballotState.mLastEnvelopeEmit)
+            {
+                mWrappedBaseline.mBallotLastEnvelopeEmit =
+                    wrapEnvelope(*ballotState.mLastEnvelopeEmit);
+            }
+            mWrappedBaseline.mSnapshotId = baseline.mSnapshotId;
         }
+
+        auto& nomination = slot->mNominationProtocol;
+        nomination.mRoundNumber = slotSnapshot.mNominationState.mRoundNumber;
+        nomination.mVotes = mWrappedBaseline.mVotes;
+        nomination.mAccepted = mWrappedBaseline.mAccepted;
+        nomination.mCandidates = mWrappedBaseline.mCandidates;
+        nomination.mLatestNominations = mWrappedBaseline.mLatestNominations;
+        nomination.mLastEnvelope = mWrappedBaseline.mNominationLastEnvelope;
+        nomination.mRoundLeaders = mWrappedBaseline.mRoundLeaders;
+        nomination.mNominationStarted =
+            slotSnapshot.mNominationState.mNominationStarted;
+        nomination.mLatestCompositeCandidate =
+            mWrappedBaseline.mLatestCompositeCandidate;
         nomination.mPreviousValue =
             slotSnapshot.mNominationState.mPreviousValue;
         nomination.mTimerExpCount =
@@ -552,31 +606,15 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
         ballot.mHighBallot =
             restoreBallot(slotSnapshot.mBallotState.mHighBallot);
         ballot.mCommit = restoreBallot(slotSnapshot.mBallotState.mCommit);
-        ballot.mLatestEnvelopes =
-            restoreEnvelopeMap(slotSnapshot.mBallotState.mLatestEnvelopes);
+        ballot.mLatestEnvelopes = mWrappedBaseline.mLatestEnvelopes;
         ballot.mPhase = static_cast<BallotProtocol::SCPPhase>(
             slotSnapshot.mBallotState.mPhase);
-        ballot.mValueOverride.reset();
-        if (slotSnapshot.mBallotState.mValueOverride)
-        {
-            ballot.mValueOverride =
-                wrapValue(*slotSnapshot.mBallotState.mValueOverride);
-        }
+        ballot.mValueOverride = mWrappedBaseline.mValueOverride;
         ballot.mCurrentMessageLevel =
             slotSnapshot.mBallotState.mCurrentMessageLevel;
         ballot.mTimerExpCount = slotSnapshot.mBallotState.mTimerExpCount;
-        ballot.mLastEnvelope.reset();
-        if (slotSnapshot.mBallotState.mLastEnvelope)
-        {
-            ballot.mLastEnvelope =
-                wrapEnvelope(*slotSnapshot.mBallotState.mLastEnvelope);
-        }
-        ballot.mLastEnvelopeEmit.reset();
-        if (slotSnapshot.mBallotState.mLastEnvelopeEmit)
-        {
-            ballot.mLastEnvelopeEmit =
-                wrapEnvelope(*slotSnapshot.mBallotState.mLastEnvelopeEmit);
-        }
+        ballot.mLastEnvelope = mWrappedBaseline.mBallotLastEnvelope;
+        ballot.mLastEnvelopeEmit = mWrappedBaseline.mBallotLastEnvelopeEmit;
     }
 
     mEmittedEnvelopes = baseline.mEmittedEnvelopes;
@@ -657,11 +695,21 @@ DporScpNode::signEnvelope(SCPEnvelope&)
 SCPQuorumSetPtr
 DporScpNode::getQSet(Hash const& qSetHash)
 {
+    // SCP asks for the quorum set on every envelope, and every validator in
+    // these scenarios shares one; a single-entry memo turns a 32-byte-key map
+    // lookup per envelope into a pointer compare.
+    if (mLastQSetLookup && mLastQSetLookupHash == qSetHash)
+    {
+        return mLastQSetLookup;
+    }
+
     auto const it = mQuorumSets.find(qSetHash);
     if (it == mQuorumSets.end())
     {
         return nullptr;
     }
+    mLastQSetLookupHash = qSetHash;
+    mLastQSetLookup = it->second;
     return it->second;
 }
 
@@ -780,15 +828,24 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
         }
     }
 
-    mEmittedEnvelopes.push_back(envelope);
+    if (mEmittedEnvelopeRecordingEnabled)
+    {
+        mEmittedEnvelopes.push_back(envelope);
+    }
     if (auto const value = txSetDownloadSucceededValue(envelope))
     {
         markTxSetDownloadSucceeded(*value);
     }
-    recordReplayDebugEvent(
-        ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
-                         .mEnvelope = envelope,
-                         .mBoundary = reachesBoundaryNow});
+    // Guarded rather than left to recordReplayDebugEvent(): building the event
+    // deep-copies the envelope, and exploration emits envelopes constantly with
+    // recording off.
+    if (mReplayDebugRecordingEnabled)
+    {
+        recordReplayDebugEvent(
+            ReplayDebugEvent{.mKind = ReplayDebugEvent::Kind::EmitEnvelope,
+                             .mEnvelope = envelope,
+                             .mBoundary = reachesBoundaryNow});
+    }
     // The envelope that reaches the boundary is still a protocol message and
     // must be delivered to peers. The scenario drains pending sends before it
     // stops a boundary thread. Suppress only envelopes emitted after the
@@ -1245,8 +1302,8 @@ void
 DporScpNode::clearReplayState()
 {
     auto const slotToKeep = std::numeric_limits<uint64>::max();
-    mSCP.purgeSlotsOutsideRange(1, std::nullopt, slotToKeep);
-    mSCP.purgeSlotsOutsideRange(std::nullopt, 0, slotToKeep);
+    // One traversal: everything below slot 1 and above slot 0, i.e. every slot.
+    mSCP.purgeSlotsOutsideRange(1, 0, slotToKeep);
     mEmittedEnvelopes.clear();
     mPendingEnvelopes.clear();
     mTimers.clear();

@@ -32,6 +32,56 @@ class ScpDporReplaySupport
         bool mObservedBottom{false};
     };
 
+    // DPOR asks a thread function for event `step` given the whole trace, so a
+    // naive scenario replays the trace from the baseline on every call, which
+    // is quadratic in the trace length and dominates exploration cost. The
+    // cursor lets a caller resume an already-replayed prefix instead: it
+    // records the trace entries the cached node has consumed together with the
+    // scenario-side loop state, so a call whose trace extends that prefix
+    // continues from where the previous call stopped. `mLabel` additionally
+    // memoizes the answer for the exact step the previous call stopped at,
+    // which is the common case when DPOR polls the other threads.
+    //
+    // `mValid` is the single authority: it is true only when the cached node's
+    // state is exactly "baseline plus mConsumedTrace" and the loop state below
+    // matches. Any partial replay (a required nondeterministic choice, or a
+    // thrown replay error) must leave it false.
+    struct ReplayCursor
+    {
+        bool mValid{false};
+        std::vector<ObservedValue> mConsumedTrace;
+        std::vector<SendLabel> mPendingSends;
+        std::size_t mNextPendingSend{0};
+        std::size_t mEventCount{0};
+        std::optional<int> mSelectedTimerID;
+        std::optional<EventLabel> mLabel;
+
+        void
+        consume(ObservedValue const& observed)
+        {
+            mConsumedTrace.push_back(observed);
+        }
+
+        void
+        reset(std::vector<SendLabel> const& initialPendingSends)
+        {
+            mValid = false;
+            mConsumedTrace.clear();
+            mPendingSends = initialPendingSends;
+            mNextPendingSend = 0;
+            mEventCount = 0;
+            mSelectedTimerID.reset();
+            mLabel.reset();
+        }
+    };
+
+
+    struct ReplayState
+    {
+        DporScpNode& mNode;
+        ReplayCursor& mCursor;
+    };
+
     ScpDporReplaySupport(std::vector<SecretKey> validators, SCPQuorumSet qSet,
                          uint64_t slotIndex, Value previousValue,
                          std::vector<Value> initialValues,
@@ -52,6 +102,18 @@ class ScpDporReplaySupport
 
     DporScpNode&
     acquireNode(std::size_t nodeIndex) const;
+
+    // Picks the cached node whose already-replayed prefix best matches
+    // `trace`: the longest valid prefix that `trace` extends and that has not
+    // yet passed `step`. Exploration is depth-first with backtracking, so
+    // keeping several partially-replayed nodes per validator lets a call that
+    // follows a rollback resume from a shared ancestor prefix instead of
+    // replaying from the baseline. When nothing matches, the
+    // least-recently-used node is returned with an invalid cursor and the
+    // caller is expected to restore the baseline into it.
+    ReplayState
+    acquireReplayState(std::size_t nodeIndex, ThreadTrace const& trace,
+                       std::size_t step) const;
 
     static void
     clearThreadLocalCacheForCurrentThread();

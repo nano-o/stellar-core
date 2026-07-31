@@ -14,10 +14,51 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
+#include <utility>
 #include <xdrpp/marshal.h>
 
 namespace stellar::scpdpor
 {
+
+// Envelopes are the payload of almost every DPOR value, and DPOR copies values
+// constantly: every graph restriction, rf-rewrite and thread-trace
+// materialization deep-copies each event label. An SCPEnvelope holds several
+// heap-allocated XDR vectors, so storing it by value made those copies the
+// single largest cost in exploration. Values therefore share one immutable
+// envelope instance and copy only a refcount.
+// FNV-1a over the envelope's XDR encoding. Equal envelopes always produce equal
+// digests, which is what lets the digest short-circuit equality and back
+// std::hash.
+inline std::size_t
+computeEnvelopeDigest(SCPEnvelope const& envelope)
+{
+    auto const opaque = xdr::xdr_to_opaque(envelope);
+    std::size_t digest = 0xcbf29ce484222325ULL;
+    for (auto const byte : opaque)
+    {
+        digest = (digest ^ byte) * 0x100000001b3ULL;
+    }
+    return digest;
+}
+
+struct ScpDporEnvelopePayload
+{
+    SCPEnvelope mEnvelope;
+    // Content digest, computed once. Values that share a payload compare by
+    // pointer, but re-deriving a node's state produces a fresh payload for an
+    // envelope the exploration graph already holds, so equal-but-distinct
+    // payloads do occur and were being compared field by field through the XDR
+    // structure. The digest rejects unequal ones without that walk.
+    std::size_t mDigest{0};
+
+    explicit ScpDporEnvelopePayload(SCPEnvelope envelope)
+        : mEnvelope(std::move(envelope)), mDigest(computeEnvelopeDigest(mEnvelope))
+    {
+    }
+};
+
+using ScpDporEnvelopePtr = std::shared_ptr<ScpDporEnvelopePayload const>;
 
 struct ScpDporValue
 {
@@ -31,10 +72,35 @@ struct ScpDporValue
 
     Kind mKind{Kind::Envelope};
     uint64_t mSlotIndex{};
-    SCPEnvelope mEnvelope{};
+    ScpDporEnvelopePtr mEnvelope;
     int mTimerID{};
     int64_t mDurationMilliseconds{};
     std::uint8_t mTxSetStatus{};
+
+    // A value that carries no payload behaves exactly like one carrying a
+    // default-constructed envelope, so equality and ordering keep the
+    // semantics they had when the envelope was stored inline.
+    SCPEnvelope const&
+    envelope() const
+    {
+        static SCPEnvelope const emptyEnvelope{};
+        return mEnvelope ? mEnvelope->mEnvelope : emptyEnvelope;
+    }
+
+    // A value with no payload compares equal to one carrying a
+    // default-constructed envelope, so it must hash like one too: this returns
+    // that envelope's digest rather than zero.
+    std::size_t
+    envelopeDigest() const
+    {
+        if (mEnvelope)
+        {
+            return mEnvelope->mDigest;
+        }
+        static std::size_t const emptyEnvelopeDigest =
+            computeEnvelopeDigest(SCPEnvelope{});
+        return emptyEnvelopeDigest;
+    }
 
     bool
     operator==(ScpDporValue const& other) const
@@ -47,7 +113,16 @@ struct ScpDporValue
         switch (mKind)
         {
         case Kind::Envelope:
-            return mEnvelope == other.mEnvelope;
+            if (mEnvelope == other.mEnvelope)
+            {
+                return true;
+            }
+            if (mEnvelope && other.mEnvelope &&
+                mEnvelope->mDigest != other.mEnvelope->mDigest)
+            {
+                return false;
+            }
+            return envelope() == other.envelope();
         case Kind::TimerChoice:
             return mTimerID == other.mTimerID;
         case Kind::TxSetDownloadWaitTimeChoice:
@@ -73,7 +148,8 @@ struct ScpDporValue
         switch (mKind)
         {
         case Kind::Envelope:
-            return mEnvelope < other.mEnvelope;
+            return mEnvelope != other.mEnvelope &&
+                   envelope() < other.envelope();
         case Kind::TimerChoice:
             return mTimerID < other.mTimerID;
         case Kind::TxSetDownloadWaitTimeChoice:
@@ -104,8 +180,8 @@ namespace std
 template <>
 struct hash<stellar::scpdpor::ScpDporValue>
 {
-    // Not noexcept: hashing envelopes serializes them via xdr_to_opaque,
-    // which allocates.
+    // Envelope payloads carry a precomputed content digest, so this never
+    // serializes.
     std::size_t
     operator()(stellar::scpdpor::ScpDporValue const& value) const
     {
@@ -117,15 +193,9 @@ struct hash<stellar::scpdpor::ScpDporValue>
         switch (value.mKind)
         {
         case stellar::scpdpor::ScpDporValue::Kind::Envelope:
-        {
-            auto const opaque = xdr::xdr_to_opaque(value.mEnvelope);
-            for (auto const byte : opaque)
-            {
-                result ^= std::hash<std::uint8_t>{}(byte) + 0x9e3779b9 +
-                          (result << 6) + (result >> 2);
-            }
+            result ^= value.envelopeDigest() + 0x9e3779b9 + (result << 6) +
+                      (result >> 2);
             break;
-        }
         case stellar::scpdpor::ScpDporValue::Kind::TimerChoice:
             result ^= std::hash<int>{}(value.mTimerID) + 0x9e3779b9 +
                       (result << 6) + (result >> 2);

@@ -607,7 +607,7 @@ toJson(ScpDporValue const& value)
     {
     case ScpDporValue::Kind::Envelope:
         root["kind"] = "envelope";
-        root["envelope_xdr"] = encodeBytes(xdr::xdr_to_opaque(value.mEnvelope));
+        root["envelope_xdr"] = encodeBytes(xdr::xdr_to_opaque(value.envelope()));
         root["annotation"] = formatWithStream(value);
         return root;
     case ScpDporValue::Kind::TimerChoice:

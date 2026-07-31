@@ -80,11 +80,14 @@ flag needs a clean rebuild (`make clean` first). See
 [docs/dpor-build.md](docs/dpor-build.md) and
 [docs/dpor-integration-status.md](docs/dpor-integration-status.md) for details.
 
+Always configure with `--enable-nsc-sccache` — see
+[Compiler cache](#compiler-cache-always-use---enable-nsc-sccache) below.
+
 Normal build:
 ```bash
 git submodule update --init --recursive
 ./autogen.sh
-./configure CC=clang-20 CXX=clang++-20
+./configure --enable-nsc-sccache CC=clang-20 CXX=clang++-20
 make -j"$(nproc)"
 ```
 
@@ -95,7 +98,7 @@ Current DPOR build workflow:
 ```bash
 git submodule update --init --recursive
 ./autogen.sh
-./configure --enable-dpor CC=clang-20 CXX=clang++-20
+./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
@@ -121,6 +124,69 @@ Notes:
   depth deep enough to reach a blocking receive: for `--stop-on-prepare
   --txset-status always-downloading --download-time above` that is `--depth 18`,
   not 12.
+
+### Benchmarking
+
+**On `pop-os-desktop` only** (check `hostname`): that machine is a shared
+desktop with unrelated work running on it, so exploration-throughput numbers
+move around a lot between runs of the *same* binary. There, treat any difference
+below **20%** as noise — do not report a sub-20% change as a speedup or a
+regression, and do not go hunting for the cause of one. Sustained multi-hour
+benchmarking sessions on it have produced 10%+ spreads on identical binaries with
+no thermal throttling and no visible competing process. On dedicated or otherwise
+quiet hardware, establish the noise floor by measuring one binary several times
+before trusting any threshold.
+
+`src/scp/test/bench-dpor.sh` drives all of this and is runnable from any
+directory (set `BIN` for an out-of-tree binary). It exits nonzero if any
+scenario process fails, so its output can be trusted rather than silently
+degrading:
+- `bench-dpor.sh check` prints exact execution counts for 13 scenarios — the
+  correctness fingerprint. Diff it against a known-good capture.
+- `bench-dpor.sh bench` times four terminating scenarios, best of three.
+- `bench-dpor.sh head` reports the rate for the externalize-boundary scenario
+  over a time-boxed window.
+
+Regardless of machine:
+- To claim a real change, measure old and new **back to back in the same
+  session** and take a median of several runs. A ratio built against a baseline
+  measured hours earlier is not trustworthy.
+- Prefer terminating scenarios (fixed total work, so wall-clock is directly
+  comparable) over time-boxed rate windows when the size of an effect matters.
+- Correctness fingerprints are a different matter: exact execution counts must
+  match exactly, with no tolerance. `--workers N` runs report approximate counts
+  in `--print-stats` progress lines (`counts_exact=false`) but the final summary
+  line is exact.
+
+### Compiler cache: always use `--enable-nsc-sccache`
+
+Pass `--enable-nsc-sccache` to every `configure` invocation, normal and DPOR,
+in-tree and out-of-tree. The DPOR binaries link the whole test suite, so a cold
+rebuild is expensive and the shared cache is what makes iteration practical.
+
+What the flag does (`configure.ac`, `AC_ARG_ENABLE([nsc-sccache])`):
+- runs `nsc cache sccache setup --cache_name stellar` and evals the result into
+  configure's environment, which exports `SCCACHE_WEBDAV_ENDPOINT`,
+  `SCCACHE_WEBDAV_KEY_PREFIX` and `SCCACHE_WEBDAV_TOKEN` so the sccache daemon
+  it starts inherits the remote-cache credentials;
+- implies `--enable-sccache`, which wraps `CC`/`CXX` and sets `RUSTC_WRAPPER`;
+- sets `SCCACHE_BASEDIRS` so absolute paths in the source and build trees are
+  normalized. That is what lets separate worktrees and out-of-tree build
+  directories share cache entries instead of each missing.
+
+Requirements and constraints:
+- `nsc` must be on `PATH`; configure hard-errors with
+  `--enable-nsc-sccache requested but nsc was not found` otherwise.
+- Mutually exclusive with `--enable-ccache`; configure errors if both are given.
+- The flag only takes effect at configure time. An existing build directory
+  configured without it keeps compiling uncached — re-run `configure`.
+
+Verify it actually took effect before trusting build times:
+```bash
+grep -m1 '^CXX = ' src/Makefile        # expect: sccache clang++-20 ...
+grep -m1 '^RUSTC_WRAPPER' src/Makefile # expect: sccache
+sccache --show-stats | head            # compile requests / hit rate
+```
 
 ## DPOR dependency
 
@@ -204,14 +270,15 @@ avoid polluting the bind-mounted volume with build artifacts. If the directory
 Out-of-tree normal build:
 ```bash
 cd /home/dev/stellar-core-build
-/home/dev/stellar-core/configure CC=clang-20 CXX=clang++-20
+/home/dev/stellar-core/configure --enable-nsc-sccache CC=clang-20 CXX=clang++-20
 make -j"$(nproc)"
 ```
 
 Out-of-tree DPOR build:
 ```bash
 cd /home/dev/stellar-core-build
-/home/dev/stellar-core/configure --enable-dpor CC=clang-20 CXX=clang++-20
+/home/dev/stellar-core/configure --enable-dpor --enable-nsc-sccache \
+    CC=clang-20 CXX=clang++-20
 make -C lib -j"$(nproc)"
 make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation
 ```
