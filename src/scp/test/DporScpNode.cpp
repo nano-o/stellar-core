@@ -850,7 +850,6 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     return validationLevelForTxSetStatus(status);
 }
 
-#ifdef CAP_0083
 Value
 DporScpNode::makeEmptyTxSetValueFromValue(Value const& value) const
 {
@@ -865,7 +864,6 @@ DporScpNode::makeEmptyTxSetValueFromValue(Value const& value) const
     std::copy(value.begin(), value.end(), emptyTxSetValue.begin() + 6);
     return emptyTxSetValue;
 }
-#endif // CAP_0083
 
 bool
 DporScpNode::isEmptyTxSetValue(Value const& value) const

@@ -287,9 +287,7 @@ class DporScpNode : public SCPDriver
     void emitEnvelope(SCPEnvelope const& envelope) override;
     ValidationLevel validateValue(uint64 slotIndex, Value const& value,
                                   bool nomination) const override;
-#ifdef CAP_0083
     Value makeEmptyTxSetValueFromValue(Value const& value) const override;
-#endif
     bool isEmptyTxSetValue(Value const& value) const override;
     bool isParallelTxSetDownloadEnabled() const override;
     bool protocolAllowsEmptyTxSetValues() const override;
