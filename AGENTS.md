@@ -190,7 +190,11 @@ sccache --show-stats | head            # compile requests / hit rate
 
 ## DPOR dependency
 
-Upstream: `https://github.com/nano-o/CPP-DPOR.git` (branch `main`)
+Upstream: `git@github.com:nano-o/CPP-DPOR.git` (branch `main`). The submodule
+URL is SSH, so `git submodule update --init` needs a GitHub SSH key. Where one
+is unavailable, override locally rather than editing `.gitmodules`:
+`git config submodule.external/dpor.url https://github.com/nano-o/CPP-DPOR.git`
+before `--init`.
 
 DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
 commit `23e1998`. Initialize the revision selected by `stellar-core` before

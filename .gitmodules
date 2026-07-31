@@ -57,4 +57,4 @@
 	url = https://github.com/gperftools/gperftools.git
 [submodule "external/dpor"]
 	path = external/dpor
-	url = https://github.com/nano-o/CPP-DPOR.git
+	url = git@github.com:nano-o/CPP-DPOR.git
