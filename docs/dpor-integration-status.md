@@ -366,17 +366,18 @@ it after confirming no build is active), then rerun configure.
 
 ## Verification in this workspace
 
-Verified directly in this tree with the post-CAP-0083 configure and build:
+Verified directly in this tree after rebasing onto `4c0d88c75` (upstream
+post-CAP-0083-ungating master), with a clean reconfigure and rebuild:
 
-- `make -C src -j8 stellar-core-dpor-tests scp-dpor-investigation` completed;
-  emitted DPOR compile lines contained global `-DCAP_0083` plus target-local
-  `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`.
-- A disposable clean configure with `--enable-dpor` but without
-  `--enable-next-protocol-version-unsafe-for-production` failed with
-  `--enable-dpor requires
-  --enable-next-protocol-version-unsafe-for-production`.
+- `./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20`
+  (no next-protocol flag), `make clean`, `make -C lib`, then
+  `make -C src -j"$(nproc)" stellar-core-dpor-tests scp-dpor-investigation`
+  completed. Emitted DPOR compile lines carry target-local
+  `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`, contain no
+  `-DCAP_0083` anywhere in the build, and pick up master's new global
+  `-DXDRPP_STRONG_ORDER=1`.
 - `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 233
-  assertions in 40 test cases.
+  assertions in 40 test cases (unchanged by the rebase).
 - `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
   reported
   `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.
@@ -385,7 +386,26 @@ Verified directly in this tree with the post-CAP-0083 configure and build:
   `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
 - `./src/scp-dpor-investigation --txset-status always-downloading
   --download-time above --stop-on-prepare --depth 12` reported
-  `kind=all-explored executions=4 full=0 blocked=1 error=0 depth-limit=3`.
+  `kind=all-explored executions=4 full=0 blocked=0 error=0 depth-limit=4`.
+
+  > This entry previously recorded
+  > `executions=4 full=0 blocked=1 error=0 depth-limit=3`. That number was
+  > stale rather than changed by the rebase: "refine DPOR investigation
+  > scenarios" made the runner broadcast boundary envelopes before stopping,
+  > which lengthens every `--stop-on-prepare` execution, but it renamed
+  > `--txset-status downloading` to `always-downloading` without re-running
+  > this case. The extra boundary broadcasts push the formerly-blocked
+  > execution past a depth-12 cap, so it is now classified `depth-limit`
+  > instead of `blocked`. Upstream's only SCP changes in this range were the
+  > removal of `#ifdef CAP_0083` guards, which were no-ops in a build that
+  > already defined `CAP_0083`.
+
+- In that same scenario, blocked executions first appear at `--depth 18`
+  (`blocked=2`). Depths 13-17 report `blocked=0`. For reference:
+  `--depth 20` gives
+  `executions=55 full=4 blocked=2 error=0 depth-limit=49`, and `--depth 24`
+  gives `executions=83 full=46 blocked=4 error=0 depth-limit=33`. Any
+  blocked-execution check on this scenario needs depth >= 18.
 - `./src/scp-dpor-investigation --txset-status always-downloading
   --download-time below --depth 12` reported
   `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
@@ -393,19 +413,25 @@ Verified directly in this tree with the post-CAP-0083 configure and build:
   reported
   `kind=all-explored executions=1 full=0 blocked=1 error=0 depth-limit=0`.
 - The obsolete `--txset-status valid`, `downloading`, `invalid`, `waiting`,
-  `downloading-then-invalid`, and `nondet` values and
-  `--nomination-always-waiting` flag are rejected, while
-  `--invalid-proposer 0` without `--init unique` fails with the intended
-  validation error.
+  `downloading-then-invalid`, and `nondet` values are rejected with
+  `error: unknown txset-status mode: ...`; `--nomination-always-waiting` exits
+  nonzero as an unknown flag; and `--invalid-proposer 0` without
+  `--init unique` fails with
+  `error: --invalid-proposer requires unique initial values; use --init unique`.
 - `--fail-on-first-terminal --trace-dir ... --txset-status
-  downloading-then-valid --depth 12` wrote a version-4 trace bundle, and
-  `--replay-trace-json ... --replay-node all` reloaded and replayed every node
-  successfully.
+  downloading-then-valid --depth 12` reported `terminal-kind=error
+  node-index=0 thread=0` and `kind=stopped executions=1`, exited 1, and wrote
+  a version-4 trace; `--replay-trace-json ... --replay-node all` reloaded and
+  replayed every node successfully (exit 0).
 - `--fail-on-first-blocked --trace-dir ... --txset-status always-downloading
-  --download-time above --stop-on-prepare --depth 12` stopped on a blocked
-  execution, exited nonzero, and wrote a version-4 trace focused on the first
-  blocked node; `--replay-trace-json ... --replay-node all` replayed every
-  node successfully.
+  --download-time above --stop-on-prepare --depth 20` reported
+  `terminal-kind=blocked leader-boundary=true` and
+  `kind=stopped executions=52 full=2 blocked=1 error=0 depth-limit=49`, exited
+  1, and wrote a version-4 trace focused on the first blocked node;
+  `--replay-trace-json ... --replay-node all` replayed every node
+  successfully (exit 0). At the previously documented `--depth 12` this
+  invocation now finds no blocked execution and exits 0 -- see the depth note
+  above.
 
 ## Current limitations
 
