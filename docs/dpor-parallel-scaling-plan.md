@@ -17,12 +17,12 @@ after, and every engine execution-set test green.
 
 | Phase | Result |
 |---|---|
-| 0 — operational guidance | Done, documentation only, as decided. The guidance changed: after Phases 1 and 3 there is no knee, so "use `--workers 8`" is obsolete. |
+| 0 — operational guidance | Done, documentation only, no code change, as decided. The serial default and `--parallel` were left alone. The *guidance* changed: after Phases 1 and 3 there is no knee, so the interim "use `--workers 8`" is obsolete and the advice is now to pass an explicit `--workers` set to the logical CPU count. |
 | 1 — remove the broadcast | **Landed and decisive.** D1 confirmed. |
-| 2 — distributed queues | **Not done: entry gate failed.** Correct per the plan. |
-| 3 — ND/receive splitting (Design A) | **Landed.** 2PC showed no regression; S2 improved 2.6x. |
-| 4 — gates and defaults | `min_fanout` **removed** (option (b)). Queue budget and `sync_steps` re-checked, defaults kept. |
-| 5 — scaling regression check | `bench-dpor.sh scale` added, opt-in, gated on the constructed reference shape. |
+| 2 — distributed queues | **Not done: entry gate failed.** Correct per the plan. Nothing was built. |
+| 3 — ND/receive splitting (Design A) | **Landed**, with the bottom branch deliberately excluded (see below). 2PC showed no regression; S2 improved 2.6x over Phase 1 alone. Design B not attempted, as it was conditional on A first winning. |
+| 4 — gates and defaults | `min_fanout` **removed** (option (b)). `split_poll_interval_steps` default 64 -> 1. Queue budget, `sync_steps` and `progress_poll_interval_steps` re-checked and left unchanged. |
+| 5 — scaling regression check | `bench-dpor.sh scale` added, opt-in, gated on the constructed reference shape. Verified it **fails on the pre-fix binary and passes on the fixed one**. |
 
 **Phase 1** was a falsification test for D1 and D1 survived it. At 32 workers on
 S2: futex calls 5,682,256 -> 329,119 (17x), CPUs utilized 3.68 -> 12.43,
@@ -58,14 +58,23 @@ frame, not the splitting: splits fired only ~1,000 times against 7.26M
 executions. Reordering the gate so the shared stop flag is only touched after
 the idle check passes removed it.
 
-Final scaling, speedups against the pre-change binary at one worker:
+Final scaling. Wall-clock medians, with speedups against the pre-change binary
+at one worker (169.09s for S1, 21.45s for S2) so all three columns share one
+denominator. "final" is the shipped configuration, which includes the
+`split_poll_interval_steps` default change below:
 
 | | w=1 | w=8 | w=16 | w=32 |
 |---|---|---|---|---|
-| S1 before | 1.00x | 4.79x | 7.23x | 6.31x |
-| S1 after | 1.00x | 5.17x | 8.35x | **9.83x** |
-| S2 before | 1.00x | 2.51x | 1.99x | 0.62x |
-| S2 after | 1.00x | 4.32x | 7.08x | **8.31x** |
+| S1 before | 169.09s (1.00x) | 35.33s (4.79x) | 23.38s (7.23x) | 26.79s (**6.31x**) |
+| S1 + Phase 1 | 172.92s | 33.97s (4.98x) | 21.73s (7.78x) | 18.74s (9.02x) |
+| S1 final | 167.99s | 31.21s (5.42x) | 19.30s (8.76x) | 15.95s (**10.60x**) |
+| S2 before | 21.45s (1.00x) | 8.56s (2.51x) | 10.79s (1.99x) | 34.72s (**0.62x**) |
+| S2 + Phase 1 | 21.47s | 8.16s (2.63x) | 6.78s (3.16x) | 6.83s (3.14x) |
+| S2 final | 21.44s | 4.38s (4.90x) | 2.64s (8.13x) | 1.93s (**11.11x**) |
+
+The `w=1` column is a control as much as a baseline: `--workers 1` takes the
+serial `verify()` path, which none of these changes touch, and it stays flat
+across all three binaries.
 
 Still short of the ~16x physical-core ceiling, so there is headroom left; the
 next lever is no longer contention (D1, fixed) or the spawn-site restriction
@@ -95,6 +104,99 @@ was flat (218-232 MB on S2, 386-408 MB on S1) across budgets from 64 to 1024,
 so the ceiling is not memory, and the wall-clock effect did not survive
 repetition cleanly.
 
+### Where Phase 3 departed from this plan
+
+Design A was implemented as specified, with one deliberate narrowing: **the
+non-blocking bottom (`flag`) branch is never split.** The plan devoted a
+paragraph to getting `flag` ownership exactly right across a failed handoff.
+That hazard is avoidable rather than manageable: the bottom branch is always
+the *last* alternative in a receive frame, so handing it off would leave the
+splitting worker with nothing to do, which defeats the purpose. Restricting
+splits to "an alternative that still leaves work local" excludes it by
+construction, and `frame.flag` then stays consumed exactly once by its owner,
+so there is no split/local ownership race over it at all. The same rule applies
+to the last ND choice.
+
+Also not attempted, as the plan directed: Design B (range tasks), which was
+conditional on Design A first showing a win, and stealing an ancestor frame,
+which was out of scope for both designs.
+
+### Phase 5 as built
+
+`bench-dpor.sh scale`, opt-in and not part of any default run. It pins the S2
+command exactly, alternates worker points 1/8/16/32 within one session, and
+reports medians. It also asserts that the execution count is identical at every
+worker point, since a scheduler exploring a different set makes every timing
+meaningless.
+
+Eligibility is *constructed* rather than required: CPUs are grouped by
+`(physical_package_id, core_id)`, cores exposing exactly two usable siblings are
+selected, and the run is pinned to both siblings of 16 of them. That makes
+larger SMT2 machines eligible instead of excluding them. The cgroup v2 `cpu.max`
+quota is walked leaf-to-root and must cover all 32 logical CPUs, because a
+32-CPU affinity mask under an 8-CPU quota is oversubscription in disguise and
+would reproduce the exact confound the rule exists to exclude. Anything that
+cannot be constrained to that shape prints the curve and asserts nothing.
+
+Two implementation points worth recording:
+
+- **The tolerance is a per-point relative median absolute deviation, not a
+  range.** The first version used `(max - min) / median` at the noisiest worker
+  point as a single global margin. On the fixed binary that produced a 42%
+  margin — because w=32 now finishes in ~2s, so its absolute jitter is large
+  relative to its median — which then swallowed a genuine 39% improvement and
+  failed the secondary gate. Relative MAD per point, summed across the two
+  points being compared and floored at `MIN_MARGIN`, reports 0.1-1.6% on the
+  same data.
+- **The gate was checked for discrimination, not just for passing.** On the
+  pre-fix binary it fails both gates (w=32 35.80s vs w=1 21.48s; w=16 10.76s
+  vs w=8 8.62s); on the fixed binary it passes both. That check matters because
+  this document warned that a weak eligibility bar would let the gate pass on
+  broken code, and an untested gate is decorative.
+
+### Validation performed
+
+Against this document's "Validation requirements (all phases)":
+
+| Requirement | Status |
+|---|---|
+| Full engine suite (`ctest --preset debug`) | 290/290 pass (was 280 before; the 10 new cases are listed below) |
+| Exact execution-**set** equality vs sequential *and* oracle, across worker counts including 1 and an over-subscribed value | Added. Worker counts `{1, 2, 4, min(64, max(8, 2 * hardware_concurrency))}`; asserts set equality both ways plus `unique.size() == observed.size()` so an omission cannot be masked by a duplicate |
+| Focused pure-ND, pure-receive, nested mixed-branch programs | Added all three, plus a variant that re-runs them with `split_poll_interval_steps = 1` to drive the new split path as hard as possible |
+| Tiny queue (`max_queued_tasks = 1`) | Covered by the pre-existing test and by a new nested-mixed section, which exercises the ownership-restore path under repeated enqueue refusal |
+| Stop-requested, exception-propagation | Pre-existing coverage, still green |
+| Repeated quiescence | Added: 50 iterations, 8 workers, 1-slot queue |
+| ASAN clean | Clean, 290/290 |
+| Repeated TSAN (`scripts/run_tsan.sh`) | 3 repeated runs, 290/290 each, 0 races |
+| 13-scenario `bench-dpor.sh check` fingerprint | Byte-identical to the pre-change engine |
+
+Two notes on how much those tests are worth:
+
+- The repeated-quiescence test guards a **hang**, not an assertion, so it would
+  report as a timeout rather than a failure. It was confirmed to actually catch
+  the bug it exists for: disabling the completion broadcast makes it park
+  forever instead of failing, which is exactly the signature to expect.
+- The split-activation tests assert on a spawn **counter** (`nd_splits`,
+  `receive_splits` on `VerifyResult`), not on wall-clock, because a splitting
+  path that silently never fires would otherwise look identical to a working
+  one. Splitting is opportunistic by design — it only fires while a peer is
+  parked — so those tests retry a bounded number of times and require
+  activation to be observed at least once, while asserting correctness on
+  every attempt.
+
+Beyond the checklist: 42 `stellar-core` DPOR smoke tests pass, and the engine
+is `clang-format`-clean on the files touched (`dpor.hpp` carried 9 pre-existing
+deviations before and after; `dpor_test.cpp` was clean and was reformatted so
+it stays clean).
+
+### Artifacts
+
+- Engine: `external/dpor` branch `parallel-scaling`, commit `febae6f`, on top
+  of the previously pinned `23e1998`.
+- `scp-dpor-investigation` gains `--split-poll-interval-steps`, mirroring the
+  other `ParallelVerifyOptions` pass-through flags.
+- `bench-dpor.sh scale` is the opt-in regression check described under Phase 5.
+
 Read alongside **`external/dpor/docs/parallel_exploration_implementation.md`**,
 which is the engine's own design record for this subsystem. That document
 predates this one and explains why the current policy is what it is; several
@@ -102,6 +204,11 @@ alternatives proposed below have already been tried and rejected there, and
 this plan is written to respect that history rather than relitigate it.
 
 ## TL;DR
+
+> Everything from here on is the **pre-change** analysis, kept in the present
+> tense as it was written. All of it has since been acted on; see "Outcome"
+> above for what actually happened, including two places where the analysis
+> turned out to be wrong (F7's cause, and which scenario was starving).
 
 Parallel exploration does not scale, and past a knee it actively regresses.
 On the benchmark machine the second scenario below is **1.6x slower at

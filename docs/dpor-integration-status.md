@@ -421,27 +421,29 @@ across all three engines:
 S1 — send-heavy (`--txset-status always-valid --download-time below
 --stop-on-externalize --depth 200`, 5,600,446 executions):
 
-| workers | before | + wake fix | + starvation split |
+| workers | before | + wake fix | final |
 |---|---|---|---|
-| 1 | 169.1s (1.00x) | 172.9s | — |
-| 8 | 35.3s (4.79x) | 34.0s (4.98x) | 32.7s (5.17x) |
-| 16 | 23.4s (7.23x) | 21.7s (7.78x) | 20.2s (8.35x) |
-| 32 | 26.8s (**6.31x**) | 18.7s (9.02x) | 17.2s (**9.83x**) |
+| 1 | 169.1s (1.00x) | 172.9s | 168.0s |
+| 8 | 35.3s (4.79x) | 34.0s (4.98x) | 31.2s (5.42x) |
+| 16 | 23.4s (7.23x) | 21.7s (7.78x) | 19.3s (8.76x) |
+| 32 | 26.8s (**6.31x**) | 18.7s (9.02x) | 16.0s (**10.60x**) |
 
 S2 — reads-from/ND-heavy (`--txset-status downloading-then-valid
 --nomination-always-downloading --download-time nondet --stop-on-externalize
 --depth 56`, 1,278,277 executions):
 
-| workers | before | + wake fix | + starvation split |
+| workers | before | + wake fix | final |
 |---|---|---|---|
-| 1 | 21.5s (1.00x) | 21.5s | 21.6s |
-| 8 | 8.6s (2.51x) | 8.2s (2.63x) | 5.0s (4.32x) |
-| 16 | 10.8s (1.99x) | 6.8s (3.16x) | 3.0s (7.08x) |
-| 32 | 34.7s (**0.62x**) | 6.8s (3.14x) | 2.6s (**8.31x**) |
+| 1 | 21.5s (1.00x) | 21.5s | 21.4s |
+| 8 | 8.6s (2.51x) | 8.2s (2.63x) | 4.4s (4.90x) |
+| 16 | 10.8s (1.99x) | 6.8s (3.16x) | 2.6s (8.13x) |
+| 32 | 34.7s (**0.62x**) | 6.8s (3.14x) | 1.9s (**11.11x**) |
 
-Speedups are against the pre-change binary at one worker. Both scenarios now
-improve monotonically through 32 workers, and SMT contributes a further
-17-18% beyond the 16 physical cores, so **there is no longer a knee to avoid**:
+Speedups are against the pre-change binary at one worker; the `w=1` column
+doubles as a control, since `--workers 1` takes the serial `verify()` path that
+none of these changes touch. Both scenarios now improve monotonically through
+32 workers, and SMT contributes a further 17-21% beyond the 16 physical cores,
+so **there is no longer a knee to avoid**:
 
 - Pass an explicit `--workers N`. Set `N` to the logical CPU count for the
   fastest wall-clock, or to the physical core count to leave headroom for other
