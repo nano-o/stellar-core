@@ -358,6 +358,26 @@ TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
     REQUIRE(sameEventLabel(leader({}, 2), leader({}, 2)));
 }
 
+TEST_CASE("scp dpor replay cache capacity is configurable",
+          "[scp][dpor][smoke]")
+{
+    REQUIRE_THROWS_AS(
+        ScpDporDefaultScenario(ScpDporDefaultScenario::makeDefaultOptions(), 0),
+        std::invalid_argument);
+
+    ScpDporDefaultScenario scenario(
+        ScpDporDefaultScenario::makeDefaultOptions(), 1);
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 6;
+    config.on_terminal_execution = [](auto const&) {
+        return dpor::algo::TerminalExecutionAction::Stop;
+    };
+
+    auto const result = dpor::algo::verify(config);
+    REQUIRE(result.executions_explored == 1);
+}
+
 TEST_CASE("scp dpor leader initially sends to both followers then waits",
           "[scp][dpor][smoke]")
 {

@@ -5,8 +5,9 @@ skipped because its entry gate did not pass. See "Outcome" immediately below
 for what was measured; the original analysis after the follow-up section is
 preserved as the record of why the work was done, and its numbers are the
 *pre-change* baseline.
-Follow-up status: **investigated; recommended plan not yet implemented**. The
-post-implementation investigation and next plan are recorded after "Artifacts".
+Follow-up status: **investigated; replay-capacity probe complete, remaining
+recommended plan not yet implemented**. The post-implementation investigation,
+replay-cache measurements and next plan are recorded after "Artifacts".
 Date: 2026-07-31, implemented 2026-08-01.
 Scope: `verify_parallel()` work scheduling in the pinned `external/dpor`
 submodule (commit `23e1998`), as exercised by `scp-dpor-investigation`.
@@ -533,7 +534,7 @@ that it is stable. If Phase 7 or 8 changes a default, recalibrate
 `bench-dpor.sh scale` and again prove that it fails the known-bad binary and
 passes the candidate.
 
-#### Follow-up Phase 9: bound replay working set
+#### Follow-up Phase 9: bound replay working set — measured, no default change
 
 This targets the 1-to-16 IPC collapse that scheduler work cannot fix. Make the
 64 replay slots per node an investigation option and add the Phase 6 replay
@@ -550,6 +551,57 @@ some can be removed without a compensating replay explosion.
 
 **Performance gate:** improve target-worker executions/s and IPC above noise,
 with no material one-worker regression. Lower memory by itself is not a pass.
+
+**Measured outcome (2026-08-01): the performance gate did not pass.** The
+investigation runner now exposes the positive-valued operational option
+`--replay-slots-per-node N`; it defaults to 64 and deliberately is not part of
+the scenario options or trace JSON because it cannot change scenario semantics.
+Every row below produced the same exact terminal counts at every capacity.
+
+The first screen used terminating S2 at depth 56 (1,278,277 executions). These
+are single-pass wall times in seconds, so they locate candidates but do not by
+themselves establish small parallel differences:
+
+| slots | w=1 | w=8 | w=16 | w=32 |
+|---:|---:|---:|---:|---:|
+| 1 | 25.82 | 7.64 | 4.62 | 2.68 |
+| 4 | 23.79 | 6.12 | 3.60 | 2.21 |
+| 8 | 23.30 | 5.49 | 3.42 | 2.38 |
+| 16 | 22.70 | 5.02 | 3.04 | 2.04 |
+| 32 | 21.86 | 4.31 | 2.73 | 1.60 |
+| 64 | **21.31** | 4.93 | **2.22** | 2.61 |
+
+The non-monotonic target-worker column was scheduler noise, not a 32-slot win.
+Seven order-alternated 32-versus-64 repetitions gave median paired time ratios
+(`32 / 64`) of 1.09 at eight workers, 1.00 at 16 and 0.99 at 32. Thus 64 was
+about 9% faster at eight workers and the two capacities tied at 16 and 32;
+there was no repeatable absolute-throughput improvement from 32. On terminating
+S2 depth 64 (10,030,833 executions), five paired repetitions instead made 16
+slots 8.4% slower than 64 at 32 workers.
+
+The high-depth cross-check was terminating S1 at depth 200 (5,600,446
+executions), not a time-boxed approximate-rate row. At 32 workers the full
+one-pass 1/4/8/16/32/64 screen took 22.73/18.92/17.55/16.06/15.57/14.24s: 64
+was fastest in absolute executions/s. Five additional order-alternated
+32-versus-64 pairs were noisy, but 64 won four pairs and the median paired time
+ratio was 1.146 in its favor. Median RSS fell only from about 354 MiB at 64 to
+328 MiB at 32 in those repetitions.
+
+A follow-up above the old bound also ruled out a trivial larger-cache win. On
+S2 depth 56 at one worker, the rotated three-run medians for 64/128/256 slots
+were 21.39/21.17/22.11s with median RSS about 29/32/39 MiB. At 16 workers they
+were 2.36/2.44/2.55s with median RSS about 118/171/272 MiB. The roughly 1%
+serial difference at 128 is below the measured noise; its memory cost is not.
+
+The cache itself is useful: relative to 64, one slot took 21% longer in the
+serial S2 screen, 2.1x as long at 16 workers, 36% longer on S2 depth 64 at 32
+workers, and 60% longer on the S1 depth-200 screen. Smaller capacities often
+lower RSS materially, but they either tie or reduce executions/s. Keep 64 as
+the default, retain the option for memory-constrained investigations and future
+instrumented experiments, and do not build an adaptive capacity policy from
+these results. Phase 6's replay counters remain useful if a later profile
+reopens this phase, but they are not needed to reject the current low-hanging
+capacity change.
 
 #### Follow-up Phase 10: compact values and graph snapshots
 

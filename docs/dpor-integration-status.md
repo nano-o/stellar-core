@@ -203,8 +203,10 @@ it after confirming no build is active), then rerun configure.
   replay helpers for observed traces, including hidden txset status and
   wait-time choices. Valid replay cursors resume the longest matching consumed
   prefix and memoize the label at their stopping step; a partially applied
-  nondeterministic-choice step deliberately invalidates its cursor. Replay
-  semantics are also described in
+  nondeterministic-choice step deliberately invalidates its cursor. The cache
+  retains 64 partially replayed nodes per validator and worker by default; the
+  investigation runner can override that operational capacity without changing
+  the trace or scenario semantics. Replay semantics are also described in
   [`docs/dpor-replay-notes.md`](./dpor-replay-notes.md).
 - [`src/scp/test/ScpDporTraceJson.h`](../src/scp/test/ScpDporTraceJson.h) and
   [`src/scp/test/ScpDporTraceJson.cpp`](../src/scp/test/ScpDporTraceJson.cpp)
@@ -308,6 +310,13 @@ it after confirming no build is active), then rerun configure.
       behavior for every existing workflow
     - prefer an explicit `--workers N`. See
       [Parallel scaling](#parallel-scaling) for what to set it to.
+  - `--replay-slots-per-node N`
+    - positive per-validator, per-worker replay-cache capacity; defaults to 64
+    - this is an investigation/performance option, not a scenario option, and
+      therefore is not serialized in replay traces
+    - a measured 1/4/8/16/32/64 sweep retained the default: smaller values can
+      lower RSS but did not improve absolute executions/s; see
+      [the scaling plan](dpor-parallel-scaling-plan.md#follow-up-phase-9-bound-replay-working-set--measured-no-default-change)
   - `--print-stats`
   - `--fail-on-first-blocked`
     - continues past full executions, then stops at the first blocked

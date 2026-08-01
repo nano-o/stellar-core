@@ -7,6 +7,7 @@
 #include "scp/test/DporScpNode.h"
 #include "scp/test/ScpDporBridge.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -18,6 +19,12 @@ namespace stellar::scpdpor
 class ScpDporReplaySupport
 {
   public:
+    // Partially replayed nodes retained per validator and worker thread.
+    // Depth-first backtracking makes a modest cache effective, while a larger
+    // cache increases the linear prefix scan on every acquire. The
+    // investigation runner exposes this default for workload-specific sweeps.
+    static constexpr std::size_t DEFAULT_REPLAY_SLOTS_PER_NODE = 64;
+
     struct NodeBaseline
     {
         DporScpNode::ReplayBaseline mNodeState;
@@ -85,7 +92,9 @@ class ScpDporReplaySupport
     ScpDporReplaySupport(std::vector<SecretKey> validators, SCPQuorumSet qSet,
                          uint64_t slotIndex, Value previousValue,
                          std::vector<Value> initialValues,
-                         DporScpNode::Configuration config = {});
+                         DporScpNode::Configuration config = {},
+                         std::size_t replaySlotsPerNode =
+                             DEFAULT_REPLAY_SLOTS_PER_NODE);
 
     // Copies get a fresh generation so they never adopt thread-local cached
     // nodes that were created for the source object.
@@ -155,6 +164,7 @@ class ScpDporReplaySupport
     Value mPreviousValue;
     std::vector<Value> mInitialValues;
     DporScpNode::Configuration mConfig;
+    std::size_t mReplaySlotsPerNode;
     std::vector<NodeBaseline> mReplayBaselines;
     // Process-unique identity used to key the thread-local node cache; unlike
     // the object's address, it is never reused after destruction.

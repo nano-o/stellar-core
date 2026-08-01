@@ -119,12 +119,15 @@ class ScpDporDefaultScenario
         std::optional<std::string> mReplayErrorMessage;
     };
 
-    explicit ScpDporDefaultScenario(Options options = makeDefaultOptions())
+    explicit ScpDporDefaultScenario(
+        Options options = makeDefaultOptions(),
+        std::size_t replaySlotsPerNode =
+            ScpDporReplaySupport::DEFAULT_REPLAY_SLOTS_PER_NODE)
         : mOptions(std::move(options))
         , mReplaySupport(mOptions.mValidators, mOptions.mQuorumSet,
                          mOptions.mSlotIndex, mOptions.mPreviousValue,
                          mOptions.mInitialValues,
-                         buildNodeConfiguration(mOptions))
+                         buildNodeConfiguration(mOptions), replaySlotsPerNode)
     {
         if (!isSupportedValidatorCount(mOptions.mValidators.size()))
         {

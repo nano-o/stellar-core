@@ -45,6 +45,8 @@ struct CommandLineOptions
     std::size_t mDepth{12};
     std::size_t mValidatorCount{
         stellar::scpdpor::ScpDporDefaultScenario::DEFAULT_VALIDATOR_COUNT};
+    std::size_t mReplaySlotsPerNode{
+        stellar::scpdpor::ScpDporReplaySupport::DEFAULT_REPLAY_SLOTS_PER_NODE};
     std::optional<std::size_t> mMaxQueuedTasks;
     std::optional<std::size_t> mSyncSteps;
     std::optional<std::size_t> mSplitPollIntervalSteps;
@@ -228,6 +230,10 @@ printUsage(char const* argv0)
               << "      Validator count, currently 3 or 4; 4 uses a"
               << " 3-of-4 quorum set on every node"
               << " (default: " << defaults.mValidatorCount << ")\n"
+              << "  --replay-slots-per-node N\n"
+              << "      Partially replayed SCP nodes cached per validator and"
+              << " worker thread; must be positive"
+              << " (default: " << defaults.mReplaySlotsPerNode << ")\n"
               << "  --max-nomination-round N"
               << " | --max-nomination-rounds N\n"
               << "      Stop when nomination round reaches N"
@@ -437,6 +443,18 @@ parseSizeValue(std::string_view arg, std::string_view value)
 }
 
 std::size_t
+parsePositiveSizeValue(std::string_view arg, std::string_view value)
+{
+    auto const parsed = parseSizeValue(arg, value);
+    if (parsed == 0)
+    {
+        throw std::invalid_argument(std::string(arg) +
+                                    " requires a value greater than 0");
+    }
+    return parsed;
+}
+
+std::size_t
 parseValidatorCountValue(std::string_view arg, std::string_view value)
 {
     auto const validatorCount = parseSizeValue(arg, value);
@@ -517,7 +535,8 @@ makeScenario(CommandLineOptions const& options)
     scenarioOptions.mNominationAlwaysDownloading =
         options.mNominationAlwaysDownloading;
     scenarioOptions.mDownloadSucceedsInRound = options.mDownloadSucceedsInRound;
-    return stellar::scpdpor::ScpDporDefaultScenario(std::move(scenarioOptions));
+    return stellar::scpdpor::ScpDporDefaultScenario(
+        std::move(scenarioOptions), options.mReplaySlotsPerNode);
 }
 
 template <typename T>
@@ -1105,6 +1124,12 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mValidatorCount = parseValidatorCountValue(arg, argv[++i]);
             continue;
         }
+        if (arg == "--replay-slots-per-node" && i + 1 < argc)
+        {
+            options.mReplaySlotsPerNode =
+                parsePositiveSizeValue(arg, argv[++i]);
+            continue;
+        }
         if ((arg == "--max-nomination-round" ||
              arg == "--max-nomination-rounds") &&
             i + 1 < argc)
@@ -1281,8 +1306,8 @@ main(int argc, char* argv[])
         {
             auto const bundle = stellar::scpdpor::loadTraceBundle(
                 *options.mReplayTraceJsonPath);
-            auto const scenario =
-                stellar::scpdpor::ScpDporDefaultScenario(bundle.mOptions);
+            auto const scenario = stellar::scpdpor::ScpDporDefaultScenario(
+                bundle.mOptions, options.mReplaySlotsPerNode);
             dumpReplayBundle(std::cout, options, scenario, bundle);
             return 0;
         }

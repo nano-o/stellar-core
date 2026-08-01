@@ -22,12 +22,6 @@ nextReplaySupportGeneration()
     return ++generationCounter;
 }
 
-// Number of partially-replayed nodes kept per validator, per worker thread.
-// Depth-first exploration backtracks a few events at a time, so a handful of
-// slots captures almost all of the reuse; beyond that the per-call prefix scan
-// costs more than the replays it saves.
-constexpr std::size_t REPLAY_SLOTS_PER_NODE = 64;
-
 struct ReplayStateCacheEntry
 {
     uint64_t mGeneration{};
@@ -141,13 +135,14 @@ decodeKnownTxSetChoices(ThreadTrace const& trace, std::size_t observedIndex)
 ScpDporReplaySupport::ScpDporReplaySupport(
     std::vector<SecretKey> validators, SCPQuorumSet qSet, uint64_t slotIndex,
     Value previousValue, std::vector<Value> initialValues,
-    DporScpNode::Configuration config)
+    DporScpNode::Configuration config, std::size_t replaySlotsPerNode)
     : mValidators(std::move(validators))
     , mQSet(std::move(qSet))
     , mSlotIndex(slotIndex)
     , mPreviousValue(std::move(previousValue))
     , mInitialValues(std::move(initialValues))
     , mConfig(std::move(config))
+    , mReplaySlotsPerNode(replaySlotsPerNode)
     , mGeneration(nextReplaySupportGeneration())
 {
     if (mValidators.empty())
@@ -159,6 +154,10 @@ ScpDporReplaySupport::ScpDporReplaySupport(
         throw std::invalid_argument(
             "initialValues must match validator count");
     }
+    if (mReplaySlotsPerNode == 0)
+    {
+        throw std::invalid_argument("replaySlotsPerNode must be positive");
+    }
     rebuildBaselines();
 }
 
@@ -169,6 +168,7 @@ ScpDporReplaySupport::ScpDporReplaySupport(ScpDporReplaySupport const& other)
     , mPreviousValue(other.mPreviousValue)
     , mInitialValues(other.mInitialValues)
     , mConfig(other.mConfig)
+    , mReplaySlotsPerNode(other.mReplaySlotsPerNode)
     , mReplayBaselines(other.mReplayBaselines)
     , mGeneration(nextReplaySupportGeneration())
 {
@@ -263,7 +263,7 @@ ScpDporReplaySupport::acquireReplayState(std::size_t nodeIndex,
     auto* chosen = best;
     if (!chosen)
     {
-        if (slots.size() < REPLAY_SLOTS_PER_NODE)
+        if (slots.size() < mReplaySlotsPerNode)
         {
             slots.push_back(ReplayStateCacheEntry{
                 mGeneration, nodeIndex,
