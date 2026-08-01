@@ -197,7 +197,7 @@ is unavailable, override locally rather than editing `.gitmodules`:
 before `--init`.
 
 DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
-commit `23e1998`. Initialize the revision selected by `stellar-core` before
+commit `febae6f` (branch `parallel-scaling`). Initialize the revision selected by `stellar-core` before
 configuring:
 ```bash
 git submodule update --init external/dpor

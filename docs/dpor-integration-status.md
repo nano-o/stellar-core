@@ -2,7 +2,7 @@
 
 Status snapshot as of 2026-07-31 for branch `dpor-on-master` at `4c89f7a03`,
 rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
-DPOR library commit `23e1998`.
+DPOR library commit `febae6f`.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -86,7 +86,7 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `23e1998`. The
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `febae6f`. The
   `--with-dpor-dir` override remains available for development against another
   checkout.
 - Configure no longer couples `--enable-dpor` to the next-protocol option.
@@ -299,6 +299,15 @@ it after confirming no build is active), then rerun configure.
   - `--download-succeeds-in-round`
   - `--fifo`
   - `--parallel` / `--workers`
+    - the runner defaults to **one worker**, and parallel exploration is
+      selected only when `--workers > 1`; `--workers 0` takes the serial
+      `verify()` path rather than the engine's `hardware_concurrency()`
+      default. Only `--parallel` selects host concurrency.
+    - the serial default is deliberate and stays: making ordinary debugger and
+      smoke-test invocations parallel would change event ordering and fail-fast
+      behavior for every existing workflow
+    - prefer an explicit `--workers N`. See
+      [Parallel scaling](#parallel-scaling) for what to set it to.
   - `--print-stats`
   - `--fail-on-first-blocked`
     - continues past full executions, then stops at the first blocked
@@ -399,6 +408,52 @@ shared envelope payloads in stellar-core, plus masked FIFO tiebreaking, cheaper
 restriction/revisit paths, CSR PORF adjacency, flat vector clocks, and reusable
 scratch storage in the engine. Throughput measurements are machine-sensitive;
 the execution-count fingerprint is not and must remain exact.
+
+### Parallel scaling
+
+Two engine scheduler changes (see
+[docs/dpor-parallel-scaling-plan.md](dpor-parallel-scaling-plan.md)) removed a
+pathology in which more workers made exploration *slower*. Measured on
+`addict-glad-64ta` (16 physical cores / 32 logical, SMT2), paired same-session
+medians, with the 13-scenario `bench-dpor.sh check` fingerprint byte-identical
+across all three engines:
+
+S1 — send-heavy (`--txset-status always-valid --download-time below
+--stop-on-externalize --depth 200`, 5,600,446 executions):
+
+| workers | before | + wake fix | + starvation split |
+|---|---|---|---|
+| 1 | 169.1s (1.00x) | 172.9s | — |
+| 8 | 35.3s (4.79x) | 34.0s (4.98x) | 32.7s (5.17x) |
+| 16 | 23.4s (7.23x) | 21.7s (7.78x) | 20.2s (8.35x) |
+| 32 | 26.8s (**6.31x**) | 18.7s (9.02x) | 17.2s (**9.83x**) |
+
+S2 — reads-from/ND-heavy (`--txset-status downloading-then-valid
+--nomination-always-downloading --download-time nondet --stop-on-externalize
+--depth 56`, 1,278,277 executions):
+
+| workers | before | + wake fix | + starvation split |
+|---|---|---|---|
+| 1 | 21.5s (1.00x) | 21.5s | 21.6s |
+| 8 | 8.6s (2.51x) | 8.2s (2.63x) | 5.0s (4.32x) |
+| 16 | 10.8s (1.99x) | 6.8s (3.16x) | 3.0s (7.08x) |
+| 32 | 34.7s (**0.62x**) | 6.8s (3.14x) | 2.6s (**8.31x**) |
+
+Speedups are against the pre-change binary at one worker. Both scenarios now
+improve monotonically through 32 workers, and SMT contributes a further
+17-18% beyond the 16 physical cores, so **there is no longer a knee to avoid**:
+
+- Pass an explicit `--workers N`. Set `N` to the logical CPU count for the
+  fastest wall-clock, or to the physical core count to leave headroom for other
+  work on a shared machine.
+- The old interim guidance of `--workers 8` is obsolete; it was a workaround for
+  the scheduler pathology, not a property of the workload.
+
+`bench-dpor.sh scale` is an opt-in regression check for exactly this. It is not
+part of any default run, and it only asserts on one machine shape (16 usable
+SMT2 physical cores presenting 32 logical CPUs, with a CPU bandwidth quota
+covering all 32), which it constructs with an affinity mask rather than merely
+requiring. Everywhere else it prints the curve and asserts nothing.
 
 ## Verification in this workspace
 

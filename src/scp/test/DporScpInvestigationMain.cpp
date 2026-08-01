@@ -47,6 +47,7 @@ struct CommandLineOptions
         stellar::scpdpor::ScpDporDefaultScenario::DEFAULT_VALIDATOR_COUNT};
     std::optional<std::size_t> mMaxQueuedTasks;
     std::optional<std::size_t> mSyncSteps;
+    std::optional<std::size_t> mSplitPollIntervalSteps;
     std::optional<std::size_t> mProgressCounterFlushInterval;
     std::optional<std::size_t> mProgressPollIntervalSteps;
     std::optional<uint32_t> mMaxNominationRound;
@@ -205,6 +206,12 @@ printUsage(char const* argv0)
               << "      Parallel stop/progress synchronization interval;"
               << " 0 enables strict stop checks"
               << " (default: " << parallelDefaults.sync_steps << ")\n"
+              << "  --split-poll-interval-steps N\n"
+              << "      Check the idle-worker count every N nondeterministic"
+              << " or receive branches before offering one alternative to a"
+              << " parked worker; 0 or 1 checks every branch"
+              << " (default: " << parallelDefaults.split_poll_interval_steps
+              << ")\n"
               << "  --progress-counter-flush-interval N\n"
               << "      Flush worker-local progress counters after N terminal"
               << " executions; 0 uses DPOR default"
@@ -1072,6 +1079,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
             options.mSyncSteps = parseSizeValue(arg, argv[++i]);
             continue;
         }
+        if (arg == "--split-poll-interval-steps" && i + 1 < argc)
+        {
+            options.mSplitPollIntervalSteps = parseSizeValue(arg, argv[++i]);
+            continue;
+        }
         if (arg == "--progress-counter-flush-interval" && i + 1 < argc)
         {
             options.mProgressCounterFlushInterval =
@@ -1520,6 +1532,11 @@ main(int argc, char* argv[])
         if (options.mSyncSteps)
         {
             parallelOptions.sync_steps = *options.mSyncSteps;
+        }
+        if (options.mSplitPollIntervalSteps)
+        {
+            parallelOptions.split_poll_interval_steps =
+                *options.mSplitPollIntervalSteps;
         }
         if (options.mProgressCounterFlushInterval)
         {

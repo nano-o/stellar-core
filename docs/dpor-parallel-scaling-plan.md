@@ -1,9 +1,99 @@
 # DPOR parallel exploration: scaling analysis and plan
 
-Status: analysis complete, no code changes made yet. Revised after review.
-Date: 2026-07-31.
+Status: **implemented**. Phases 0, 1, 3, 4 and 5 landed; Phase 2 was correctly
+skipped because its entry gate did not pass. See "Outcome" immediately below
+for what was measured; the analysis that follows is preserved as the record of
+why the work was done, and its numbers are the *pre-change* baseline.
+Date: 2026-07-31, implemented 2026-08-01.
 Scope: `verify_parallel()` work scheduling in the pinned `external/dpor`
 submodule (commit `23e1998`), as exercised by `scp-dpor-investigation`.
+
+## Outcome
+
+All measurements below are paired same-session medians on `addict-glad-64ta`
+(the same 16-physical/32-logical SMT2 host used for the original analysis), with
+the 13-scenario `bench-dpor.sh check` fingerprint byte-identical before and
+after, and every engine execution-set test green.
+
+| Phase | Result |
+|---|---|
+| 0 — operational guidance | Done, documentation only, as decided. The guidance changed: after Phases 1 and 3 there is no knee, so "use `--workers 8`" is obsolete. |
+| 1 — remove the broadcast | **Landed and decisive.** D1 confirmed. |
+| 2 — distributed queues | **Not done: entry gate failed.** Correct per the plan. |
+| 3 — ND/receive splitting (Design A) | **Landed.** 2PC showed no regression; S2 improved 2.6x. |
+| 4 — gates and defaults | `min_fanout` **removed** (option (b)). Queue budget and `sync_steps` re-checked, defaults kept. |
+| 5 — scaling regression check | `bench-dpor.sh scale` added, opt-in, gated on the constructed reference shape. |
+
+**Phase 1** was a falsification test for D1 and D1 survived it. At 32 workers on
+S2: futex calls 5,682,256 -> 329,119 (17x), CPUs utilized 3.68 -> 12.43,
+context switches 11.9M -> 1.2M, system time 62.9s -> 28.8s, wall 34.7s -> 6.8s.
+S2 at 32 workers went from 1.6x *slower* than one worker to 3.1x faster.
+
+**Phase 2's entry gate did not pass**, so it was not attempted. Of the three
+conditions required, (a) `worker_loop_impl`-minus-`process_task` fell from 43%
+to ~20% of cycles and (b) system time fell from 46% to 31% of total CPU — both
+reduced but arguably still material — while (c) "scaling still degrades before
+physical-core count" became plainly false: both scenarios improve monotonically
+from 1 to 8 to 16 workers. The plan required all three, so the remaining ceiling
+was re-evaluated against F7 instead.
+
+**F7 turned out to be two different things.** On S1 the end-of-run occupancy
+collapse was largely a *contention artifact*: post-Phase-1 the queue stays at
+60-64/64 with 25-32/32 workers active for the whole run, where the pre-fix
+binary repeatedly drained to `queued=0/64` with 4-16/32 active. But S2 — which
+the original analysis never checked for starvation — starves badly, sitting at
+`queued=0/64` with 4-20/32 active for most of its run. That is why S2 plateaued
+at 3.2x while S1 reached 9.2x, and it is what made Phase 3 worth doing. Phase 3
+should therefore be read as targeting S2, not S1 as originally written.
+
+**Phase 3 cleared the 2PC bar that sank the two earlier prototypes.** At 8
+workers, 11 alternated repetitions gave send-only 7619ms versus splitting
+7752ms (1.018x) — while a *copy of the send-only binary measured against itself
+in the same session* came out at 0.966x, a larger deviation than the change
+being tested. Splitting was slower in 5 of 11 paired repetitions, and execution
+counts were identical (7,262,928) at every worker count. An earlier version of
+the gate did regress 2PC by ~7%, but the cause was the gate itself calling
+`can_spawn()` (and through it `stop_requested()`) on every ND and receive
+frame, not the splitting: splits fired only ~1,000 times against 7.26M
+executions. Reordering the gate so the shared stop flag is only touched after
+the idle check passes removed it.
+
+Final scaling, speedups against the pre-change binary at one worker:
+
+| | w=1 | w=8 | w=16 | w=32 |
+|---|---|---|---|---|
+| S1 before | 1.00x | 4.79x | 7.23x | 6.31x |
+| S1 after | 1.00x | 5.17x | 8.35x | **9.83x** |
+| S2 before | 1.00x | 2.51x | 1.99x | 0.62x |
+| S2 after | 1.00x | 4.32x | 7.08x | **8.31x** |
+
+Still short of the ~16x physical-core ceiling, so there is headroom left; the
+next lever is no longer contention (D1, fixed) or the spawn-site restriction
+(D2, addressed), and would need fresh profiling to identify.
+
+**Phase 4 defaults.** `min_fanout` was removed outright — option (b). It passed
+a literal `2` at its only call site, so it had exactly two reachable behaviours
+("spawn at send revisits" and "never spawn"), and option (a) was rejected on
+inspection rather than on taste: a send revisit with a single child is still
+worth handing off because the owning worker keeps the forward continuation, so
+gating on the cheap upper bound would only lose parallelism. `max_workers = 1`
+remains the way to explore serially.
+
+Of the remaining knobs, only one default moved, and only where the measurement
+was consistent:
+
+| Knob | Sweep result | Decision |
+|---|---|---|
+| `split_poll_interval_steps` | S2 2.49s -> 2.05s, S1 16.59s -> 15.67s, 2PC 7284ms -> 6871ms at interval 1 | **default 64 -> 1** |
+| `max_queued_tasks` (`2 * workers`) | 0-12% better at 128-256, non-monotonic past 256, and inside S1's noise | unchanged |
+| `sync_steps` | flat from 128 to 512 (2.64s vs 2.65s); strict mode 2.82s | unchanged at 512 |
+| `progress_poll_interval_steps` | no effect unless `on_progress` is set, since `maybe_report_progress()` returns immediately otherwise | unchanged |
+
+Raising `max_queued_tasks` is worth trying by hand on a starved workload, but
+the signal was not stable enough to move a default that affects everyone: RSS
+was flat (218-232 MB on S2, 386-408 MB on S1) across budgets from 64 to 1024,
+so the ceiling is not memory, and the wall-clock effect did not survive
+repetition cleanly.
 
 Read alongside **`external/dpor/docs/parallel_exploration_implementation.md`**,
 which is the engine's own design record for this subsystem. That document
