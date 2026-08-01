@@ -242,26 +242,36 @@ worker counts, but needs far more cycles to do it:
 From 1 to 16 workers, retired instructions grow only about 5%, while cycles
 grow about 94%. At 16 workers, about 96% of sampled cycles are still in
 `process_task`; a perfect scheduler could improve that point by only about 4%.
+That bound covers scheduler time, not work avoided inside `process_task`; the
+cutoff win below can therefore exceed 4% without contradicting it.
 At 32 workers, `process_task` falls to about 81%, `try_enqueue` reaches about
 13%, and futex/kernel stacks reach about 26%. The physical-core gap and the SMT
 gap therefore have different causes.
 
 The engine's generic four-participant 2PC benchmark exposes the scheduler more
 strongly even though its `SimValue` is only 8 bytes. It explores exactly
-7,262,928 executions:
+7,262,928 executions. The first profile measured 5.56s at 16 workers and 6.41s
+at 32, while the later cutoff sweep measured unlimited baselines of 5.54s and
+5.42s. Because that disagreement is larger than the apparent 16-to-32
+regression, those single runs do not establish one.
 
-| workers | wall | executions/s | speedup |
+A nine-repetition, alternating recheck made the variance explicit:
+
+| workers | median | observed range | executions/s at median |
 |---:|---:|---:|---:|
-| 1 | 30.25s | 240k | 1.00x |
-| 8 | 8.66s | 839k | 3.49x |
-| 16 | 5.56s | 1.31M | 5.44x |
-| 32 | 6.41s | 1.13M | 4.72x |
+| 16 | 5.24s | 4.20-5.81s | 1.39M |
+| 32 | 6.09s | 5.01-6.73s | 1.19M |
+
+The median still favors 16 workers, but the paired ratio is too dispersed to
+serve as an implementation entry or acceptance gate. Any claim about the
+16-to-32 curve needs a fresh paired median in the implementation session.
 
 At 32 workers, futex/kernel stacks account for about 61% of samples,
 `__pv_queued_spin_lock_slowpath` for about 54% self, and `try_enqueue` for
-about 38% cumulative. This reopens the distributed-scheduler question that
-Phase 2 correctly skipped after Phase 1: Phase 3 created a different workload,
-and the fresh profile now satisfies the reason to reconsider it.
+about 38% cumulative in the profiled run. That profile, rather than an
+unestablished 16-to-32 regression, reopens the distributed-scheduler question
+that Phase 2 correctly skipped after Phase 1. Phase 3 created a different
+workload, so the scheduler must be re-profiled after granularity changes.
 
 #### Granularity experiment
 
@@ -270,21 +280,39 @@ SCP investigation runner for measurement; that diagnostic source change was
 removed afterward. A cutoff prevents task publication below that DPOR-tree
 depth but does not change which branches are explored.
 
-The result is large enough that granularity should precede a scheduler rewrite:
+The result is large enough that granularity should precede a scheduler rewrite.
+The SCP rows below apply the cutoff to both send publication and idle-driven
+ND/receive splitting, so they measure the ceiling available from throttling all
+task kinds. The generic 2PC result was subsequently isolated by leaving
+ND/receive splitting active below the cutoff and applying depth 40 only to send
+revisits:
 
-| workload | workers | unlimited | useful cutoff | cutoff time | change |
+| workload | workers | unlimited | oracle cutoff | cutoff time | change |
 |---|---:|---:|---:|---:|---:|
-| generic 2PC P=4 | 16 | 5.54s | 40 | 2.70s | 51% faster |
-| generic 2PC P=4 | 32 | 5.42s | 40 | 1.90s | 65% faster |
+| generic 2PC P=4, send-only gate | 16 | 5.24s | 40 | 2.73s | 48% faster |
+| generic 2PC P=4, send-only gate | 32 | 6.09s | 40 | 1.82s | 70% faster |
 | S2, depth 56 | 16 | 2.43s | 40 | 2.09s | 14% faster |
 | S2, depth 56 | 32 | 1.90s | 40 | 1.20s | 37% faster |
 | S2, depth 64 | 32 | 17.19s | 40 | 9.94s | 42% faster |
 | S1, depth 200 | 32 | 14.37s | 64 | 9.76s | 32% faster |
 
+The isolated generic results are seven-run medians; their unlimited baselines
+are the adjacent nine-run medians above. Every run explored the exact same
+7,262,928 executions. Keeping starvation splitting active did not erase the
+win, so send-revisit admission is a justified first prototype. The SCP results
+must still be revalidated with the actual send-only adaptive policy.
+
 S2 depth 64 explored exactly 10,030,833 executions. Its cutoff-40 run also
 reduced peak RSS from about 416 MB to 165 MB. Generic 2PC at cutoff 40 nearly
 eliminated system time. These are absolute throughput wins, not merely better
 normalized scaling.
+
+Every cutoff in this table was selected after seeing that workload and worker
+count. It is an oracle ceiling, not a gain the adaptive policy is expected to
+match automatically; capturing a significant fraction without regressions is
+the goal. Likewise, S1's 14.37s unlimited point is a diagnostic run, not a
+replacement for the 15.95s paired median in the Outcome table; implementation
+claims must come from a new alternating paired session.
 
 A fixed default cutoff is nevertheless the wrong implementation. On S1 at 32
 workers, cutoff 32 starved the pool and took 30.33s, while cutoff 64 took 9.76s.
@@ -338,7 +366,13 @@ credible physical-core limit:
   graph copy duplicates the event and derived-index vectors; ND labels also
   own their choice vectors.
 - Each worker's thread-local SCP replay support can retain 64 complete replay
-  slots per validator. More slots avoid replay but multiply the working set.
+  slots per validator: up to `64 * 3 * 32 = 6,144` `DporScpNode` instances for
+  the three-node scenario at 32 workers, although allocation is lazy. More
+  slots multiply the working set, and `acquireReplayState()` linearly scans a
+  validator's live slots and compares candidate prefixes back-to-front. The
+  source comment already says that beyond the useful knee, scan cost can exceed
+  the replay work saved. A smaller cap may therefore reduce both CPU and RSS;
+  this is not only a memory-versus-replay tradeoff.
 - The current shared envelope payload uses `shared_ptr`; graph/value copies can
   therefore create cross-core reference-count traffic in addition to copying
   bytes. A probe showed that an uncontended atomic `shared_ptr` path alone does
@@ -366,7 +400,8 @@ publication:
 - send, ND and receive split attempts/successes;
 - terminal executions per scheduled task and task DPOR-tree depth;
 - replay-cache hits, restored prefix length, observations replayed, baseline
-  restores, slots allocated and evictions;
+  restores, slots allocated and evictions, slots examined per acquire, and
+  trace elements compared while matching prefixes;
 - bytes/events copied when materializing a task or restricting a graph.
 
 Avoid a new shared atomic on every DPOR step. Counters should be thread-local
@@ -374,19 +409,23 @@ and flushed with the existing progress mechanism. Expose
 `spawn_depth_cutoff` through `scp-dpor-investigation` as an explicit diagnostic
 override, but do not change its default.
 
-Establish one benchmark matrix and keep every row visible:
+Extend `bench-dpor.sh` with an opt-in throughput/profile mode for the SCP rows
+rather than creating a second ad-hoc harness. Keep generic 2PC in the engine's
+own benchmark binary. Establish one benchmark matrix and keep every row visible:
 
 - short control: S2 depth 48, correctness/no-regression only;
 - substantial finite: S2 depths 56 and 64, S1 depth 200, and generic 2PC P=4;
-- sustained: the same SCP program at depths 100 and 200 in a fixed 20-60s
-  window, using a steady-state sub-window rather than startup;
+- reporting-only saturation diagnostics: the same SCP program at depths 100
+  and 200 in a fixed 20-60s window, using a steady-state sub-window rather than
+  startup;
 - worker points 1, 8, 16 and 32, plus a deliberately oversubscribed correctness
   point outside performance gating.
 
 Record wall time, executions/s, user/system time, task-clock, cycles,
 instructions, IPC and RSS. On capable bare metal also record LLC misses,
 memory bandwidth and cache-to-cache transfers. Terminating rows must have exact
-counts; correctness-set equality is checked separately for time-boxed rows.
+counts. Exact set equality is checked on separate terminating correctness
+programs; a truncated time-boxed run has no well-defined complete set.
 
 **Exit gate:** measurements are repeatable enough to distinguish queue/task
 churn from graph/replay cost, and the new counters do not cause a material
@@ -394,8 +433,10 @@ serial or parallel throughput regression.
 
 #### Follow-up Phase 7: adaptive task-reservoir hysteresis
 
-First keep the existing global queue and change only admission policy. Replace
-the absolute-depth policy with a program-independent reservoir:
+First keep the existing global queue and change only admission policy. Do not
+enable an absolute-depth policy by default: `spawn_depth_cutoff == 0` remains
+unlimited unless the user explicitly sets the diagnostic override. Add a
+program-independent reservoir gate specifically at the send-revisit handoff:
 
 1. Track scheduled tasks as active plus queued work. Start with the root task.
 2. While the spawn gate is open, publish send-revisit children until a high
@@ -405,7 +446,8 @@ the absolute-depth policy with a program-independent reservoir:
    or a worker reports demand/idle. The gap between the watermarks is
    load-bearing hysteresis.
 4. An idle-worker demand always overrides the closed gate. ND and receive
-   alternatives retain their existing idle-driven split rule.
+   alternatives retain their existing idle-driven split rule and are not
+   throttled by the reservoir.
 5. Cache the approximate gate state per worker and poll it at a measured
    interval so the fast rejected path does not bounce a shared cache line.
 
@@ -415,6 +457,14 @@ high/low watermarks and polling on the full matrix, not on S2 alone. Preserve
 the existing move-back-on-refusal ownership rule and all `Visit` versus
 `VisitIfConsistent` modes.
 
+The reservoir predicate must not be added to shared `can_spawn()`, because
+`should_split_to_idle_worker()` deliberately calls `can_spawn()` only after its
+cheap idle check. Putting the reservoir there would veto the very starvation
+splits that must override it and could reintroduce the shared-hot-path cost that
+previously regressed 2PC by 7%. Compose the reservoir only with the send
+handoff's existing stop/depth checks. The isolated cutoff experiment above is
+evidence for this shape; it is not evidence to throttle both task kinds.
+
 Instrument a deterministic-prefix program whose first parallel branch is
 deeper than every tested cutoff, plus a program whose useful fanout arrives in
 several separated bursts. They prove that the gate can reopen and cannot
@@ -422,17 +472,22 @@ silently strand parallelism.
 
 **Performance gate:** compared with the current unlimited baseline in paired
 same-session medians, materially improve absolute executions/s on generic 2PC
-and at least two substantial finite SCP rows; preserve the depth-100/200
-steady-state rate and every one-worker row. A build that has a prettier speedup
-curve but a lower target-worker executions/s fails.
+and at least two substantial finite SCP rows; preserve the terminating S2
+depth-64 and S1 depth-200 rows and every one-worker row. Depth-100/200
+time-boxed rates remain reporting-only because exploration order changes their
+terminal mix. A build that has a prettier speedup curve but a lower
+target-worker executions/s fails. The adaptive policy is expected to capture a
+useful fraction of the oracle cutoff ceiling, not necessarily match it.
 
 #### Follow-up Phase 8: sharded deques and work stealing, conditionally
 
 Re-profile after Phase 7. Enter this phase if queue/futex work still exceeds
-10% of target-worker cycles, system time remains material, or generic 2PC still
-regresses from 16 to 32 workers. The old Phase 2 decision is historical, not a
-permanent prohibition: its entry condition was evaluated before the current
-spawn sites and before the fresh workload profile.
+10% of target-worker cycles or system time remains material in a fresh paired
+profile. Do not enter it merely because one noisy worker curve regresses; the
+generic 2PC 16-to-32 regression was not stable enough to be a gate. The old
+Phase 2 decision is historical, not a permanent prohibition: its entry
+condition was evaluated before the current spawn sites and before the fresh
+workload profile.
 
 Use a correctness-first scheduler before attempting a lock-free deque:
 
@@ -441,11 +496,17 @@ Use a correctness-first scheduler before attempting a lock-free deque:
 - thieves take the oldest task from the FIFO end;
 - round-robin start points perturbed per worker to avoid a common victim;
 - an exact outstanding-task count: increment before a task becomes stealable,
-  decrement after its processor has finished all spawning, and let the 1 -> 0
-  transition declare quiescence;
-- a global epoch/condition variable used only after a complete failed steal
-  scan. Snapshot epoch, register idle, rescan, then park, so publication cannot
-  race with sleep and lose a wake;
+  decrement only after the task is fully processed, including all local
+  exploration and spawning, and let the 1 -> 0 transition declare quiescence;
+- publish worker demand as soon as a local deque becomes empty, before the
+  first remote steal scan, and clear it only after acquiring work. ND/receive
+  splitting must see workers that are searching as well as those already
+  parked; waiting until a full failed scan would make the starvation signal too
+  lazy;
+- a global epoch/condition variable used only after registering demand and a
+  complete failed steal scan. Snapshot the epoch, scan, then park only if the
+  epoch and outstanding count still permit it, so publication cannot race with
+  sleep and lose a wake;
 - `notify_one` only when idle workers exist; broadcast only for quiescence,
   stop or fatal error;
 - preserve the global `max_queued_tasks` contract with explicit publication
@@ -457,20 +518,32 @@ the single coherence point while keeping ownership and TSAN reasoning simple.
 Consider a direct idle-worker mailbox only if the sharded version still spends
 material time parking and waking.
 
-**Performance gate:** generic 2PC must no longer regress from 16 to 32 workers,
-its futex/spin-lock and system-time fractions must fall materially, and no SCP
-matrix row may lose absolute throughput beyond its measured noise floor.
+Rewrite the current Phase 1 no-broadcast comments with the epoch/quiescence
+proof. Their argument relies on every worker rechecking the global queue under
+`queue_mutex_`; leaving it in place after sharding would document an invariant
+that no longer exists. Likewise, define whether `idle_workers_` means
+work-seeking or parked and update every comment/counter consistently.
+
+**Performance gate:** improve generic 2PC absolute throughput at the same
+target-worker point above noise, materially reduce its futex/spin-lock and
+system-time fractions, and do not regress any substantial terminating SCP row
+beyond its measured noise floor. Report the 16-to-32 curve, but do not turn it
+into a pass/fail comparison unless the session's repeated baseline establishes
+that it is stable. If Phase 7 or 8 changes a default, recalibrate
+`bench-dpor.sh scale` and again prove that it fails the known-bad binary and
+passes the candidate.
 
 #### Follow-up Phase 9: bound replay working set
 
 This targets the 1-to-16 IPC collapse that scheduler work cannot fix. Make the
 64 replay slots per node an investigation option and add the Phase 6 replay
-counters. Sweep 4, 8, 16, 32 and 64 slots at worker counts 1, 8, 16 and 32.
+counters. Sweep 1, 4, 8, 16, 32 and 64 slots at worker counts 1, 8, 16 and 32.
 
-Do not assume `64 / workers` is correct. A smaller cache lowers RSS and cache
-pressure but may replay more SCP observations. Choose a fixed or adaptive
-budget only when the paired measurements show higher absolute executions/s,
-not merely lower RSS or better parallel efficiency.
+Do not assume `64 / workers` is correct. A smaller cache lowers RSS, cache
+pressure, the linear slots-scanned cost and prefix comparisons, but may replay
+more SCP observations. Choose a fixed or adaptive budget only when the paired
+measurements show higher absolute executions/s, not merely lower RSS or better
+parallel efficiency.
 
 **Entry gate:** replay slots are a material part of RSS and hit-rate data says
 some can be removed without a compensating replay explosion.
@@ -482,9 +555,12 @@ with no material one-worker regression. Lower memory by itself is not a pass.
 
 Treat these as successive prototypes, from lower to higher risk:
 
-1. Store `ScpDporValue`'s mutually exclusive payloads in a tagged union/variant
-   instead of keeping every field live. Record `sizeof(Value)` and
-   `sizeof(Event)` as benchmark metadata.
+1. Store `ScpDporValue`'s mutually exclusive payloads in discriminated storage
+   instead of keeping every field live. Reusing the existing `Kind` tag with a
+   carefully managed union can reduce this build from 56 to about 32 bytes; a
+   safer `std::variant` prototype carries its own discriminant and is expected
+   nearer 40 bytes. Treat them as distinct designs and record `sizeof(Value)`
+   and `sizeof(Event)` as benchmark metadata before choosing.
 2. If profiles still implicate envelope reference-count traffic, give the
    program/run an explicit payload owner or arena and place lightweight stable
    handles in values. The owner must outlive every graph/task and allocation
@@ -531,9 +607,15 @@ margin from repeated-baseline dispersion on that machine (and retain the 20%
 rule on `pop-os-desktop`). Require:
 
 - no material one-worker regression;
-- no material regression in the depth-100/200 sustained rate;
+- no material regression in the substantial terminating rows, including S2
+  depth 64 and S1 depth 200;
 - a gain above noise in the phase's named target rows;
 - identical exact terminal counts for every terminating comparison.
+
+Depth-100/200 time-boxed rates are always reported as saturation diagnostics,
+but cannot make a candidate pass or fail: approximate counters and a
+scheduler-dependent mix of terminal kinds make them non-comparable as hard
+gates.
 
 Correctness remains stricter than aggregate counts. Run the full engine suite,
 exact execution-set equality against serial and oracle, pure ND/receive and
