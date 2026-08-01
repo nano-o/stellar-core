@@ -190,15 +190,18 @@ sccache --show-stats | head            # compile requests / hit rate
 
 ## DPOR dependency
 
-Upstream: `git@github.com:nano-o/CPP-DPOR.git` (branch `main`). The submodule
-URL is SSH, so `git submodule update --init` needs a GitHub SSH key. Where one
-is unavailable, override locally rather than editing `.gitmodules`:
-`git config submodule.external/dpor.url https://github.com/nano-o/CPP-DPOR.git`
-before `--init`.
+Upstream: `https://github.com/nano-o/CPP-DPOR.git` (branch `main`). The
+repository is public and the submodule URL is HTTPS, so `git submodule update
+--init` needs no credentials. Pushing to it does: this repo already configures
+`gh auth git-credential` as the helper for `https://github.com`. To push over
+SSH instead, override the push URL locally rather than editing `.gitmodules`:
+`git -C external/dpor remote set-url --push origin git@github.com:nano-o/CPP-DPOR.git`.
 
 DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
-commit `febae6f` (branch `parallel-scaling`). Initialize the revision selected by `stellar-core` before
-configuring:
+commit `febae6f`, which upstream publishes as branch `dpor-perf` (it is *not*
+an ancestor of `main`, and no tag points at it, so that branch is the only
+thing keeping the pin reachable). Initialize the revision selected by
+`stellar-core` before configuring:
 ```bash
 git submodule update --init external/dpor
 ```

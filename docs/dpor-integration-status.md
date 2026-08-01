@@ -86,9 +86,10 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `febae6f`. The
-  `--with-dpor-dir` override remains available for development against another
-  checkout.
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `febae6f`, published
+  upstream as branch `dpor-perf` (not merged to `main`, and untagged, so that
+  branch is what keeps the pin fetchable). The `--with-dpor-dir` override
+  remains available for development against another checkout.
 - Configure no longer couples `--enable-dpor` to the next-protocol option.
   That check existed only to guarantee `CAP_0083` was defined; with CAP-0083
   ungated upstream there is nothing left to enforce.

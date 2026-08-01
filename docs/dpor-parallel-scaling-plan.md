@@ -195,7 +195,7 @@ it stays clean).
 
 ### Artifacts
 
-- Engine: `external/dpor` branch `parallel-scaling`, commit `febae6f`, on top
+- Engine: `external/dpor` branch `dpor-perf`, commit `febae6f`, on top
   of the previously pinned `23e1998`.
 - `scp-dpor-investigation` gains `--split-poll-interval-steps`, mirroring the
   other `ParallelVerifyOptions` pass-through flags.
@@ -995,9 +995,10 @@ gate, not the only one.
 
 ## Plan
 
-The engine lives in a separate repository (`git@github.com:nano-o/CPP-DPOR.git`,
-branch `main`), pinned here as `external/dpor`. Each phase lands upstream first,
-then the submodule pin is bumped in this repo.
+The engine lives in a separate repository (`https://github.com/nano-o/CPP-DPOR.git`),
+pinned here as `external/dpor`. Each phase lands upstream first, then the
+submodule pin is bumped in this repo. The phases below landed on branch
+`dpor-perf` rather than `main`; the current pin `febae6f` is that branch's tip.
 
 ### Phase 0 — operational guidance (this repo, minimal change)
 
