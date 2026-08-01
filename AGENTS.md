@@ -217,6 +217,18 @@ Key files in that example:
 
 ## SCP code orientation
 
+Protocol reference: the SCP paper-style specification is the IETF
+Internet-Draft
+[draft-mazieres-dinrg-scp-05](https://www.ietf.org/archive/id/draft-mazieres-dinrg-scp-05.txt)
+(Barry, Losa, Mazieres, McCaleb, Polu; November 2018), written after the
+lessons learned from the original `stellar-core` implementation. It is the best
+available description of what the protocol is *supposed* to do — quorum slices
+and quorums, federated voting, nomination, and the ballot protocol — and is
+worth consulting when reasoning about scenario expectations or about whether an
+observed execution is genuine SCP behavior. Treat it as informative rather than
+normative for this codebase: the implementation has drifted since 2018/2019, so
+where the two disagree, the code under `src/scp/` is the authority.
+
 SCP implementation:
 - `src/scp/SCP.h` / `src/scp/SCP.cpp` — top-level SCP class
 - `src/scp/SCPDriver.h` — virtual driver interface (the seam DPOR hooks into)
