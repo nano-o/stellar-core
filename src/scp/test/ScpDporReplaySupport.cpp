@@ -322,6 +322,15 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
     try
     {
         replayOneObservedValue(node, observed, selectedTimerID);
+        // The choice queues are append-only with a persistent read index, so a
+        // trace that supplies a choice this event no longer requests would
+        // leave it to be consumed by some later event.
+        if (node.hasUnconsumedTxSetChoices())
+        {
+            throw std::logic_error(
+                "trace supplies a txset choice the observed event does not "
+                "request");
+        }
         return ReplayObservationProgress{
             .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
             .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,

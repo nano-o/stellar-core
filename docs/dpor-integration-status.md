@@ -391,10 +391,10 @@ it after confirming no build is active), then rerun configure.
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
-  - JSON version-5 round-trips for scenario options, per-node
+  - JSON version-6 round-trips for scenario options, per-node
     outright-invalid mappings, and raw per-thread traces
   - explicit rejection of semantically incompatible version-1 through
-    version-4 traces
+    version-5 traces
   - timeout-driven empty-txset replacement
   - outright-invalid nomination and ballot rejection without replacement
   - empty-txset nomination-versus-ballot validation
@@ -588,3 +588,17 @@ state.
   entirely inside `loadTraceBundle()`.
 - DPOR still depends on `BUILD_TESTS`; `--disable-tests --enable-dpor` is not
   supported.
+- `--nomination-always-downloading` breaks the per-event tx-set invariant on
+  purpose. Modeled tx-set status and download wait time are otherwise decided
+  at most once per value per external event, but this flag forces
+  nomination-phase validation to `downloading` without consulting or writing
+  that decision. Because `NominationProtocol::processEnvelope` can call
+  `Slot::bumpState` synchronously, one `receiveEnvelope` of a `NOMINATE`
+  message can run nomination validation (forced `downloading`) and then
+  balloting validation, which may choose `valid` for the same value. The flag
+  is a branch-saving knob rather than a model of fetcher state, and memoizing
+  it would stop balloting from ever branching in an event that began with a
+  nomination validation — exactly what the scenarios using the flag exist to
+  explore. The clean fix is to make tx-set availability its own event source
+  per (node, value), at which point the flag becomes an initial-state fact
+  instead of a per-call override.

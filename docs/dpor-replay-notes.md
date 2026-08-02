@@ -54,9 +54,16 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus thread
 - one raw `ThreadTrace` per thread
 
-Trace bundles use schema version 5. Version 5 stores the txset-status modes as
+Trace bundles use schema version 6. Version 6 stores the txset-status modes as
 `always-valid`, `downloading-then-valid`, or `always-downloading`, and txset
-status choices can contain only `valid` or `downloading`.
+status choices can contain only `valid` or `downloading`. It records at most
+one txset status choice and one txset wait-time choice per value per external
+event.
+
+Version-5 bundles are rejected because they recorded a choice per `SCPDriver`
+call rather than per external event. Such a bundle carries choices the current
+model never asks for, and replay rejects the leftovers rather than letting a
+later event consume one.
 
 Version-4 bundles are rejected because `--download-succeeds-in-round` used to
 take effect in the same event that emitted the triggering `PREPARE`, and now
@@ -185,7 +192,7 @@ Each `NodeBaseline` contains:
 - replay-boundary state
 
 The configured per-node outright-invalid value sets are immutable scenario
-configuration rather than mutable replay state. Loading a version-5 bundle
+configuration rather than mutable replay state. Loading a version-6 bundle
 reconstructs those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.
@@ -258,6 +265,50 @@ If SCP discovers a choice that was not already in the trace (i.e. a new
 nondeterministic branch), the node throws an exception and
 `replayObservation()` returns a pending DPOR event without retrying. See
 below.
+
+The choice queues are append-only with a persistent read index, so the
+symmetric failure also has to be caught: a trace supplying a choice the
+replayed event never asks for would leave it for some later event to consume
+silently. After an observed event replays to completion,
+`replayObservation()` checks `DporScpNode::hasUnconsumedTxSetChoices()` and
+throws. The existing check in the other direction -- a trace that omits a
+choice the event does ask for -- lives in the exception handlers.
+
+## External Event Scoping
+
+`DporScpNode::ExternalEventScope` scopes one external event: a single call that
+drives SCP from outside, plus everything SCP does synchronously inside it.
+`nominate`, `startBalloting`, `receiveEnvelope`, `setStateFromEnvelope`, and
+`fireTimer` (around its callback) each open one. The scope is public so tests
+can open an event explicitly; direct driver calls made outside any scope form
+one implicit event that is reset whenever a real scope opens or closes.
+
+Two pieces of state hang off it:
+
+- the per-event txset decisions, cleared when the outermost scope opens and
+  again when it closes. Within one event, a given value's modeled status and
+  download wait time are each decided at most once, so repeated `SCPDriver`
+  callbacks inside one handler observe one consistent snapshot. Distinct values
+  still branch independently, and both answers can still change at the next
+  event boundary.
+- deferred download success. `--download-succeeds-in-round` fires from
+  `emitEnvelope()`, i.e. mid-handler; the value is recorded as pending and
+  promoted when the next event opens, so a completion cannot flip a verdict
+  part-way through the handler that caused it.
+
+`--nomination-always-downloading` is a deliberate exception: it forces
+nomination-phase validation without consulting or writing the per-event
+decision, so a nomination and a balloting validation of the same value in one
+event can still disagree. That is a known modeling wart, kept because
+memoizing it would stop balloting from ever branching in an event that began
+with a nomination validation.
+
+Snapshotting or restoring a replay baseline is only legal at an event
+boundary. `snapshotReplayBaseline()` throws if a scope is open **or** if the
+per-event decisions hold anything, and `restoreReplayBaseline()` throws if a
+scope is open. The decisions are deliberately not part of `ReplayBaseline` --
+they belong to an event, not to a resumable state -- and those checks are what
+keep the omission from becoming a silent correctness hole.
 
 ## Why Txset Choices Use Exception + Pending Return
 

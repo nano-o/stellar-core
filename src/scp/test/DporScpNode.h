@@ -280,6 +280,12 @@ class DporScpNode : public SCPDriver
 
     void enqueueTxSetDownloadWaitTimeChoice(std::chrono::milliseconds waitTime);
 
+    // True when a preloaded txset choice was never asked for. A trace that
+    // supplies more choices than the replayed event requests desynchronizes
+    // the append-only choice queues, so replay checks this rather than letting
+    // a later event silently consume a stale choice.
+    bool hasUnconsumedTxSetChoices() const;
+
     void setReplayDebugRecordingEnabled(bool enabled);
 
     // Exploration never reads the emitted-envelope log -- only the inspection
@@ -352,6 +358,17 @@ class DporScpNode : public SCPDriver
         uint32_t mCount{};
     };
 
+    // What the modeled tx-set state answered for one value during the event
+    // currently running. Both answers are pinned once made, so repeated
+    // callbacks inside a single handler observe one consistent snapshot the
+    // way production does.
+    struct TxSetEventDecision
+    {
+        std::optional<DporScpTxSetStatus> mStatus;
+        bool mWaitTimeDecided{false};
+        std::optional<std::chrono::milliseconds> mWaitTime;
+    };
+
     void applyConfiguration(Configuration const& config);
 
     TimerState* findTimer(uint64 slotIndex, int timerID);
@@ -369,6 +386,8 @@ class DporScpNode : public SCPDriver
     void clearReplayState();
 
     void beginExternalEvent();
+
+    void endExternalEvent();
 
     void markTxSetDownloadSucceeded(Value const& value);
 
@@ -409,6 +428,10 @@ class DporScpNode : public SCPDriver
     // never flip a verdict part-way through the handler that caused it.
     std::set<Value> mPendingTxSetDownloadsSucceeded;
     std::uint32_t mExternalEventDepth{0};
+    // Deliberately absent from ReplayBaseline: it is scoped to one event, and
+    // snapshotReplayBaseline() refuses to run while it holds anything, so it
+    // can never be silently dropped by a snapshot.
+    mutable std::map<Value, TxSetEventDecision> mTxSetDecisionsThisEvent;
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};

@@ -143,7 +143,10 @@ DporScpNode::ExternalEventScope::ExternalEventScope(DporScpNode& node)
 
 DporScpNode::ExternalEventScope::~ExternalEventScope()
 {
-    --mNode.mExternalEventDepth;
+    if (--mNode.mExternalEventDepth == 0)
+    {
+        mNode.endExternalEvent();
+    }
 }
 
 DporScpNode::DporScpNode(SecretKey const& secretKey,
@@ -302,6 +305,14 @@ DporScpNode::enqueueTxSetDownloadWaitTimeChoice(
     mPendingTxSetDownloadWaitTimeChoices.push_back(waitTime);
 }
 
+bool
+DporScpNode::hasUnconsumedTxSetChoices() const
+{
+    return mNextPendingTxSetStatusChoice < mPendingTxSetStatusChoices.size() ||
+           mNextPendingTxSetDownloadWaitTimeChoice <
+               mPendingTxSetDownloadWaitTimeChoices.size();
+}
+
 void
 DporScpNode::setEmittedEnvelopeRecordingEnabled(bool enabled)
 {
@@ -333,6 +344,15 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
     {
         throw std::logic_error(
             "replay baseline snapshot requested inside an external event");
+    }
+    // The per-event decisions are not part of the baseline, so a snapshot
+    // taken while they hold anything -- inside an implicit event that has
+    // already answered a call -- would silently drop them, and restoring could
+    // then answer differently.
+    if (!mTxSetDecisionsThisEvent.empty())
+    {
+        throw std::logic_error("replay baseline snapshot requested after a "
+                               "txset decision in the current event");
     }
 
     // Identity for the wrapped-form cache in restoreReplayBaseline().
@@ -761,30 +781,88 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
         return std::nullopt;
     }
 
+    auto const recordWaitTimeDebugEvent =
+        [this](std::chrono::milliseconds waitTime) {
+            recordReplayDebugEvent(ReplayDebugEvent{
+                .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
+                .mWaitTime = waitTime});
+        };
+
+    {
+        auto const decisionIt = mTxSetDecisionsThisEvent.find(value);
+        if (decisionIt != mTxSetDecisionsThisEvent.end() &&
+            decisionIt->second.mWaitTimeDecided)
+        {
+            // Recorded on every call that returns a wait time, memo hits
+            // included, so investigation output still shows what SCP observed.
+            // A memoized nullopt records nothing, matching the behavior before
+            // the memo, where only a produced wait time emitted an event --
+            // and the investigation formatter dereferences mWaitTime
+            // unconditionally.
+            if (decisionIt->second.mWaitTime)
+            {
+                recordWaitTimeDebugEvent(*decisionIt->second.mWaitTime);
+            }
+            return decisionIt->second.mWaitTime;
+        }
+    }
+
+    // Every gated nullopt is memoized, the no-recorded-status case included.
+    // Without that, a wait query preceding all validation in an event answers
+    // "no download in progress", a later validateValue chooses Downloading,
+    // and the next query branches -- two answers to one question inside one
+    // event.
+    auto const decideNoWaitTime =
+        [this, &value]() -> std::optional<std::chrono::milliseconds> {
+        auto& decision = mTxSetDecisionsThisEvent[value];
+        decision.mWaitTimeDecided = true;
+        decision.mWaitTime.reset();
+        return std::nullopt;
+    };
+
     if (mNondeterministicTxSetStatus)
     {
-        // A wait time only exists while a download is in progress, which the
-        // modeled status records. No recorded status means nothing was ever
-        // downloading for this value.
-        auto const it = mLastTxSetStatusByValue.find(value);
-        if (it == mLastTxSetStatusByValue.end() ||
-            it->second != DporScpTxSetStatus::Downloading)
+        // A wait time only exists while a download is in progress, and the
+        // event's own status decides that. maybeReplaceValueWithEmptyTxSet(),
+        // the only caller, always validates before it queries, so falling back
+        // to the cross-event status should be unreachable -- but that call
+        // order belongs to production code the harness does not own, so the
+        // fallback pins the event's status rather than answering past it.
+        auto const eventStatus =
+            [this, &value]() -> std::optional<DporScpTxSetStatus> {
+            auto const decisionIt = mTxSetDecisionsThisEvent.find(value);
+            if (decisionIt != mTxSetDecisionsThisEvent.end() &&
+                decisionIt->second.mStatus)
+            {
+                return decisionIt->second.mStatus;
+            }
+            auto const lastStatusIt = mLastTxSetStatusByValue.find(value);
+            if (lastStatusIt == mLastTxSetStatusByValue.end())
+            {
+                return std::nullopt;
+            }
+            mTxSetDecisionsThisEvent[value].mStatus = lastStatusIt->second;
+            return lastStatusIt->second;
+        }();
+
+        if (eventStatus != DporScpTxSetStatus::Downloading)
         {
-            return std::nullopt;
+            return decideNoWaitTime();
         }
     }
     else if (mTxSetStatus != DporScpTxSetStatus::Downloading)
     {
-        return std::nullopt;
+        return decideNoWaitTime();
     }
 
-    auto const recordWaitTime = [this,
-                                 &value](std::chrono::milliseconds waitTime) {
+    auto const recordWaitTime = [this, &value, &recordWaitTimeDebugEvent](
+                                    std::chrono::milliseconds waitTime) {
         mLastTxSetDownloadWaitTimeByValue[value] = waitTime;
         ++mTxSetDownloadWaitTimeCallCountsByValue[value];
-        recordReplayDebugEvent(ReplayDebugEvent{
-            .mKind = ReplayDebugEvent::Kind::UseTxSetDownloadWaitTime,
-            .mWaitTime = waitTime});
+        auto& decision = mTxSetDecisionsThisEvent[value];
+        decision.mWaitTimeDecided = true;
+        decision.mWaitTime = waitTime;
+        recordWaitTimeDebugEvent(waitTime);
         return waitTime;
     };
 
@@ -897,11 +975,30 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     }
     if (nomination && mNominationAlwaysDownloadingTxSetStatus)
     {
+        // Deliberately exempt from the per-event decision below. This is a
+        // branch-saving forcing knob, not a model of fetcher state: memoizing
+        // it would stop balloting from ever branching in an event that began
+        // with a nomination validation, which is exactly what the flag exists
+        // to explore. See docs/dpor-integration-status.md for the wart.
         return SCPDriver::kStructurallyValidValue;
     }
     if (mTxSetDownloadsSucceeded.contains(value))
     {
         return SCPDriver::kFullyValidatedValue;
+    }
+    {
+        // Repeated validateValue calls with the same arguments inside one
+        // handler cannot disagree in production: the fetcher state they read
+        // is only mutated by other main-thread callbacks, and none can run
+        // re-entrantly inside Slot::processEnvelope. If a future SCPDriver
+        // callback synchronously drains overlay work, this assumption is what
+        // it breaks.
+        auto const decisionIt = mTxSetDecisionsThisEvent.find(value);
+        if (decisionIt != mTxSetDecisionsThisEvent.end() &&
+            decisionIt->second.mStatus)
+        {
+            return validationLevelForTxSetStatus(*decisionIt->second.mStatus);
+        }
     }
     DporScpTxSetStatus status = mTxSetStatus;
     if (mNondeterministicTxSetStatus)
@@ -921,6 +1018,7 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     }
 
     mLastTxSetStatusByValue[value] = status;
+    mTxSetDecisionsThisEvent[value].mStatus = status;
     return validationLevelForTxSetStatus(status);
 }
 
@@ -1328,6 +1426,7 @@ DporScpNode::clearReplayState()
     mPendingTxSetStatusChoices.clear();
     mNextPendingTxSetStatusChoice = 0;
     mLastTxSetStatusByValue.clear();
+    mTxSetDecisionsThisEvent.clear();
     mLastTxSetDownloadWaitTimeByValue.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
@@ -1342,6 +1441,11 @@ DporScpNode::clearReplayState()
 void
 DporScpNode::beginExternalEvent()
 {
+    // Cleared on entry as well as exit: direct driver calls made outside any
+    // scope form one implicit event, and opening a real one must not inherit
+    // its decisions.
+    mTxSetDecisionsThisEvent.clear();
+
     for (auto const& value : mPendingTxSetDownloadsSucceeded)
     {
         if (!mTxSetDownloadsSucceeded.insert(value).second)
@@ -1354,6 +1458,14 @@ DporScpNode::beginExternalEvent()
         mTxSetDownloadWaitTimeCallCountsByValue.erase(value);
     }
     mPendingTxSetDownloadsSucceeded.clear();
+}
+
+void
+DporScpNode::endExternalEvent()
+{
+    // Leaving a finished event's decisions readable by a subsequent direct
+    // driver call would make "which event is this?" ambiguous.
+    mTxSetDecisionsThisEvent.clear();
 }
 
 void

@@ -1007,6 +1007,13 @@ traceBundleFromJson(Json::Value const& value)
             "replay differently; capture a fresh trace with the current "
             "binary");
     }
+    if (bundle.mVersion == 5)
+    {
+        throw std::invalid_argument(
+            "trace bundle version 5 recorded a txset choice per driver call "
+            "rather than per event, so it carries choices the current model "
+            "never requests; capture a fresh trace with the current binary");
+    }
     if (bundle.mVersion != TRACE_BUNDLE_VERSION)
     {
         throw std::invalid_argument("unsupported trace bundle version");

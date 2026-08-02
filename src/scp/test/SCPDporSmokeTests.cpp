@@ -640,6 +640,16 @@ TEST_CASE("scp dpor trace json rejects mid-event download-success version four",
                         Catch::Contains("trace bundle version 4"));
 }
 
+TEST_CASE("scp dpor trace json rejects per-call-choice version five",
+          "[scp][dpor][smoke]")
+{
+    Json::Value root(Json::objectValue);
+    root["version"] = 5;
+
+    REQUIRE_THROWS_WITH(traceBundleFromJson(root),
+                        Catch::Contains("trace bundle version 5"));
+}
+
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",
           "[scp][dpor][smoke]")
 {
@@ -1595,39 +1605,63 @@ TEST_CASE("scp dpor node latches txset wait-time once a value times out",
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
-    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
-                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                          DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    }
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetDownloadWaitTimeChoice(aboveTimeout);
-    auto const chosenAboveWaitTime = node.getTxSetDownloadWaitTime(value);
-    REQUIRE(chosenAboveWaitTime == aboveTimeout);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+        // Same event: pinned rather than re-chosen.
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    }
     auto const aboveCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    auto const latchedAboveWaitTime = node.getTxSetDownloadWaitTime(value);
-    REQUIRE(latchedAboveWaitTime == aboveTimeout);
+    {
+        // Next event: still above the timeout, because that latch is
+        // cross-event.
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+    }
 
     node.restoreReplayBaseline(aboveCheckpoint);
-    auto const restoredAboveWaitTime = node.getTxSetDownloadWaitTime(value);
-    REQUIRE(restoredAboveWaitTime == aboveTimeout);
-    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(otherValue),
-                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == aboveTimeout);
+        REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(otherValue),
+                          DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    }
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetDownloadWaitTimeChoice(belowTimeout);
-    auto const chosenBelowWaitTime = node.getTxSetDownloadWaitTime(value);
-    REQUIRE(chosenBelowWaitTime == belowTimeout);
-    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
-                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+        // Same event: pinned, so no second branch.
+        REQUIRE(node.getTxSetDownloadWaitTime(value) == belowTimeout);
+    }
+    {
+        // Next event: a below-timeout wait is not latched, so it branches.
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                          DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    }
     auto const belowCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
 
     node.restoreReplayBaseline(belowCheckpoint);
-    REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
-                      DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.getTxSetDownloadWaitTime(value),
+                          DporScpNode::TxSetDownloadWaitTimeChoiceRequired);
+    }
 }
 
-TEST_CASE("scp dpor replay restores pending txset wait-time eligibility",
+TEST_CASE("scp dpor replay restores txset wait-time eligibility",
           "[scp][dpor][smoke]")
 {
     auto const options = ScpDporDefaultScenario::makeDefaultOptions();
@@ -1642,16 +1676,85 @@ TEST_CASE("scp dpor replay restores pending txset wait-time eligibility",
     value.push_back('x');
 
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
-    auto const waitingLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(waitingLevel == SCPDriver::kStructurallyValidValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kStructurallyValidValue);
+    }
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     node.restoreReplayBaseline(checkpoint);
 
+    DporScpNode::ExternalEventScope event(node);
     auto const waitTime = node.getTxSetDownloadWaitTime(value);
     REQUIRE(waitTime.has_value());
     REQUIRE(*waitTime == config.mTxSetDownloadWaitTimes.at(0));
+}
+
+TEST_CASE("scp dpor pins a txset wait-time answered before validation",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    config.mTxSetDownloadWaitTimes = {
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1),
+        std::chrono::milliseconds(
+            DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS + 1)};
+    config.mNondeterministicTxSetDownloadWaitTime = true;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
+
+    DporScpNode::ExternalEventScope event(node);
+    // Nothing has been validated yet, so there is no download in progress to
+    // wait on. That answer is memoized even though there is no status behind
+    // it.
+    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(value).has_value());
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kStructurallyValidValue);
+    // Answering differently now -- or opening a wait-time branch -- would be
+    // exactly the mid-event flip the per-event decision exists to prevent.
+    REQUIRE_FALSE(node.getTxSetDownloadWaitTime(value).has_value());
+}
+
+TEST_CASE("scp dpor answers repeated txset wait-time queries consistently",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    config.mTxSetDownloadWaitTimes = {std::chrono::milliseconds(
+        DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    node.setReplayDebugRecordingEnabled(true);
+    Value value;
+    value.push_back('x');
+
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
+
+    DporScpNode::ExternalEventScope event(node);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kStructurallyValidValue);
+
+    // One verdict, two queries. The removed pairing counter decremented per
+    // query, so the second one reported "no download in progress" and drove
+    // SCP down the drop-the-tx-set path.
+    auto const first = node.getTxSetDownloadWaitTime(value);
+    auto const second = node.getTxSetDownloadWaitTime(value);
+    REQUIRE(first.has_value());
+    REQUIRE(second == first);
+
+    // Memo hits still record what SCP observed, so investigation output is
+    // unchanged.
+    REQUIRE(countWaitTimeDebugEvents(node.takeReplayDebugEvents()) == 2);
 }
 
 TEST_CASE(
@@ -1737,40 +1840,65 @@ TEST_CASE("scp dpor node latches txset status once a value is resolved",
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                          DporScpNode::TxSetStatusChoiceRequired);
+    }
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    auto const chosenValidLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(chosenValidLevel == SCPDriver::kFullyValidatedValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+    }
     auto const validCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    auto const latchedValidLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(latchedValidLevel == SCPDriver::kFullyValidatedValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+    }
 
     node.restoreReplayBaseline(validCheckpoint);
-    auto const restoredValidLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(restoredValidLevel == SCPDriver::kFullyValidatedValue);
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+        // A distinct value is a distinct download, so it still branches.
+        REQUIRE_THROWS_AS(
+            node.validateValue(options.mSlotIndex, otherValue, false),
+            DporScpNode::TxSetStatusChoiceRequired);
+    }
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
-    auto const chosenWaitingLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(chosenWaitingLevel == SCPDriver::kStructurallyValidValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kStructurallyValidValue);
+        // Same event: pinned rather than re-branched.
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kStructurallyValidValue);
+    }
     auto const waitingCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    {
+        // Next event: downloading is not latched, so it branches again.
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                          DporScpNode::TxSetStatusChoiceRequired);
+    }
 
     node.restoreReplayBaseline(waitingCheckpoint);
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                          DporScpNode::TxSetStatusChoiceRequired);
+    }
 }
 
 TEST_CASE("scp dpor node can model eventual valid txset resolution",
@@ -1790,29 +1918,38 @@ TEST_CASE("scp dpor node can model eventual valid txset resolution",
 
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
 
-    auto const initialChoices =
-        requireTxSetStatusChoices(node, options.mSlotIndex, value);
-    REQUIRE(initialChoices == config.mSupportedTxSetStatusChoices);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        auto const initialChoices =
+            requireTxSetStatusChoices(node, options.mSlotIndex, value);
+        REQUIRE(initialChoices == config.mSupportedTxSetStatusChoices);
+    }
 
     node.restoreReplayBaseline(checkpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
-    auto const waitingLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(waitingLevel == SCPDriver::kStructurallyValidValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kStructurallyValidValue);
+    }
     auto const waitingCheckpoint =
         node.snapshotReplayBaseline(options.mSlotIndex);
-    auto const rebranchedChoices =
-        requireTxSetStatusChoices(node, options.mSlotIndex, value);
-    REQUIRE(rebranchedChoices == config.mSupportedTxSetStatusChoices);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        auto const rebranchedChoices =
+            requireTxSetStatusChoices(node, options.mSlotIndex, value);
+        REQUIRE(rebranchedChoices == config.mSupportedTxSetStatusChoices);
+    }
 
     node.restoreReplayBaseline(waitingCheckpoint);
     node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Valid);
-    auto const resolvedLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(resolvedLevel == SCPDriver::kFullyValidatedValue);
-    auto const latchedLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(latchedLevel == SCPDriver::kFullyValidatedValue);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+    }
 }
 
 TEST_CASE("scp dpor node can force downloading txset status during nomination",
@@ -1830,6 +1967,14 @@ TEST_CASE("scp dpor node can force downloading txset status during nomination",
     DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
     Value value;
     value.push_back('x');
+
+    // Everything below happens inside one event. The forcing knob is exempt
+    // from the per-event decision on purpose, so nomination can answer
+    // downloading while balloting answers valid for the same value in the same
+    // event. Memoizing the override would stop balloting from ever branching
+    // after a nomination validation, which is what this flag exists to
+    // explore. Recorded as a known wart in docs/dpor-integration-status.md.
+    DporScpNode::ExternalEventScope event(node);
 
     auto const nominationLevel =
         node.validateValue(options.mSlotIndex, value, true);
@@ -1961,6 +2106,147 @@ TEST_CASE("scp dpor rejects replay snapshots taken inside an external event",
                       std::logic_error);
     REQUIRE_THROWS_AS(node.restoreReplayBaseline(checkpoint),
                       std::logic_error);
+}
+
+TEST_CASE("scp dpor rejects replay snapshots after an implicit txset decision",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
+
+    // No scope is open, so this call sits in the implicit event at depth 0.
+    // The event-depth check cannot see it; only the decision map can.
+    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
+    REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+            SCPDriver::kStructurallyValidValue);
+
+    REQUIRE_THROWS_AS(node.snapshotReplayBaseline(options.mSlotIndex),
+                      std::logic_error);
+
+    // Opening and closing a real event resets the implicit one.
+    {
+        DporScpNode::ExternalEventScope event(node);
+    }
+    REQUIRE_NOTHROW(node.snapshotReplayBaseline(options.mSlotIndex));
+}
+
+TEST_CASE("scp dpor asks for one txset status choice per value per event",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+    auto const& localKey = options.mValidators.at(0);
+    auto const& peerKey = options.mValidators.at(1);
+    auto const value = makeTestValue("x");
+    auto const previousValue = makeTestValue("previous");
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 1;
+    qSet.validators.push_back(localKey.getPublicKey());
+    qSet.validators.push_back(peerKey.getPublicKey());
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    // Below the download timeout, so maybeReplaceValueWithEmptyTxSet keeps the
+    // value instead of dropping the tx set. Keeping it is what lets the ballot
+    // protocol validate the same value again later in this one event.
+    config.mTxSetDownloadWaitTimes = {std::chrono::milliseconds(
+        DporScpNode::DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS - 1)};
+
+    // Nominating with a threshold-1 quorum set drives the node straight into
+    // balloting, so this single event runs nomination validation and then
+    // several ballot-protocol validations of the same value.
+    //
+    // Mirror what replay does with a required choice: it unwinds the handler,
+    // and the event is re-run from scratch with the accumulated answers
+    // preloaded. Each round therefore consumes exactly one more choice, so the
+    // round count is the number of choices this one event asks for. Answering
+    // `downloading` every time is what makes the count meaningful -- `valid`
+    // would latch across events and hide a repeat behind the cross-event
+    // latch.
+    std::vector<DporScpTxSetStatus> answers;
+    std::size_t rounds = 0;
+    while (true)
+    {
+        DporScpNode node(localKey, qSet, config);
+        for (auto const answer : answers)
+        {
+            node.enqueueTxSetStatusChoice(answer);
+        }
+        try
+        {
+            // Deliberately not inside REQUIRE: Catch would absorb the choice
+            // exception and report it as an unexpected failure.
+            auto const nominated =
+                node.nominate(options.mSlotIndex, value, previousValue);
+            REQUIRE(nominated);
+            break;
+        }
+        catch (DporScpNode::TxSetStatusChoiceRequired const&)
+        {
+            answers.push_back(DporScpTxSetStatus::Downloading);
+            ++rounds;
+            REQUIRE(rounds < 8);
+        }
+    }
+
+    // Measured at 7 with the per-event decision bypassed: nomination
+    // validation branched, and then the ballot protocol branched again on the
+    // same value, six more times, inside this one handler.
+    REQUIRE(rounds == 1);
+}
+
+TEST_CASE("scp dpor replay rejects a txset choice the event never requests",
+          "[scp][dpor][smoke]")
+{
+    auto const validator = SecretKey::pseudoRandomForTestingFromSeed(2002);
+
+    SCPQuorumSet qSet;
+    qSet.threshold = 1;
+    qSet.validators.push_back(validator.getPublicKey());
+
+    Value previousValue;
+    previousValue.push_back('p');
+    Value initialValue;
+    initialValue.push_back('x');
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+
+    std::vector<SecretKey> validators{validator};
+    std::vector<Value> initialValues{initialValue};
+    ScpDporReplaySupport replaySupport(validators, qSet, 0, previousValue,
+                                       initialValues, config);
+    DporScpNode node(validator, qSet, config);
+
+    node.setupTimer(0, Slot::NOMINATION_TIMER, std::chrono::milliseconds(10),
+                    [&node, initialValue]() {
+                        static_cast<void>(
+                            node.validateValue(0, initialValue, false));
+                        static_cast<void>(
+                            node.validateValue(0, initialValue, false));
+                    });
+
+    // A structurally valid, current-version trace can still be stale: this one
+    // records a choice per driver call, and the second one is never requested.
+    // The version check cannot catch that, so replay has to.
+    ThreadTrace trace;
+    trace.emplace_back(ObservedValue::bottom());
+    trace.emplace_back(
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Downloading));
+    trace.emplace_back(
+        makeTxSetStatusChoiceValue(0, DporScpTxSetStatus::Downloading));
+    trace.emplace_back(ObservedValue::bottom());
+
+    REQUIRE_THROWS_WITH(
+        replaySupport.replayObservation(
+            node, 0, trace, 0, std::optional<int>{Slot::NOMINATION_TIMER}),
+        Catch::Contains("does not request"));
 }
 
 TEST_CASE(

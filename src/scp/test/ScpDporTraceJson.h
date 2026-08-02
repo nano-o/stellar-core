@@ -14,7 +14,7 @@
 namespace stellar::scpdpor
 {
 
-inline constexpr int TRACE_BUNDLE_VERSION = 5;
+inline constexpr int TRACE_BUNDLE_VERSION = 6;
 
 struct TerminalMeta
 {
