@@ -447,8 +447,6 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
                                         .mCount = count.mCount});
     }
     baseline.mLastTxSetStatusByValue = mLastTxSetStatusByValue;
-    baseline.mPendingTxSetDownloadStatusCounts =
-        mPendingTxSetDownloadStatusCounts;
     baseline.mLastTxSetDownloadWaitTimeByValue =
         mLastTxSetDownloadWaitTimeByValue;
     baseline.mTxSetDownloadWaitTimeCallCountsByValue =
@@ -626,8 +624,6 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
                                .mCount = timerSetCount.mCount});
     }
     mLastTxSetStatusByValue = baseline.mLastTxSetStatusByValue;
-    mPendingTxSetDownloadStatusCounts =
-        baseline.mPendingTxSetDownloadStatusCounts;
     mLastTxSetDownloadWaitTimeByValue =
         baseline.mLastTxSetDownloadWaitTimeByValue;
     mTxSetDownloadWaitTimeCallCountsByValue =
@@ -734,18 +730,14 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
 
     if (mNondeterministicTxSetStatus)
     {
-        auto const it = mPendingTxSetDownloadStatusCounts.find(value);
-        if (it == mPendingTxSetDownloadStatusCounts.end())
+        // A wait time only exists while a download is in progress, which the
+        // modeled status records. No recorded status means nothing was ever
+        // downloading for this value.
+        auto const it = mLastTxSetStatusByValue.find(value);
+        if (it == mLastTxSetStatusByValue.end() ||
+            it->second != DporScpTxSetStatus::Downloading)
         {
             return std::nullopt;
-        }
-        if (it->second <= 1)
-        {
-            mPendingTxSetDownloadStatusCounts.erase(it);
-        }
-        else
-        {
-            --mPendingTxSetDownloadStatusCounts[value];
         }
     }
     else if (mTxSetStatus != DporScpTxSetStatus::Downloading)
@@ -896,14 +888,6 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
     }
 
     mLastTxSetStatusByValue[value] = status;
-    if (status == DporScpTxSetStatus::Downloading)
-    {
-        ++mPendingTxSetDownloadStatusCounts[value];
-    }
-    else
-    {
-        mPendingTxSetDownloadStatusCounts.erase(value);
-    }
     return validationLevelForTxSetStatus(status);
 }
 
@@ -1311,7 +1295,6 @@ DporScpNode::clearReplayState()
     mPendingTxSetStatusChoices.clear();
     mNextPendingTxSetStatusChoice = 0;
     mLastTxSetStatusByValue.clear();
-    mPendingTxSetDownloadStatusCounts.clear();
     mLastTxSetDownloadWaitTimeByValue.clear();
     mPendingTxSetDownloadWaitTimeChoices.clear();
     mNextPendingTxSetDownloadWaitTimeChoice = 0;
@@ -1331,7 +1314,6 @@ DporScpNode::markTxSetDownloadSucceeded(Value const& value)
     }
 
     mLastTxSetStatusByValue.erase(value);
-    mPendingTxSetDownloadStatusCounts.erase(value);
     mLastTxSetDownloadWaitTimeByValue.erase(value);
     mTxSetDownloadWaitTimeCallCountsByValue.erase(value);
 }

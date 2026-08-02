@@ -180,7 +180,6 @@ class DporScpNode : public SCPDriver
         std::vector<ReplayTimerSnapshot> mTimers;
         std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
         std::map<Value, DporScpTxSetStatus> mLastTxSetStatusByValue;
-        std::map<Value, std::size_t> mPendingTxSetDownloadStatusCounts;
         std::map<Value, std::chrono::milliseconds>
             mLastTxSetDownloadWaitTimeByValue;
         std::map<Value, std::size_t> mTxSetDownloadWaitTimeCallCountsByValue;
@@ -386,7 +385,6 @@ class DporScpNode : public SCPDriver
     mutable std::vector<DporScpTxSetStatus> mPendingTxSetStatusChoices;
     mutable std::size_t mNextPendingTxSetStatusChoice{0};
     mutable std::map<Value, DporScpTxSetStatus> mLastTxSetStatusByValue;
-    mutable std::map<Value, std::size_t> mPendingTxSetDownloadStatusCounts;
     mutable std::map<Value, std::chrono::milliseconds>
         mLastTxSetDownloadWaitTimeByValue;
     mutable std::vector<std::chrono::milliseconds>

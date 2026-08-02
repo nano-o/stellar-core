@@ -171,7 +171,6 @@ Each `NodeBaseline` contains:
 - installed timers
 - timer set counts
 - per-value txset status history
-- pending txset wait-time eligibility from prior `downloading` results
 - per-value txset wait-time history
 - per-value txset wait-time call counts
 - per-value successful txset downloads
