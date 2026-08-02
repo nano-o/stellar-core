@@ -305,6 +305,11 @@ The possible events are:
   - a transaction-set download wait-time choice selects a duration
     below or above the download timeout.
 
+  Both transaction-set choices are made at most once per value per external
+  event, so the several `SCPDriver` callbacks SCP makes while handling one
+  envelope or timer firing share a single choice rather than branching
+  independently.
+
 - Block (`BlockLabel`)
 
   The DPOR core inserts this event when a blocking receive has no

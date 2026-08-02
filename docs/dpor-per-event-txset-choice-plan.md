@@ -1,8 +1,9 @@
 # DPOR Per-Event Tx-Set Choice Scoping Plan
 
-Status: **design, not started.** No code has been written. Revision 6, after
-five design reviews; see [Review disposition](#review-disposition) for what
-changed.
+Status: **implemented.** Revision 6, after five design reviews; see
+[Review disposition](#review-disposition) for what changed during design, and
+[Implementation notes](#implementation-notes) at the end for the two places
+where the plan's predictions did not survive contact with measurement.
 
 Baseline: branch `dpor-on-master` at `b784d2f25`, `external/dpor` pinned at
 `febae6f`. Fingerprint captured with `src/scp/test/bench-dpor.sh check` on this
@@ -754,3 +755,45 @@ accepted.
 | Low — Part 4 contradicts the corrected snapshot split | Accepted: paragraph rewritten. The decisive map-empty check lands with the map in commit 3; commit 2's depth checks are the weaker half and cannot catch a depth-0 snapshot during an implicit event. "Assertion" replaced with "runtime check" in the files table and the version table, consistent with everything throwing. |
 | Low — commit 1's transitional algorithm underspecified | Accepted: commit 1 reads `mLastTxSetStatusByValue`, not the event decision, which does not exist yet. No entry means no download in progress, matching today's "count absent → `nullopt`". |
 | Low — CA may move in both semantic commits | Accepted: commit 3 now says all six nondeterministic lines may move, with CA taking a second independent delta to be recorded separately rather than combined. |
+
+## Implementation notes
+
+Landed as four commits on `dpor-on-master`, in the order Part 8 specified. Two
+predictions did not survive measurement, and one detail was underspecified.
+
+**Commit 2 moved nothing, not just CA.** Part 8 expected the §3.4 deferral to
+shift CA. It shifts nothing: `--stop-on-prepare` makes the boundary the very
+`PREPARE` at counter 1 that also marks the download succeeded, so the thread
+stops and CA never validates again. CA's baseline is identical to C3's for that
+reason — the flag is inert in that scenario. At the commit boundary, where
+`--download-succeeds-in-round 1` does change behavior (33569 executions with
+the flag versus 36624 without, at `--stop-on-commit --depth 46`), the deferral
+is also byte-identical, because SCP validates before it emits. The mid-event
+flip the deferral removes is unreachable in the modeled scenarios today rather
+than merely unobserved; the smoke tests pin it at unit level.
+
+The version 4 → 5 bump was kept anyway. It guards a real semantics change
+against traces captured under the old one, and "unobservable in the
+configurations measured" is not "unobservable". Its message says *may* replay
+differently rather than *does*.
+
+**CA takes its whole delta in commit 3**, 704 → 250, identical to C3's, for the
+same reason.
+
+**The choice-count test needed a different event.** Part 5 asked for a
+`receiveEnvelope` that previously produced three status choices. A peer
+`PREPARE` delivered to a node that has already balloted produces exactly one
+before and after, because `BallotProtocol::processEnvelope` gates on the first
+verdict and a `downloading` verdict stops the ballot paths that would validate
+again. The event that does exercise it is `nominate` with a threshold-1 quorum
+set, which drives straight into balloting: measured at **7** status choices
+with the per-event decision bypassed, and 1 with it in place. A node that has
+never nominated is a bad fixture here for an unrelated reason — the ballot
+protocol then validates an empty `Value`, which the model treats as a second,
+distinct download.
+
+Deterministic scenarios show no measurable throughput change (1.01x, 1.03x,
+1.01x, 0.91x for C5, C7, CD, C4, against a 0.91x-1.06x identical-binary control
+band). The per-event decision adds a map lookup per driver call and saves
+nothing where nothing branches, so that is the expected result rather than a
+null finding.

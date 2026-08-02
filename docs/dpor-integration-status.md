@@ -1,8 +1,8 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-07-31 for branch `dpor-on-master` at `4c89f7a03`,
-rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
-DPOR library commit `febae6f`.
+Status snapshot as of 2026-08-02 for branch `dpor-on-master`, rebased onto
+upstream `master` (`4c0d88c75`), with `external/dpor` pinned to DPOR library
+commit `febae6f`.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -245,6 +245,9 @@ it after confirming no build is active), then rerun configure.
       deterministically without a DPOR choice
     - in `downloading-then-valid` mode, status choices explore `downloading`
       and `valid`
+    - a value's status is decided at most once per external event, so the
+      several `validateValue` calls SCP makes for one value while handling a
+      single envelope or timer firing share one answer and one DPOR choice
     - choices reoccur only while the last result for a value is `downloading`;
       once a value resolves to `valid`, later queries on that node reuse the
       same result without another DPOR choice
@@ -255,13 +258,17 @@ it after confirming no build is active), then rerun configure.
     nomination-path queries return structurally valid without consuming a
     txset-status choice while
     ballot-path validation still follows the configured status mode
-  - in `nondet` wait-time mode, choices reoccur only while the last wait-time
+  - in `nondet` wait-time mode, a value's wait time is likewise decided at most
+    once per external event, and choices reoccur only while the last wait-time
     result for a value is still below the download timeout; once a value times
     out, later queries on that node reuse the timed-out result without another
     DPOR choice
-  - forcing later txset validation calls for that ballot value to return
-    `valid` after a node emits its first non-empty `PREPARE` in a configured
-    ballot round; resolution is isolated per value
+  - forcing txset validation calls for that ballot value to return `valid`
+    from the next external event onward, after a node emits its first
+    non-empty `PREPARE` in a configured ballot round; resolution is isolated
+    per value, and the deferral by one event is what keeps a download that
+    completes mid-handler from flipping a verdict inside the handler that
+    caused it
   - deterministic per-node outright-invalid value sets, kept separate from
     txset status so malformed values are rejected without empty-txset
     replacement
@@ -419,6 +426,43 @@ restriction/revisit paths, CSR PORF adjacency, flat vector clocks, and reusable
 scratch storage in the engine. Throughput measurements are machine-sensitive;
 the execution-count fingerprint is not and must remain exact.
 
+### Per-event txset decisions
+
+Scoping the modeled txset status and download wait time to one external event
+cut the state space of the nondeterministic scenarios rather than the cost per
+execution. `bench-dpor.sh check`, before and after:
+
+| scenario | before | after |
+|---|---|---|
+| C1 | 1336 | 460 |
+| C3 | 704 | 250 |
+| C6 | 10954 | 3346 |
+| CA | 704 | 250 |
+| CB | 90530 | 83846 |
+| CC | 90208 | 45381 |
+
+The other seven scenarios use only deterministic txset modes and are
+byte-identical. That split is the point: the reduction comes from removing
+branch points a single handler cannot actually take, not from exploring less of
+the protocol.
+
+Wall clock, medians of five alternating runs in one session at `--workers 8`,
+with a byte-identical copy of the baseline binary run as a control to establish
+the noise floor (its ratios are in parentheses):
+
+| scenario | before | after | ratio |
+|---|---|---|---|
+| 3-node FIFO externalize, depth 56 | 4.448 s | 2.764 s | 0.62x (control 0.94x) |
+| CC, depth 46 | 0.337 s | 0.174 s | 0.52x (control 1.00x) |
+| CB, depth 40 | 0.154 s | 0.133 s | 0.86x (control 1.00x) |
+
+Deterministic scenarios show no measurable change: over nine alternating runs
+each, C5, C7, CD and C4 came in at 1.01x, 1.03x, 1.01x and 0.91x, all inside
+the 0.91x-1.06x band the identical-binary control produced on the same runs.
+The per-event decision adds a map lookup per driver call and saves nothing when
+nothing branches, so "no measurable change" is the expected result there rather
+than a null finding.
+
 ### Parallel scaling
 
 Two engine scheduler changes (see
@@ -471,8 +515,8 @@ requiring. Everywhere else it prints the curve and asserts nothing.
 
 The build shape was verified with a clean reconfigure after rebasing onto
 `4c0d88c75` (upstream post-CAP-0083-ungating master). The runtime suites and
-execution fingerprint were rerun at `4c89f7a03` with the optimized `5f48e8b`
-engine:
+execution fingerprint were rerun after per-event txset scoping landed, with the
+optimized `5f48e8b` engine:
 
 - `./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20`
   (no next-protocol flag), `make clean`, `make -C lib`, then
@@ -481,20 +525,23 @@ engine:
   `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`, contain no
   `-DCAP_0083` anywhere in the build, and pick up master's new global
   `-DXDRPP_STRONG_ORDER=1`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 246
-  assertions in 42 test cases.
-- `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,931 assertions in
-  52 test cases.
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 266
+  assertions in 52 test cases.
+- `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,951 assertions in
+  62 test cases.
 - The standalone DPOR suite passed 279/279 tests in the current engine
   checkout, including the follow-up sparse ordered-import regressions.
-- `./src/scp/test/bench-dpor.sh check` reproduced the complete 13-scenario
-  execution-count fingerprint exactly.
+- `./src/scp/test/bench-dpor.sh check` reproduced the seven deterministic
+  scenarios byte-identically and the six nondeterministic ones at their new,
+  lower counts; see "Per-event txset decisions" above for the table.
 - `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
   reported
   `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.
 - `./src/scp-dpor-investigation --txset-status downloading-then-valid
   --depth 6` reported
-  `kind=all-explored executions=3 full=0 blocked=0 error=0 depth-limit=3`.
+  `kind=all-explored executions=2 full=0 blocked=0 error=0 depth-limit=2`.
+  This was `executions=3` before per-event txset scoping; the removed execution
+  was a duplicate status branch inside one handler.
 - `./src/scp-dpor-investigation --txset-status always-downloading
   --download-time above --stop-on-prepare --depth 12` reported
   `kind=all-explored executions=4 full=0 blocked=0 error=0 depth-limit=4`.
@@ -542,6 +589,30 @@ engine:
   1, and wrote a current-version trace focused on the first blocked node;
   `--replay-trace-json ... --replay-node all` replayed every node
   successfully (exit 0).
+- Behavior preservation across per-event txset scoping was checked directly
+  rather than inferred from aggregate counts, because a lower `full=` can mean
+  either "duplicate branches removed" or "coverage lost":
+  - Download blocking at the commit boundary is byte-identical.
+    `--nodes 3 --fifo --txset-status always-downloading --stop-on-commit
+    --depth 60` still gives
+    `executions=35904 full=0 blocked=8613 error=0 depth-limit=27291` for
+    `--download-time below` and
+    `executions=26409 full=12760 blocked=0 error=0 depth-limit=13649` for
+    `above`. A node that never times out still stalls; one that always times
+    out still replaces the tx set and proceeds. The prepare boundary does not
+    discriminate here -- it gives `16/12/4` for both -- because it stops before
+    full validation matters.
+  - The blocked executions C1 and C3 capture under `--fail-on-first-blocked`
+    are the same routes as before: same blocking node index, same thread, and
+    replay dumps that differ only by the removal of three (C1) and five (C3)
+    duplicate `txset-status(downloading)` choices.
+  - `--must-externalize --check-agreement` on the externalize-boundary variants
+    of C1 and C6 at `--depth 50` pass with `blocked=0`, over `full=821` and
+    `full=355634` maximal executions respectively. The `blocked=` count matters:
+    `--must-externalize` only checks quiesced runs.
+  - A captured bundle reports version 6 and round-trips through
+    `--replay-node all`; hand-edited version-4 and version-5 copies of it are
+    both rejected with their own messages.
 - At the previously documented `--depth 12` that same invocation finds no
   blocked execution. It now reports
   `error: --fail-on-first-blocked was set but no matching execution was found
