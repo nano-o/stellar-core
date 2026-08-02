@@ -1,7 +1,7 @@
 # DPOR Per-Event Tx-Set Choice Scoping Plan
 
-Status: **design, not started.** No code has been written. Revision 5, after
-four design reviews; see [Review disposition](#review-disposition) for what
+Status: **design, not started.** No code has been written. Revision 6, after
+five design reviews; see [Review disposition](#review-disposition) for what
 changed.
 
 Baseline: branch `dpor-on-master` at `b784d2f25`, `external/dpor` pinned at
@@ -309,10 +309,21 @@ fetcher lookup.
    fallback into the event decision**, so a wait query that runs before any
    validation in the event still pins the event's status. This replaces the
    counter at `:737-750`.
-   In practice the fallback should be unreachable — `maybeReplaceValueWithEmptyTxSet`
-   always validates (`:387`) before querying (`:401`), and it is the only
-   caller — so add a comment saying so; if it ever fires, that is a signal a new
-   call path appeared.
+
+   **Every gated `nullopt` return must set `mWaitTimeDecided = true` with
+   `mWaitTime` empty**, including the case where neither the event decision nor
+   `mLastTxSetStatusByValue` has any status to fall back on. Otherwise a wait
+   query that precedes all validation returns `nullopt` without recording
+   anything, a later `validateValue` in the same event chooses `Downloading`,
+   and the next wait query branches — two different answers in one event, which
+   is exactly what §3.0 forbids. Memoizing the status fallback alone does not
+   cover this, because in the no-history case there is no status to memoize.
+
+   In practice this whole branch should be unreachable —
+   `maybeReplaceValueWithEmptyTxSet` always validates (`:387`) before querying
+   (`:401`), and it is the only caller — so add a comment saying so. But the
+   memo must be correct without relying on that call order, since the order is
+   a property of production code the harness does not own.
 4. Above-timeout latch (`:773`) — unchanged.
 5. Consume a choice, or index the configured sequence; memoize the answer.
 
@@ -396,10 +407,12 @@ of a per-call override.
 ## Part 4 — Interaction with the replay machinery
 
 **Snapshots.** `mTxSetDecisionsThisEvent` needs no `ReplayBaseline` field
-*given* the event-boundary asserts in §3.1 — without them the omission is a
-silent correctness hole. The asserts land with the guard in commit 2, one
-commit ahead of the map they protect, so the contract is already enforced when
-the map appears.
+*given* the event-boundary runtime checks in §3.1 — without them the omission
+is a silent correctness hole. The decisive check is the map-empty one, and it
+lands in the same commit as the map itself (commit 3), so the map is never
+present without the check that protects it. Commit 2's event-depth checks are
+the weaker half: useful on their own, but they cannot catch a snapshot taken at
+depth 0 during an implicit event.
 `mPendingTxSetDownloadsSucceeded` does need a field (§3.4). Both are cleared in
 `clearReplayState`.
 
@@ -437,7 +450,7 @@ how a stored trace replays, and each must leave the tree self-consistent
 | commit | breaking change | version |
 |---|---|---|
 | 2 | `--download-succeeds-in-round` shifts by one event (§3.4), so a v4 trace replays differently | 4 → **5** |
-| 3 | per-call choices become per-event; the queue assertion rejects the leftovers a v5 trace still carries | 5 → **6** |
+| 3 | per-call choices become per-event; the queue runtime check rejects the leftovers a v5 trace still carries | 5 → **6** |
 
 Collapsing commits 2 and 3 into one bump is the alternative, but it also
 collapses the CA fingerprint delta into a single unattributable number
@@ -460,12 +473,12 @@ several recorded choices the memo now answers.
 |---|---|
 | `src/scp/test/DporScpNode.h` | event guard (public), `TxSetEventDecision`, `mPendingTxSetDownloadsSucceeded` (member + `ReplayBaseline` field), drop `mPendingTxSetDownloadStatusCounts` |
 | `src/scp/test/DporScpNode.cpp` | entry-point guards; `validateValue` / `getTxSetDownloadWaitTime` memo; counter removal; deferred download success; `clearReplayState`, `markTxSetDownloadSucceeded`, snapshot/restore |
-| `src/scp/test/ScpDporReplaySupport.cpp` | fully-consumed-queue assertion |
+| `src/scp/test/ScpDporReplaySupport.cpp` | fully-consumed-queue runtime check |
 | `src/scp/test/ScpDporTraceJson.h` / `.cpp` | `TRACE_BUNDLE_VERSION` 4→5 (commit 2) then 5→6 (commit 3); explicit rejection of each superseded version; version-agnostic v1-v3 messages |
 | `src/scp/test/SCPDporSmokeTests.cpp` | see below, incl. trace-version tests bumped alongside each version change |
 | `src/scp/test/DporScpInvestigationMain.cpp` | help text: `--txset-status` (`:290`), `--download-time` (`:285`), `--download-succeeds-in-round` |
-| `docs/dpor-replay-notes.md` | `:166` lists "pending txset wait-time eligibility from prior `downloading` results" — the removed counter; replace with the pending-success set |
-| `docs/dpor-integration-status.md` | new choice granularity; the §3.5 carve-out as a known wart |
+| `docs/dpor-replay-notes.md` | `:166` lists "pending txset wait-time eligibility from prior `downloading` results" — the removed counter; replace with the pending-success set. Also `:57` ("Trace bundles use schema version 4") and `:181` ("Loading a version-4 bundle") must track each bump |
+| `docs/dpor-integration-status.md` | `:394` ("JSON version-4 round-trips") and `:395-396` ("rejection of ... version-1 through version-3") must track each bump; plus the new choice granularity and the §3.5 carve-out as a known wart |
 | `src/scp/test/bench-dpor.sh` | no change; re-capture fingerprint |
 
 No production SCP files change. No build-system change.
@@ -493,6 +506,12 @@ No production SCP files change. No build-system change.
   second reporting "no download in progress".
 - New: the §3.5 carve-out — with the override on, nomination returns
   `Downloading` and a balloting call in the same event may still choose `Valid`.
+- New: wait-before-validation. In one event, query the wait time for a value
+  with no recorded status (expect `nullopt`), then `validateValue` choosing
+  `Downloading`, then query the wait time again. The second query must return
+  `nullopt` from the memo rather than opening a branch. Without the
+  gated-`nullopt` memoization in §3.3 step 3 this test fails, and nothing else
+  in the suite catches it.
 - New: superseded bundles are rejected. Because each bump must leave its own
   commit self-consistent, the test moves with it — commit 2 asserts v4 is
   rejected and v5 loads; commit 3 asserts **both v4 and v5** are rejected and v6
@@ -645,7 +664,12 @@ schema carries its own help text and schema documentation. Only cross-cutting
 results wait for the end.
 
 1. **Counter removal.** Replace `mPendingTxSetDownloadStatusCounts` with a read
-   of the decided status. All 13 fingerprint lines unchanged, C4 especially.
+   of `mLastTxSetStatusByValue` — **not** the event decision, which does not
+   exist until commit 3. Precisely: in nondeterministic-status mode,
+   `getTxSetDownloadWaitTime` returns `nullopt` unless
+   `mLastTxSetStatusByValue` holds `Downloading` for the value; no entry means
+   no download in progress, matching today's "count absent → `nullopt`". All 13
+   fingerprint lines unchanged, C4 especially.
    Docs: `docs/dpor-replay-notes.md:166`, which describes the removed counter
    as part of the baseline contents and is wrong the moment this lands.
 2. **Event guard + deferred download success** (§3.1 guard half, §3.4). The
@@ -655,15 +679,19 @@ results wait for the end.
    event-depth checks, and the two commit-2 replay tests.
    Trace version 4 → 5, with the v4 rejection message and the version-agnostic
    rewrite of the v1-v3 messages. Docs: `--download-succeeds-in-round` help
-   text ("from the next event onward"), and the replay-notes description of the
-   new pending-success baseline field. Only CA moves; record the delta.
+   text ("from the next event onward"), the replay-notes description of the new
+   pending-success baseline field, and the version references that go stale on
+   this bump — `docs/dpor-replay-notes.md:57`, `:181` and
+   `docs/dpor-integration-status.md:394-396`. Only CA moves; record the delta.
 3. **Per-event memoization** (§3.1 map half, §3.2, §3.3, §3.5). The event
    decision map on top of commit 2's guard, the map-empty snapshot check and
    the smoke-test restructuring it forces, `hasUnconsumedTxSetChoices` and the
    queue-consumption check, and the two commit-3 replay tests. Trace version
-   5 → 6. Docs: `--txset-status` / `--download-time` help text, and the §3.5
-   carve-out recorded as a known wart. This is where the remaining five
-   fingerprint lines move; record before/after in the message.
+   5 → 6. Docs: `--txset-status` / `--download-time` help text, the §3.5
+   carve-out recorded as a known wart, and the same version references bumped
+   again. All six nondeterministic fingerprint lines may move here, CA
+   included — it takes a second, independent delta on top of commit 2's, so
+   record the two separately rather than reporting one combined change.
 4. **Results and summary only.** Refreshed `bench-dpor.sh check` fingerprint,
    throughput measurements, and the `docs/dpor-integration-status.md` summary
    of the new choice granularity. Nothing here is needed to make commits 1-3
@@ -714,4 +742,15 @@ implementation clarification confirmed and accepted.
 | Medium — commit 2 references commit 3 state | Accepted: §3.1 now splits the checks by commit in a table. Commit 2 gets the two event-depth checks; the map-empty check and the smoke-test restructuring it forces move to commit 3, alongside the map itself. Part 4 and Part 8 updated to match. |
 | Medium — new replay invariants need direct tests | Accepted: four tests added to Part 5, each assigned to its commit — deferred success surviving a snapshot (the only coverage of the new `ReplayBaseline` field), snapshot/restore inside an event, snapshot after an implicit choice, and a well-formed v6 bundle carrying a leftover choice. Noted why version rejection cannot substitute: such a bundle is current and structurally valid. |
 | Medium — per-commit docs postponed to commit 4 | Accepted: help text and schema documentation move into the commits that change the behavior they describe. `docs/dpor-replay-notes.md:166` moves to commit 1, since the counter it describes disappears there. Commit 4 keeps only the refreshed fingerprint, throughput results, and the integration-status summary. |
-| Clarification — throw rather than assert; queues are private | Accepted, and generalized: **all** the new checks throw `std::logic_error`, because neither `DporScpNode.cpp` nor `ScpDporReplaySupport.cpp` uses `releaseAssert` or `assert` anywhere today — every existing invariant in them is a throw. Confirmed `DporScpNode` declares no `friend` and the queues and indices are private (`DporScpNode.h:386-394`); the plan now names a minimal public `bool hasUnconsumedTxSetChoices() const` instead of exposing indices or granting friendship. |
+| Clarification (rev 5) — throw rather than assert; queues are private | Accepted, and generalized: **all** the new checks throw `std::logic_error`, because neither `DporScpNode.cpp` nor `ScpDporReplaySupport.cpp` uses `releaseAssert` or `assert` anywhere today — every existing invariant in them is a throw. Confirmed `DporScpNode` declares no `friend` and the queues and indices are private (`DporScpNode.h:386-394`); the plan now names a minimal public `bool hasUnconsumedTxSetChoices() const` instead of exposing indices or granting friendship. |
+
+Revision 6 responds to the fifth review. All five findings confirmed and
+accepted.
+
+| finding | disposition |
+|---|---|
+| Medium — gate-produced `nullopt` not memoized | Accepted: §3.3 step 3 now requires **every** gated `nullopt` return to set `mWaitTimeDecided` with an empty `mWaitTime`, explicitly including the no-history case where there is no status to memoize — the gap memoizing the status fallback alone leaves open. New wait-before-validation test in Part 5, noted as the only thing in the suite that catches it. |
+| Medium — current-status docs cannot wait for commit 4 | Accepted: `docs/dpor-integration-status.md:394-396` and `docs/dpor-replay-notes.md:57`, `:181` carry explicit version references and now track each bump in commits 2 and 3. Added to the files table and both commit descriptions. |
+| Low — Part 4 contradicts the corrected snapshot split | Accepted: paragraph rewritten. The decisive map-empty check lands with the map in commit 3; commit 2's depth checks are the weaker half and cannot catch a depth-0 snapshot during an implicit event. "Assertion" replaced with "runtime check" in the files table and the version table, consistent with everything throwing. |
+| Low — commit 1's transitional algorithm underspecified | Accepted: commit 1 reads `mLastTxSetStatusByValue`, not the event decision, which does not exist yet. No entry means no download in progress, matching today's "count absent → `nullopt`". |
+| Low — CA may move in both semantic commits | Accepted: commit 3 now says all six nondeterministic lines may move, with CA taking a second independent delta to be recorded separately rather than combined. |
