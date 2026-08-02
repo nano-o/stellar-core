@@ -391,10 +391,10 @@ it after confirming no build is active), then rerun configure.
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
-  - JSON version-4 round-trips for scenario options, per-node
+  - JSON version-5 round-trips for scenario options, per-node
     outright-invalid mappings, and raw per-thread traces
   - explicit rejection of semantically incompatible version-1 through
-    version-3 traces
+    version-4 traces
   - timeout-driven empty-txset replacement
   - outright-invalid nomination and ballot rejection without replacement
   - empty-txset nomination-versus-ballot validation
@@ -532,13 +532,14 @@ engine:
 - `--fail-on-first-terminal --trace-dir ... --txset-status
   downloading-then-valid --depth 12` reported `terminal-kind=error
   node-index=0 thread=0` and `kind=stopped executions=1`, exited 1, and wrote
-  a version-4 trace; `--replay-trace-json ... --replay-node all` reloaded and
+  a current-version trace; `--replay-trace-json ... --replay-node all`
+  reloaded and
   replayed every node successfully (exit 0).
 - `--fail-on-first-blocked --trace-dir ... --txset-status always-downloading
   --download-time above --stop-on-prepare --depth 20` reported
   `terminal-kind=blocked leader-boundary=true` and
   `kind=stopped executions=52 full=2 blocked=1 error=0 depth-limit=49`, exited
-  1, and wrote a version-4 trace focused on the first blocked node;
+  1, and wrote a current-version trace focused on the first blocked node;
   `--replay-trace-json ... --replay-node all` replayed every node
   successfully (exit 0).
 - At the previously documented `--depth 12` that same invocation finds no

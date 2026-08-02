@@ -65,6 +65,31 @@ class DporScpNode : public SCPDriver
         std::vector<DporScpTxSetStatus> mChoices;
     };
 
+    // Scopes one external event: a single call that drives SCP from outside,
+    // plus everything SCP does synchronously inside it. The five entry points
+    // below open one; tests that need to exercise per-event behavior must open
+    // one explicitly rather than relying on the implicit event that direct
+    // driver calls made outside any scope form.
+    //
+    // Replay baselines may only be snapshotted or restored at an event
+    // boundary, i.e. with no scope open.
+    class ExternalEventScope
+    {
+      public:
+        explicit ExternalEventScope(DporScpNode& node);
+        ~ExternalEventScope();
+
+        // Copying or moving would run the exit path twice and end the event
+        // while it is still running.
+        ExternalEventScope(ExternalEventScope const&) = delete;
+        ExternalEventScope& operator=(ExternalEventScope const&) = delete;
+        ExternalEventScope(ExternalEventScope&&) = delete;
+        ExternalEventScope& operator=(ExternalEventScope&&) = delete;
+
+      private:
+        DporScpNode& mNode;
+    };
+
     static constexpr uint32_t DEFAULT_PREPARE_BOUNDARY_COUNTER = 1;
     static constexpr uint32_t DEFAULT_TX_SET_DOWNLOAD_TIMEOUT_MS = 1000;
 
@@ -184,6 +209,7 @@ class DporScpNode : public SCPDriver
             mLastTxSetDownloadWaitTimeByValue;
         std::map<Value, std::size_t> mTxSetDownloadWaitTimeCallCountsByValue;
         std::set<Value> mTxSetDownloadsSucceeded;
+        std::set<Value> mPendingTxSetDownloadsSucceeded;
         bool mHasReachedBoundary{};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
     };
@@ -342,6 +368,8 @@ class DporScpNode : public SCPDriver
 
     void clearReplayState();
 
+    void beginExternalEvent();
+
     void markTxSetDownloadSucceeded(Value const& value);
 
     std::optional<Value>
@@ -376,6 +404,11 @@ class DporScpNode : public SCPDriver
     std::set<Value> mOutrightInvalidValues;
     std::optional<uint32_t> mDownloadSucceedsInBallotRound;
     std::set<Value> mTxSetDownloadsSucceeded;
+    // Downloads that completed during the event still running. Promoted into
+    // mTxSetDownloadsSucceeded when the next event opens, so a completion can
+    // never flip a verdict part-way through the handler that caused it.
+    std::set<Value> mPendingTxSetDownloadsSucceeded;
+    std::uint32_t mExternalEventDepth{0};
     uint32_t mInitialNominationTimeoutMS{1000};
     uint32_t mIncrementNominationTimeoutMS{1000};
     uint32_t mInitialBallotTimeoutMS{1000};

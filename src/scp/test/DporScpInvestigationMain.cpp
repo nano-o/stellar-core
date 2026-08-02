@@ -306,7 +306,7 @@ printUsage(char const* argv0)
               << " (default: disabled)\n"
               << "  --download-succeeds-in-round N\n"
               << "      Once a node emits its first PREPARE in ballot N,"
-              << " later tx-set validation returns valid"
+              << " tx-set validation returns valid from the next event onward"
               << " (default: disabled)\n"
               << "  --fifo\n"
               << "      Use FIFO point-to-point delivery"

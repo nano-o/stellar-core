@@ -132,6 +132,20 @@ DporScpNode::TxSetStatusChoiceRequired::getChoices() const
     return mChoices;
 }
 
+DporScpNode::ExternalEventScope::ExternalEventScope(DporScpNode& node)
+    : mNode(node)
+{
+    if (mNode.mExternalEventDepth++ == 0)
+    {
+        mNode.beginExternalEvent();
+    }
+}
+
+DporScpNode::ExternalEventScope::~ExternalEventScope()
+{
+    --mNode.mExternalEventDepth;
+}
+
 DporScpNode::DporScpNode(SecretKey const& secretKey,
                          SCPQuorumSet const& localQSet)
     : DporScpNode(secretKey, localQSet, Configuration{})
@@ -190,12 +204,14 @@ bool
 DporScpNode::nominate(uint64 slotIndex, Value const& value,
                       Value const& previousValue)
 {
+    ExternalEventScope event(*this);
     return mSCP.nominate(slotIndex, wrapValue(value), previousValue);
 }
 
 bool
 DporScpNode::startBalloting(uint64 slotIndex, Value const& value)
 {
+    ExternalEventScope event(*this);
     auto slot = mSCP.getSlot(slotIndex, true);
     return slot->bumpState(value, true);
 }
@@ -203,12 +219,14 @@ DporScpNode::startBalloting(uint64 slotIndex, Value const& value)
 SCP::EnvelopeState
 DporScpNode::receiveEnvelope(SCPEnvelope const& envelope)
 {
+    ExternalEventScope event(*this);
     return mSCP.receiveEnvelope(wrapEnvelope(envelope));
 }
 
 void
 DporScpNode::setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& envelope)
 {
+    ExternalEventScope event(*this);
     mSCP.setStateFromEnvelope(slotIndex, wrapEnvelope(envelope));
 }
 
@@ -265,6 +283,7 @@ DporScpNode::fireTimer(uint64 slotIndex, int timerID)
     mTimers.erase(it);
     if (cb)
     {
+        ExternalEventScope event(*this);
         cb();
     }
     return true;
@@ -310,6 +329,12 @@ DporScpNode::takeReplayDebugEvents()
 DporScpNode::ReplayBaseline
 DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
 {
+    if (mExternalEventDepth != 0)
+    {
+        throw std::logic_error(
+            "replay baseline snapshot requested inside an external event");
+    }
+
     // Identity for the wrapped-form cache in restoreReplayBaseline().
     ReplayBaseline baseline;
 
@@ -452,6 +477,7 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
     baseline.mTxSetDownloadWaitTimeCallCountsByValue =
         mTxSetDownloadWaitTimeCallCountsByValue;
     baseline.mTxSetDownloadsSucceeded = mTxSetDownloadsSucceeded;
+    baseline.mPendingTxSetDownloadsSucceeded = mPendingTxSetDownloadsSucceeded;
     baseline.mHasReachedBoundary = mHasReachedBoundary;
     baseline.mBoundaryEnvelope = mBoundaryEnvelope;
     baseline.mSnapshotId = nextReplayBaselineSnapshotId();
@@ -461,6 +487,12 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
 void
 DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
 {
+    if (mExternalEventDepth != 0)
+    {
+        throw std::logic_error(
+            "replay baseline restore requested inside an external event");
+    }
+
     clearReplayState();
 
     if (baseline.mSlotState)
@@ -629,6 +661,7 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
     mTxSetDownloadWaitTimeCallCountsByValue =
         baseline.mTxSetDownloadWaitTimeCallCountsByValue;
     mTxSetDownloadsSucceeded = baseline.mTxSetDownloadsSucceeded;
+    mPendingTxSetDownloadsSucceeded = baseline.mPendingTxSetDownloadsSucceeded;
     mHasReachedBoundary = baseline.mHasReachedBoundary;
     mBoundaryEnvelope = baseline.mBoundaryEnvelope;
 }
@@ -1301,21 +1334,40 @@ DporScpNode::clearReplayState()
     mTxSetDownloadWaitTimeCallCountsByValue.clear();
     mReplayDebugEvents.clear();
     mTxSetDownloadsSucceeded.clear();
+    mPendingTxSetDownloadsSucceeded.clear();
     mHasReachedBoundary = false;
     mBoundaryEnvelope.reset();
 }
 
 void
+DporScpNode::beginExternalEvent()
+{
+    for (auto const& value : mPendingTxSetDownloadsSucceeded)
+    {
+        if (!mTxSetDownloadsSucceeded.insert(value).second)
+        {
+            continue;
+        }
+
+        mLastTxSetStatusByValue.erase(value);
+        mLastTxSetDownloadWaitTimeByValue.erase(value);
+        mTxSetDownloadWaitTimeCallCountsByValue.erase(value);
+    }
+    mPendingTxSetDownloadsSucceeded.clear();
+}
+
+void
 DporScpNode::markTxSetDownloadSucceeded(Value const& value)
 {
-    if (!mTxSetDownloadsSucceeded.insert(value).second)
+    // Deferred to the start of the next external event rather than applied
+    // here: emitEnvelope() runs mid-handler, and promoting immediately would
+    // let a later validateValue() in the same handler flip from Downloading to
+    // Valid -- a mid-event change of mind that production cannot produce.
+    if (mTxSetDownloadsSucceeded.contains(value))
     {
         return;
     }
-
-    mLastTxSetStatusByValue.erase(value);
-    mLastTxSetDownloadWaitTimeByValue.erase(value);
-    mTxSetDownloadWaitTimeCallCountsByValue.erase(value);
+    mPendingTxSetDownloadsSucceeded.insert(value);
 }
 
 std::optional<Value>

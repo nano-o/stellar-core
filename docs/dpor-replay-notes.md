@@ -54,14 +54,20 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus thread
 - one raw `ThreadTrace` per thread
 
-Trace bundles use schema version 4. Version 4 stores the txset-status modes as
+Trace bundles use schema version 5. Version 5 stores the txset-status modes as
 `always-valid`, `downloading-then-valid`, or `always-downloading`, and txset
 status choices can contain only `valid` or `downloading`.
+
+Version-4 bundles are rejected because `--download-succeeds-in-round` used to
+take effect in the same event that emitted the triggering `PREPARE`, and now
+takes effect from the next event onward. No measured scenario changed its
+execution count across that shift, but a version-4 trace was captured under
+different semantics and is not guaranteed to replay the same way.
 
 Version-2 and version-3 bundles are rejected before their scenario options or
 trace observations are parsed because they may contain the removed
 downloaded-invalid status or nondeterministic status mode. Replaying either
-under the reduced version-4 model would change the explored behavior.
+under the reduced current model would change the explored behavior.
 
 Version-1 bundles are rejected before scenario options or trace observations
 are parsed. Their `invalid` status meant outright SCP-value invalidity, so
@@ -81,7 +87,7 @@ global insertion order.
 Consequently this format does not import `ExecutionGraphT` event ids and does
 not call the engine's `add_event_with_index()` API. That API's monotonic
 per-thread index requirement protects low-level graph importers but does not
-change the version-4 SCP trace schema or ordinary model-checking replay.
+change the SCP trace schema or ordinary model-checking replay.
 
 Replay defaults to the stored `focus_node_index`. `--replay-node N` overrides
 that to one node, and `--replay-node all` replays every node in focus-first
@@ -174,10 +180,12 @@ Each `NodeBaseline` contains:
 - per-value txset wait-time history
 - per-value txset wait-time call counts
 - per-value successful txset downloads
+- per-value txset downloads that completed during the running event and are
+  promoted when the next event opens
 - replay-boundary state
 
 The configured per-node outright-invalid value sets are immutable scenario
-configuration rather than mutable replay state. Loading a version-4 bundle
+configuration rather than mutable replay state. Loading a version-5 bundle
 reconstructs those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.

@@ -990,14 +990,22 @@ traceBundleFromJson(Json::Value const& value)
     {
         throw std::invalid_argument(
             "trace bundle version 1 uses incompatible pre-CAP-0083 txset "
-            "status semantics; capture a version 4 trace");
+            "status semantics; capture a fresh trace with the current binary");
     }
     if (bundle.mVersion == 2 || bundle.mVersion == 3)
     {
         throw std::invalid_argument(
             "trace bundle versions 2 and 3 may contain removed "
             "downloaded-invalid or nondeterministic txset status modes; "
-            "capture a version 4 trace");
+            "capture a fresh trace with the current binary");
+    }
+    if (bundle.mVersion == 4)
+    {
+        throw std::invalid_argument(
+            "trace bundle version 4 observed a successful txset download in "
+            "the same event that emitted the triggering PREPARE, so it may "
+            "replay differently; capture a fresh trace with the current "
+            "binary");
     }
     if (bundle.mVersion != TRACE_BUNDLE_VERSION)
     {

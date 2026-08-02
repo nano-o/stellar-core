@@ -630,6 +630,16 @@ TEST_CASE("scp dpor trace json rejects pre-CAP version one",
         Catch::Contains("version 1 uses incompatible pre-CAP-0083"));
 }
 
+TEST_CASE("scp dpor trace json rejects mid-event download-success version four",
+          "[scp][dpor][smoke]")
+{
+    Json::Value root(Json::objectValue);
+    root["version"] = 4;
+
+    REQUIRE_THROWS_WITH(traceBundleFromJson(root),
+                        Catch::Contains("trace bundle version 4"));
+}
+
 TEST_CASE("scp dpor smoke explore reaches a terminal execution",
           "[scp][dpor][smoke]")
 {
@@ -1856,8 +1866,62 @@ TEST_CASE(
     Value otherValue;
     otherValue.push_back('y');
 
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    SCPEnvelope prepareEnvelope;
+    prepareEnvelope.statement.slotIndex = options.mSlotIndex;
+    prepareEnvelope.statement.nodeID = options.mValidators.at(0).getPublicKey();
+    prepareEnvelope.statement.pledges.type(SCP_ST_PREPARE);
+    prepareEnvelope.statement.pledges.prepare().ballot.counter = 1;
+    prepareEnvelope.statement.pledges.prepare().ballot.value = value;
+
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                          DporScpNode::TxSetStatusChoiceRequired);
+        node.emitEnvelope(prepareEnvelope);
+        // The download completes mid-event, so it stays unobservable until the
+        // next event opens.
+        REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, value, false),
+                          DporScpNode::TxSetStatusChoiceRequired);
+    }
+
+    {
+        DporScpNode::ExternalEventScope event(node);
+        auto const downloadedLevel =
+            node.validateValue(options.mSlotIndex, value, false);
+        REQUIRE(downloadedLevel == SCPDriver::kFullyValidatedValue);
+        REQUIRE_THROWS_AS(
+            node.validateValue(options.mSlotIndex, otherValue, false),
+            DporScpNode::TxSetStatusChoiceRequired);
+
+        node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
+        auto const otherValueLevel =
+            node.validateValue(options.mSlotIndex, otherValue, false);
+        REQUIRE(otherValueLevel == SCPDriver::kStructurallyValidValue);
+        REQUIRE(node.getTxSetDownloadWaitTime(otherValue).has_value());
+    }
+
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+    node.restoreReplayBaseline(checkpoint);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        auto const restoredLevel =
+            node.validateValue(options.mSlotIndex, value, false);
+        REQUIRE(restoredLevel == SCPDriver::kFullyValidatedValue);
+    }
+}
+
+TEST_CASE("scp dpor defers txset download success to the next event",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode::Configuration config;
+    config.mNondeterministicTxSetStatus = true;
+    config.mDownloadSucceedsInBallotRound = 1;
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet, config);
+    Value value;
+    value.push_back('x');
 
     SCPEnvelope prepareEnvelope;
     prepareEnvelope.statement.slotIndex = options.mSlotIndex;
@@ -1865,25 +1929,38 @@ TEST_CASE(
     prepareEnvelope.statement.pledges.type(SCP_ST_PREPARE);
     prepareEnvelope.statement.pledges.prepare().ballot.counter = 1;
     prepareEnvelope.statement.pledges.prepare().ballot.value = value;
-    node.emitEnvelope(prepareEnvelope);
 
-    auto const downloadedLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(downloadedLevel == SCPDriver::kFullyValidatedValue);
-    REQUIRE_THROWS_AS(node.validateValue(options.mSlotIndex, otherValue, false),
-                      DporScpNode::TxSetStatusChoiceRequired);
+    {
+        DporScpNode::ExternalEventScope event(node);
+        node.emitEnvelope(prepareEnvelope);
+    }
 
-    node.enqueueTxSetStatusChoice(DporScpTxSetStatus::Downloading);
-    auto const otherValueLevel =
-        node.validateValue(options.mSlotIndex, otherValue, false);
-    REQUIRE(otherValueLevel == SCPDriver::kStructurallyValidValue);
-    REQUIRE(node.getTxSetDownloadWaitTime(otherValue).has_value());
-
+    // Snapshotting between the emitting event and the next one is the only
+    // window in which the promotion lives solely in the pending set, so this
+    // is what pins it to the replay baseline.
     auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
     node.restoreReplayBaseline(checkpoint);
-    auto const restoredLevel =
-        node.validateValue(options.mSlotIndex, value, false);
-    REQUIRE(restoredLevel == SCPDriver::kFullyValidatedValue);
+
+    {
+        DporScpNode::ExternalEventScope event(node);
+        REQUIRE(node.validateValue(options.mSlotIndex, value, false) ==
+                SCPDriver::kFullyValidatedValue);
+    }
+}
+
+TEST_CASE("scp dpor rejects replay snapshots taken inside an external event",
+          "[scp][dpor][smoke]")
+{
+    auto const options = ScpDporDefaultScenario::makeDefaultOptions();
+
+    DporScpNode node(options.mValidators.at(0), options.mQuorumSet);
+    auto const checkpoint = node.snapshotReplayBaseline(options.mSlotIndex);
+
+    DporScpNode::ExternalEventScope event(node);
+    REQUIRE_THROWS_AS(node.snapshotReplayBaseline(options.mSlotIndex),
+                      std::logic_error);
+    REQUIRE_THROWS_AS(node.restoreReplayBaseline(checkpoint),
+                      std::logic_error);
 }
 
 TEST_CASE(

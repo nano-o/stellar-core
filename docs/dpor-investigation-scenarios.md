@@ -283,7 +283,7 @@ The possible events are:
   produces one send event per receiving node, but those values share one
   immutable in-memory envelope payload and its precomputed content digest.
   This representation does not change equality, ordering, hashing, or the XDR
-  stored in a version-4 trace.
+  stored in a trace bundle.
 
 - Receive (`ReceiveLabel`)
 
