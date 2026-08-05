@@ -14,7 +14,15 @@
 namespace stellar::scpdpor
 {
 
-inline constexpr int TRACE_BUNDLE_VERSION = 6;
+// Version we write. Version 7 widened the serialized value domain of
+// terminal.kind with "thread-event-limit", so an older reader must reject
+// bundles we write from now on. The change is purely additive in the other
+// direction -- a version-6 bundle carries the same scenario options and trace
+// semantics, and its terminal kinds are a strict subset of ours -- so
+// MIN_READABLE_TRACE_BUNDLE_VERSION keeps loading them rather than
+// invalidating every saved debugging artifact.
+inline constexpr int TRACE_BUNDLE_VERSION = 7;
+inline constexpr int MIN_READABLE_TRACE_BUNDLE_VERSION = 6;
 
 struct TerminalMeta
 {

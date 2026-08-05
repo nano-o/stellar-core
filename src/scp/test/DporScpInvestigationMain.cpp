@@ -9,6 +9,7 @@
 #include "util/Logging.h"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -22,6 +23,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <vector>
@@ -37,12 +39,24 @@ namespace
 // exploring. The explicit --max-nomination-timers-round flag overrides this.
 constexpr uint32_t DEFAULT_MAX_NOMINATION_TIMERS_ROUND = 1;
 
+// --depth bounds DPOR *search-tree* depth, which a per-thread event bound does
+// not: capping each validator at K protocol steps still leaves plenty of
+// search-tree depth to explore the interleavings of those steps. Leaving
+// --depth at its default of 12 would keep truncating those runs before the
+// bound could bite, so setting --thread-event-depth raises it to the DPOR
+// library's own DporConfigT::max_depth default. An explicit --depth still wins.
+constexpr std::size_t DEFAULT_DEPTH_WITH_THREAD_EVENT_DEPTH = 1000;
+
 struct CommandLineOptions
 {
     std::optional<stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode>
         mInitMode;
     std::size_t mWorkers{1};
     std::size_t mDepth{12};
+    bool mDepthExplicit{false};
+    // Absent means unlimited, which is also how -1 is spelled on the command
+    // line. There is deliberately no SIZE_MAX sentinel anywhere downstream.
+    std::optional<std::size_t> mThreadEventDepth;
     std::size_t mValidatorCount{
         stellar::scpdpor::ScpDporDefaultScenario::DEFAULT_VALIDATOR_COUNT};
     std::size_t mReplaySlotsPerNode{
@@ -183,6 +197,8 @@ terminalExecutionKindName(dpor::algo::TerminalExecutionKind kind)
         return "error";
     case dpor::algo::TerminalExecutionKind::DepthLimit:
         return "depth-limit";
+    case dpor::algo::TerminalExecutionKind::ThreadEventLimit:
+        return "thread-event-limit";
     }
     throw std::logic_error("unknown terminal execution kind");
 }
@@ -225,7 +241,23 @@ printUsage(char const* argv0)
               << " (default: " << parallelDefaults.progress_poll_interval_steps
               << ")\n"
               << "  --depth N\n"
-              << "      DPOR max depth (default: " << defaults.mDepth << ")\n"
+              << "      DPOR max search-tree depth; ordinary forward steps and"
+              << " backward revisits both consume it, and it is a global budget"
+              << " shared across all nodes"
+              << " (default: " << defaults.mDepth << ")\n"
+              << "  --thread-event-depth N|-1\n"
+              << "      Bound the events any single node may contribute;"
+              << " each node is capped independently, so this is a per-node"
+              << " step budget rather than a search-tree budget. Executions a"
+              << " cap may have truncated are counted separately as"
+              << " thread-event-limit and excluded from --must-externalize and"
+              << " --check-agreement, which only inspect maximal executions."
+              << " Setting this raises --depth to "
+              << DEFAULT_DEPTH_WITH_THREAD_EVENT_DEPTH
+              << " unless --depth is also passed, since the default --depth of "
+              << defaults.mDepth
+              << " would otherwise truncate the runs first. -1 means unlimited,"
+              << " and leaves --depth alone (default: unlimited)\n"
               << "  --nodes N | --validators N\n"
               << "      Validator count, currently 3 or 4; 4 uses a"
               << " 3-of-4 quorum set on every node"
@@ -406,16 +438,41 @@ parseInitMode(std::string_view value)
     throw std::invalid_argument("unknown init mode: " + std::string(value));
 }
 
+// std::stoull is not a validator. It skips leading whitespace, wraps a leading
+// minus around into a huge positive value (std::stoull("-1") is
+// 18446744073709551615), and stops at the first non-digit without complaining
+// (std::stoull("5x") is 5). Every numeric option inherited all three, so parse
+// strictly here instead. There is deliberately no "-1 means unlimited"
+// sentinel: it would give unrelated options a new and mostly unsafe meaning,
+// and would make the legitimate decimal 18446744073709551615 indistinguishable
+// from it. Options that want an unlimited spelling handle it in their own
+// branch and represent it as an absent optional.
+template <typename T>
+T
+parseStrictUnsignedValue(std::string_view arg, std::string_view value)
+{
+    T parsed{};
+    auto const* const first = value.data();
+    auto const* const last = first + value.size();
+    auto const result = std::from_chars(first, last, parsed);
+    if (result.ec == std::errc::result_out_of_range)
+    {
+        throw std::invalid_argument(
+            std::string(arg) + " value out of range: " + std::string(value));
+    }
+    if (result.ec != std::errc{} || result.ptr != last)
+    {
+        throw std::invalid_argument(
+            std::string(arg) +
+            " requires an unsigned integer: " + std::string(value));
+    }
+    return parsed;
+}
+
 uint32_t
 parseUint32Value(std::string_view arg, std::string_view value)
 {
-    auto const parsed = std::stoull(std::string(value));
-    if (parsed >
-        static_cast<unsigned long long>(std::numeric_limits<uint32_t>::max()))
-    {
-        throw std::invalid_argument(std::string(arg) + " value out of range");
-    }
-    return static_cast<uint32_t>(parsed);
+    return parseStrictUnsignedValue<uint32_t>(arg, value);
 }
 
 uint32_t
@@ -433,15 +490,7 @@ parsePositiveUint32Value(std::string_view arg, std::string_view value)
 std::size_t
 parseSizeValue(std::string_view arg, std::string_view value)
 {
-    try
-    {
-        return static_cast<std::size_t>(std::stoull(std::string(value)));
-    }
-    catch (std::exception const& ex)
-    {
-        throw std::invalid_argument(
-            std::string(arg) + " requires an unsigned integer: " + ex.what());
-    }
+    return parseStrictUnsignedValue<std::size_t>(arg, value);
 }
 
 std::size_t
@@ -597,7 +646,8 @@ findThreadTrace(stellar::scpdpor::TraceBundle const& bundle,
 std::chrono::seconds
 parsePositiveSecondsValue(std::string_view arg, std::string_view value)
 {
-    auto const parsed = std::stoull(std::string(value));
+    auto const parsed =
+        parseStrictUnsignedValue<unsigned long long>(arg, value);
     if (parsed == 0)
     {
         throw std::invalid_argument(std::string(arg) +
@@ -644,6 +694,9 @@ printProgressSnapshot(std::ostream& out,
          << " blocked_executions=" << snapshot.blocked_executions
          << " error_executions=" << snapshot.error_executions
          << " depth_limit_executions=" << snapshot.depth_limit_executions
+         << " thread_event_limit_executions="
+         << snapshot.thread_event_limit_executions
+         << " max_thread_event_depth=" << snapshot.max_thread_event_depth
          << " active_workers=" << snapshot.active_workers << "/"
          << snapshot.max_workers << " queued_tasks=" << snapshot.queued_tasks
          << "/" << snapshot.max_queued_tasks
@@ -1087,7 +1140,7 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--workers" && i + 1 < argc)
         {
-            options.mWorkers = static_cast<std::size_t>(std::stoull(argv[++i]));
+            options.mWorkers = parseSizeValue(arg, argv[++i]);
             continue;
         }
         if (arg == "--max-queued-tasks" && i + 1 < argc)
@@ -1118,7 +1171,25 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--depth" && i + 1 < argc)
         {
-            options.mDepth = static_cast<std::size_t>(std::stoull(argv[++i]));
+            options.mDepth = parseSizeValue(arg, argv[++i]);
+            options.mDepthExplicit = true;
+            continue;
+        }
+        if (arg == "--thread-event-depth" && i + 1 < argc)
+        {
+            std::string_view value(argv[++i]);
+            // Recognized only here, and represented as an absent optional
+            // rather than a SIZE_MAX sentinel, so nothing downstream has to
+            // decode it and no other option gains a "-1" meaning.
+            if (value == "-1")
+            {
+                options.mThreadEventDepth.reset();
+            }
+            else
+            {
+                // 0 would mean no node ever runs.
+                options.mThreadEventDepth = parsePositiveSizeValue(arg, value);
+            }
             continue;
         }
         if ((arg == "--nodes" || arg == "--validators") && i + 1 < argc)
@@ -1288,6 +1359,13 @@ parseOptions(char const* argv0, int argc, char* argv[])
     {
         options.mMaxNominationTimersRound = DEFAULT_MAX_NOMINATION_TIMERS_ROUND;
     }
+    // A per-node event bound is useless under the default search-tree budget,
+    // which truncates first; an explicit --depth still wins. Keyed on the
+    // option being set, so --thread-event-depth -1 leaves --depth alone.
+    if (options.mThreadEventDepth && !options.mDepthExplicit)
+    {
+        options.mDepth = DEFAULT_DEPTH_WITH_THREAD_EVENT_DEPTH;
+    }
     return options;
 }
 
@@ -1320,6 +1398,7 @@ main(int argc, char* argv[])
             stellar::scpdpor::wrapProgramExceptionsAsErrorExecutions(
                 scenario.makeProgram());
         config.max_depth = options.mDepth;
+        config.max_thread_events = options.mThreadEventDepth.value_or(0);
         config.communication_model = options.mCommunicationModel;
         if (options.mPrintStatsInterval)
         {
@@ -1588,7 +1667,10 @@ main(int argc, char* argv[])
                   << " blocked=" << result.blocked_executions_explored
                   << " error=" << result.error_executions_explored
                   << " depth-limit=" << result.depth_limit_executions_explored
-                  << "\n"
+                  << " thread-event-limit="
+                  << result.thread_event_limit_executions_explored
+                  << " max-thread-event-depth="
+                  << result.max_thread_event_depth_reached << "\n"
                   << std::flush;
         if (failureMessage)
         {
@@ -1615,8 +1697,52 @@ main(int argc, char* argv[])
                           << " execution(s) hit the depth limit, so a greater"
                              " --depth may reach a blocked execution";
             }
+            if (result.thread_event_limit_executions_explored > 0)
+            {
+                std::cout << "; "
+                          << result.thread_event_limit_executions_explored
+                          << " execution(s) may have been truncated by"
+                             " --thread-event-depth "
+                          << options.mThreadEventDepth.value_or(0)
+                          << ", so a greater value may reach one";
+            }
             std::cout << "\n" << std::flush;
             return 1;
+        }
+        // Both property checks only inspect maximal executions, which are
+        // exactly full + blocked. If there were none, nothing was evaluated and
+        // exit 0 would be indistinguishable from a clean pass -- the trap a
+        // per-node cap (or --stop-on-prepare) makes easy to fall into. Exit 2
+        // is distinct from the exit 1 used for genuine violations, and a real
+        // violation has already returned 1 above.
+        if ((options.mMustExternalize || options.mCheckAgreement) &&
+            result.full_executions_explored +
+                    result.blocked_executions_explored ==
+                0)
+        {
+            char const* const requested = options.mMustExternalize
+                                              ? "--must-externalize"
+                                              : "--check-agreement";
+            std::cout << "inconclusive: " << requested
+                      << " inspects only maximal (full or blocked) executions,"
+                         " and none of the "
+                      << result.executions_explored
+                      << " executions explored was maximal, so the property was"
+                         " never evaluated";
+            if (result.depth_limit_executions_explored > 0)
+            {
+                std::cout << "; " << result.depth_limit_executions_explored
+                          << " execution(s) hit --depth " << options.mDepth;
+            }
+            if (result.thread_event_limit_executions_explored > 0)
+            {
+                std::cout << "; "
+                          << result.thread_event_limit_executions_explored
+                          << " execution(s) sat at --thread-event-depth "
+                          << options.mThreadEventDepth.value_or(0);
+            }
+            std::cout << "\n" << std::flush;
+            return 2;
         }
         return 0;
     }

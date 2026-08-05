@@ -269,6 +269,8 @@ terminalKindName(dpor::algo::TerminalExecutionKind kind)
         return "error";
     case dpor::algo::TerminalExecutionKind::DepthLimit:
         return "depth-limit";
+    case dpor::algo::TerminalExecutionKind::ThreadEventLimit:
+        return "thread-event-limit";
     }
     throw std::logic_error("unknown terminal execution kind");
 }
@@ -291,6 +293,10 @@ parseTerminalKind(std::string_view kind)
     if (kind == "depth-limit")
     {
         return dpor::algo::TerminalExecutionKind::DepthLimit;
+    }
+    if (kind == "thread-event-limit")
+    {
+        return dpor::algo::TerminalExecutionKind::ThreadEventLimit;
     }
     throw std::invalid_argument("unknown terminal kind: " + std::string(kind));
 }
@@ -548,7 +554,8 @@ threadTraceRecordFromJson(Json::Value const& value)
 void
 validateTraceBundle(TraceBundle const& bundle)
 {
-    if (bundle.mVersion != TRACE_BUNDLE_VERSION)
+    if (bundle.mVersion < MIN_READABLE_TRACE_BUNDLE_VERSION ||
+        bundle.mVersion > TRACE_BUNDLE_VERSION)
     {
         throw std::invalid_argument("unsupported trace bundle version");
     }
@@ -1014,7 +1021,12 @@ traceBundleFromJson(Json::Value const& value)
             "rather than per event, so it carries choices the current model "
             "never requests; capture a fresh trace with the current binary");
     }
-    if (bundle.mVersion != TRACE_BUNDLE_VERSION)
+    // Versions 1-5 are rejected above for documented semantic
+    // incompatibilities. Version 6 is not: it carries the same scenario options
+    // and trace semantics as version 7, and its terminal kinds are a strict
+    // subset of ours, so it still replays correctly.
+    if (bundle.mVersion < MIN_READABLE_TRACE_BUNDLE_VERSION ||
+        bundle.mVersion > TRACE_BUNDLE_VERSION)
     {
         throw std::invalid_argument("unsupported trace bundle version");
     }

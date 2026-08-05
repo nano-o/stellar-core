@@ -1040,6 +1040,182 @@ TEST_CASE("scp dpor stop-on-prepare reaches a blocked execution",
     }
 }
 
+TEST_CASE("scp dpor thread-event depth bounds each validator independently",
+          "[scp][dpor][smoke]")
+{
+    // The per-thread event bound is what --depth cannot express: --depth is a
+    // single search-tree budget shared by every node, so a scenario that needs
+    // deep interleavings of shallow node histories can only be reached by
+    // raising --depth until the tree explodes. Pins that the bound bites, that
+    // it displaces depth-limit truncation entirely, and that the reported
+    // maximum equals the bound.
+    ScpDporDefaultScenario scenario(
+        ScpDporDefaultScenario::makeDefaultOptions());
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 1000;
+    config.max_thread_events = 3;
+
+    std::size_t observedTerminals = 0;
+    std::size_t maximalExecutionsSeen = 0;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            ++observedTerminals;
+            if (isMaximalExecution(execution))
+            {
+                ++maximalExecutionsSeen;
+            }
+            for (std::size_t nodeIndex = 0;
+                 nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+            {
+                REQUIRE(execution.graph.thread_event_count(
+                            threadIdForNodeIndex(nodeIndex)) <= 3);
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.error_executions_explored == 0);
+    REQUIRE(result.depth_limit_executions_explored == 0);
+    REQUIRE(result.thread_event_limit_executions_explored > 0);
+    REQUIRE(result.max_thread_event_depth_reached == 3);
+    // Exact fingerprint: a change here means the bounded exploration changed.
+    REQUIRE(result.executions_explored == 6);
+    REQUIRE(result.thread_event_limit_executions_explored == 6);
+    REQUIRE(observedTerminals == result.executions_explored);
+    // A truncated execution is not maximal, so property checks skip it. This
+    // is the regression guard for --must-externalize / --check-agreement.
+    REQUIRE(maximalExecutionsSeen == 0);
+}
+
+TEST_CASE(
+    "scp dpor reports the per-thread event depth an unbounded run reaches",
+    "[scp][dpor][smoke]")
+{
+    // Pins the stat itself, independently of any bound: recompute it from the
+    // published graphs and require the engine's value to agree. This is what
+    // tells an engineer which --thread-event-depth would actually be enough.
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mStopOnPrepare = true;
+    ScpDporDefaultScenario scenario(std::move(options));
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 30;
+
+    std::size_t observedMaxThreadEventDepth = 0;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            for (std::size_t nodeIndex = 0;
+                 nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
+            {
+                observedMaxThreadEventDepth =
+                    std::max(observedMaxThreadEventDepth,
+                             execution.graph.thread_event_count(
+                                 threadIdForNodeIndex(nodeIndex)));
+            }
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    auto const result = dpor::algo::verify(config);
+
+    REQUIRE(result.thread_event_limit_executions_explored == 0);
+    REQUIRE(result.max_thread_event_depth_reached ==
+            observedMaxThreadEventDepth);
+    REQUIRE(result.max_thread_event_depth_reached == 8);
+}
+
+TEST_CASE("scp dpor trace json round-trips a thread-event-limit terminal",
+          "[scp][dpor][smoke]")
+{
+    // Version 7 exists only because "thread-event-limit" widened the
+    // serialized value domain of terminal.kind. Check both directions of that
+    // widening, and that a version-6 bundle -- which cannot contain the new
+    // spelling, and is otherwise identical -- still loads and replays.
+    auto scenarioOptions = ScpDporDefaultScenario::makeDefaultOptions();
+    scenarioOptions.mStopOnPrepare = true;
+    ScpDporDefaultScenario scenario(std::move(scenarioOptions));
+
+    std::optional<TraceBundle> bundle;
+
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 1000;
+    config.max_thread_events = 3;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            if (!execution.is_thread_event_limit_execution())
+            {
+                return dpor::algo::TerminalExecutionAction::Continue;
+            }
+            bundle = makeTraceBundle(
+                scenario, execution, config.communication_model,
+                TerminalMeta{.mKind = execution.kind,
+                             .mFailureMessage = std::nullopt,
+                             .mFocusNodeIndex = 0,
+                             .mFocusThreadID = threadIdForNodeIndex(0)});
+            return dpor::algo::TerminalExecutionAction::Stop;
+        };
+
+    static_cast<void>(dpor::algo::verify(config));
+    REQUIRE(bundle.has_value());
+    REQUIRE(bundle->mVersion == TRACE_BUNDLE_VERSION);
+    REQUIRE(bundle->mTerminal.mKind ==
+            dpor::algo::TerminalExecutionKind::ThreadEventLimit);
+
+    auto const json = toJson(*bundle);
+    REQUIRE(json["version"].asUInt64() ==
+            static_cast<uint64_t>(TRACE_BUNDLE_VERSION));
+    REQUIRE(json["terminal"]["kind"].asString() == "thread-event-limit");
+
+    auto const reloaded = traceBundleFromJson(json);
+    REQUIRE(reloaded.mVersion == TRACE_BUNDLE_VERSION);
+    REQUIRE(reloaded.mTerminal.mKind == bundle->mTerminal.mKind);
+    REQUIRE(reloaded.mThreadTraces.size() == bundle->mThreadTraces.size());
+
+    ScpDporDefaultScenario reloadedScenario(reloaded.mOptions);
+    auto const inspection = reloadedScenario.inspectThreadReplayTrace(
+        reloaded.mTerminal.mFocusNodeIndex,
+        reloaded.mThreadTraces.at(reloaded.mTerminal.mFocusNodeIndex).mTrace);
+    REQUIRE(!inspection.mSteps.empty());
+    REQUIRE(!inspection.mReplayErrorMessage.has_value());
+
+    // Version-6 regression: same payload, older version stamp and an older
+    // terminal kind. Bundles already sitting in dpor-traces/ must keep working.
+    auto legacy = json;
+    legacy["version"] =
+        static_cast<Json::UInt64>(MIN_READABLE_TRACE_BUNDLE_VERSION);
+    legacy["terminal"]["kind"] = "blocked";
+
+    auto const loadedLegacy = traceBundleFromJson(legacy);
+    REQUIRE(loadedLegacy.mVersion == MIN_READABLE_TRACE_BUNDLE_VERSION);
+    REQUIRE(loadedLegacy.mTerminal.mKind ==
+            dpor::algo::TerminalExecutionKind::Blocked);
+    REQUIRE(loadedLegacy.mThreadTraces.size() == bundle->mThreadTraces.size());
+
+    ScpDporDefaultScenario legacyScenario(loadedLegacy.mOptions);
+    auto const legacyInspection = legacyScenario.inspectThreadReplayTrace(
+        loadedLegacy.mTerminal.mFocusNodeIndex,
+        loadedLegacy.mThreadTraces.at(loadedLegacy.mTerminal.mFocusNodeIndex)
+            .mTrace);
+    REQUIRE(legacyInspection.mSteps.size() == inspection.mSteps.size());
+    REQUIRE(!legacyInspection.mReplayErrorMessage.has_value());
+
+    // Versions before 6 stay rejected for their documented semantic
+    // incompatibilities, and a future version we cannot understand is rejected
+    // too.
+    auto tooOld = json;
+    tooOld["version"] =
+        static_cast<Json::UInt64>(MIN_READABLE_TRACE_BUNDLE_VERSION - 1);
+    REQUIRE_THROWS_AS(traceBundleFromJson(tooOld), std::invalid_argument);
+
+    auto tooNew = json;
+    tooNew["version"] = static_cast<Json::UInt64>(TRACE_BUNDLE_VERSION + 1);
+    REQUIRE_THROWS_AS(traceBundleFromJson(tooNew), std::invalid_argument);
+}
+
 TEST_CASE("scp dpor exploration witnesses outright-invalid proposer rejection",
           "[scp][dpor][smoke]")
 {

@@ -54,11 +54,23 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus thread
 - one raw `ThreadTrace` per thread
 
-Trace bundles use schema version 6. Version 6 stores the txset-status modes as
-`always-valid`, `downloading-then-valid`, or `always-downloading`, and txset
-status choices can contain only `valid` or `downloading`. It records at most
-one txset status choice and one txset wait-time choice per value per external
-event.
+Trace bundles are written at schema version 7, and versions 7 and 6 are both
+accepted on read. Both store the txset-status modes as `always-valid`,
+`downloading-then-valid`, or `always-downloading`, txset status choices can
+contain only `valid` or `downloading`, and both record at most one txset status
+choice and one txset wait-time choice per value per external event.
+
+Version 7 differs from version 6 in exactly one way: `terminal.kind` gained the
+spelling `thread-event-limit`, for executions the `--thread-event-depth`
+per-node event bound may have truncated. That widens the serialized value
+domain, so a pre-version-7 reader must reject the bundles we now write --
+hence the bump. In the other direction the change is purely additive: a
+version-6 bundle carries the same scenario options and the same trace
+semantics, and its terminal kinds are a strict subset of version 7's, so it
+still loads and replays. Version 6 is deliberately *not* added to the
+rejection ladder below, which is reserved for the documented semantic
+incompatibilities of versions 1-5. Bundles already sitting in `dpor-traces/`
+keep working.
 
 Version-5 bundles are rejected because they recorded a choice per `SCPDriver`
 call rather than per external event. Such a bundle carries choices the current
@@ -192,8 +204,8 @@ Each `NodeBaseline` contains:
 - replay-boundary state
 
 The configured per-node outright-invalid value sets are immutable scenario
-configuration rather than mutable replay state. Loading a version-6 bundle
-reconstructs those sets before baselines are built.
+configuration rather than mutable replay state. Loading a bundle reconstructs
+those sets before baselines are built.
 
 These baselines are built once when `ScpDporReplaySupport` is constructed.
 Each snapshot receives a content identity that is preserved by copies. A

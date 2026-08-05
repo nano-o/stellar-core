@@ -221,6 +221,10 @@ check)
   check_one CB --nodes 4 --txset-status downloading-then-valid --nomination-always-downloading --download-time nondet --stop-on-prepare --depth 40
   check_one CC $U --depth 46
   check_one CD $X --depth 42
+  # C1's scenario under a per-thread event bound. Chosen because it splits
+  # across all three of full/blocked/thread-event-limit, so the fingerprint is
+  # sensitive to terminal *classification*, not just to the explored count.
+  check_one CE --nodes 3 --fifo --txset-status downloading-then-valid --nomination-always-downloading --download-time nondet --stop-on-prepare --depth 200 --thread-event-depth 9
   ;;
 head)
   SECS=${SECS:-60}

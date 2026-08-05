@@ -565,22 +565,30 @@ int main()
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
      AC_MSG_ERROR([failed to compile a DPOR probe with DPOR_CPPFLAGS/DPOR_CXXFLAGS])])
-  AC_MSG_CHECKING([whether the DPOR checkout provides the blocked-execution API])
+  AC_MSG_CHECKING([whether the DPOR checkout provides the per-thread event-bound API])
   AC_COMPILE_IFELSE(
     [AC_LANG_SOURCE([[
 #include <dpor/algo/dpor.hpp>
 
+#include <cstddef>
+
 static_assert(static_cast<int>(dpor::algo::TerminalExecutionKind::Blocked) >= 0,
+              "DPOR checkout too old");
+static_assert(static_cast<int>(dpor::algo::TerminalExecutionKind::ThreadEventLimit) >= 0,
               "DPOR checkout too old");
 
 int main()
 {
-    return 0;
+    dpor::algo::DporConfig config;
+    config.max_thread_events = std::size_t(1);
+    dpor::algo::VerifyResult result;
+    return static_cast<int>(result.thread_event_limit_executions_explored +
+                            result.max_thread_event_depth_reached);
 }
 ]])],
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
-     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old (missing dpor::algo::TerminalExecutionKind::Blocked); update it to commit b238b19 or later of https://github.com/nano-o/CPP-DPOR.git])])
+     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old (missing dpor::algo::TerminalExecutionKind::ThreadEventLimit and/or DporConfigT::max_thread_events); update it to commit 0c26676 or later of https://github.com/nano-o/CPP-DPOR.git])])
   CPPFLAGS="$stellar_core_save_CPPFLAGS"
   CXXFLAGS="$stellar_core_save_CXXFLAGS"
 ])

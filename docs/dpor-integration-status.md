@@ -69,7 +69,10 @@ receive that no message can satisfy); previously both were classified `Full`.
 The harness treats the union as "maximal" wherever it checks complete
 interleavings (`isMaximalExecution` in
 [`src/scp/test/ScpDporInvestigationUtils.h`](../src/scp/test/ScpDporInvestigationUtils.h)),
-so `--must-externalize` and `--check-agreement` coverage is unchanged. The
+so `--must-externalize` and `--check-agreement` coverage is unchanged.
+`DepthLimit` and the newer `ThreadEventLimit` are outside that union by
+construction, which is what keeps a truncated branch from being mistaken for a
+complete interleaving. The
 library also introduced a typed exception hierarchy (`dpor/errors.hpp`), a
 `format_graph` helper (`dpor/model/format.hpp`), and an `on_fatal_error`
 diagnostic hook; the harness's existing exception-to-`ErrorLabel` wrapping
@@ -294,6 +297,12 @@ it after confirming no build is active), then rerun configure.
     - maximal (full or blocked) executions require all observed `EXTERNALIZE`
       envelopes to agree on the externalized value, and a failing execution
       dumps its replay trace
+  - either check exits **2** with an `inconclusive:` message when the run had
+    no maximal execution at all, since neither check then evaluated anything.
+    Exit 2 is distinct from the exit 1 used for a genuine violation, and a real
+    violation returns 1 first, so exit 2 only ever means "never evaluated". See
+    [Property checks are inconclusive, not passing, when nothing was
+    maximal](#property-checks-are-inconclusive-not-passing-when-nothing-was-maximal)
   - `--with-nomination-timers`
   - `--with-balloting-timers`
   - `--nodes 3|4` / `--validators 3|4`
@@ -346,6 +355,35 @@ it after confirming no build is active), then rerun configure.
     - default replay scope is the stored focus node; `all` replays every node
       in focus-first order
   - `--depth N`
+    - bounds DPOR **search-tree** depth, not event-graph size: ordinary forward
+      steps and backward revisits both consume it, and a backward revisit
+      builds a child with *fewer* events than its parent at depth+1. It is also
+      a single budget shared across all nodes, so it grows with the number of
+      interleavings rather than with how far any node got.
+  - `--thread-event-depth N|-1`
+    - bounds the events any single node may contribute -- a per-node step
+      budget rather than a search-tree budget. Each node is capped
+      independently, so reaching the cap on one node does not truncate the
+      others. Reaches the engine as `DporConfigT::max_thread_events`.
+    - executions the cap may have truncated are published as the
+      `thread-event-limit` terminal kind, counted in `thread-event-limit=` /
+      `thread_event_limit_executions=`, and excluded from `isMaximalExecution`,
+      so `--must-externalize` and `--check-agreement` skip them rather than
+      failing on a truncated run.
+    - the kind is conservative: it means the engine *declined to ask* at least
+      one node whether it had a further event, so it reads "may be truncated",
+      not "was truncated". A node that would naturally have finished at exactly
+      step N is indistinguishable from a truncated one without making the call
+      the bound exists to avoid.
+    - setting the flag raises `--depth` to 1000 unless `--depth` is also
+      passed, because the default `--depth 12` would otherwise truncate first.
+      `-1` means unlimited and, since the raise keys on the option being set,
+      leaves `--depth` alone; an A/B between the two should pass `--depth`
+      explicitly. `0` is rejected -- it would mean no node ever runs.
+    - interaction to know about: an execution with both a capped node and a
+      blocked node is now `thread-event-limit`, not `blocked`, so
+      `--fail-on-first-blocked` combined with a cap can find nothing.
+    - operational, not a scenario option: it is not serialized in replay traces.
   - engine and diagnostic tuning knobs that do not change the explored
     execution set: `--max-queued-tasks`, `--sync-steps`,
     `--split-poll-interval-steps`, `--progress-counter-flush-interval`,
@@ -372,6 +410,20 @@ it after confirming no build is active), then rerun configure.
 - The summary line and `--print-stats` progress lines report the blocked
   count (`blocked=` / `blocked_executions=`) alongside full, error, and
   depth-limit counts, and trace bundles serialize the `blocked` terminal kind.
+- Both lines also report the per-thread event bound's two keys, unconditionally
+  and whether or not `--thread-event-depth` was passed:
+  `thread-event-limit=` / `thread_event_limit_executions=` and
+  `max-thread-event-depth=` / `max_thread_event_depth=`. The maximum is taken
+  over *published terminal executions*, not over every transient graph, so
+  under an early stop it is only a whole-space maximum if exploration ran to
+  completion. Engine-injected `Block` events count toward it, so a node that
+  blocks at step N-1 reports N; the bound is therefore never exceeded. On
+  `--workers N` runs the progress-line value lags by up to
+  `--progress-counter-flush-interval` terminals per worker -- the same caveat
+  `counts_exact=false` already signals for the counts -- while the summary
+  value is exact.
+  Reading it without a bound set is the way to pick one: an unbounded run
+  reports how deep the deepest node actually got.
 - A node's first boundary envelope is fanned out before its scenario thread
   stops. This is especially important at the externalize boundary: peers can
   consume the `EXTERNALIZE` message needed to finish instead of becoming
@@ -570,19 +622,21 @@ scratch; it was checked against the configured build's flags
   `-std=c++20 -DFMT_CONSTEVAL= -DSTELLAR_DISABLE_LOGGING`, contain no
   `-DCAP_0083` anywhere in the build, and pick up master's new global
   `-DXDRPP_STRONG_ORDER=1`.
-- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 266
-  assertions in 52 test cases.
-- `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,951 assertions in
-  62 test cases.
-- The standalone DPOR suite passed 290/290 tests in the pinned `febae6f` engine
-  checkout, including the follow-up sparse ordered-import regressions. (This
-  entry previously read 279/279, recorded at engine commit `23e1998`; the
-  parallel-scaling bump to `febae6f` added the remaining 11. The `debug`,
-  `asan`, and `tsan` presets each register all 290; `bench-release` registers
-  none.)
+- `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` passed with 312
+  assertions in 55 test cases. (Was 266 in 52 before the per-thread event
+  bound added three.)
+- `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,997 assertions in
+  65 test cases.
+- The standalone DPOR suite passed 300/300 tests in the engine checkout under
+  the `debug`, `asan` and `tsan` presets, including the follow-up sparse
+  ordered-import regressions. (This entry previously read 290/290 at engine
+  commit `febae6f`; the per-thread event bound added the remaining 10.
+  `bench-release` registers none.)
 - `./src/scp/test/bench-dpor.sh check` reproduced the seven deterministic
   scenarios byte-identically and the six nondeterministic ones at their new,
-  lower counts; see "Per-event txset decisions" above for the table.
+  lower counts; see "Per-event txset decisions" above for the table. Adding the
+  per-thread event bound left all 13 lines unchanged except for the two
+  appended keys, and added a 14th (`CE`).
 - `./src/scp-dpor-investigation --txset-status always-valid --depth 6`
   reported
   `kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1`.
@@ -658,10 +712,13 @@ scratch; it was checked against the configured build's flags
   - `--must-externalize --check-agreement` on the externalize-boundary variants
     of C1 and C6 at `--depth 50` pass with `blocked=0`, over `full=821` and
     `full=355634` maximal executions respectively. The `blocked=` count matters:
-    `--must-externalize` only checks quiesced runs.
-  - A captured bundle reports version 6 and round-trips through
+    `--must-externalize` only checks quiesced runs. A run in which nothing at
+    all was maximal no longer passes silently -- see
+    [Property checks are inconclusive, not passing, when nothing was
+    maximal](#property-checks-are-inconclusive-not-passing-when-nothing-was-maximal).
+  - A captured bundle reports version 7 and round-trips through
     `--replay-node all`; hand-edited version-4 and version-5 copies of it are
-    both rejected with their own messages.
+    both rejected with their own messages, while a version-6 copy still loads.
 - At the previously documented `--depth 12` that same invocation finds no
   blocked execution. It now reports
   `error: --fail-on-first-blocked was set but no matching execution was found
@@ -670,6 +727,116 @@ scratch; it was checked against the configured build's flags
   exits 1. Previously it exited 0, which made a too-shallow depth
   indistinguishable from a clean run -- see "Capture modes fail when they
   capture nothing" below.
+
+### Per-thread event bound
+
+Measured on `addict-glad-64ta` at the engine commit that introduced
+`max_thread_events`. Every line below was reproduced in this workspace.
+
+The bound bites and displaces depth-limit truncation entirely:
+
+| invocation | result |
+|---|---|
+| `--depth 30 --stop-on-prepare` | `executions=94 full=87 blocked=4 depth-limit=3 thread-event-limit=0 max-thread-event-depth=8` |
+| `--stop-on-prepare --thread-event-depth 8` | `executions=94 full=80 blocked=4 depth-limit=0 thread-event-limit=10 max-thread-event-depth=8` |
+| `--stop-on-prepare --thread-event-depth 7` | `executions=94 full=6 blocked=4 depth-limit=0 thread-event-limit=84` |
+| `--stop-on-prepare --thread-event-depth 6` | `executions=74 full=0 blocked=4 depth-limit=0 thread-event-limit=70` |
+| `--thread-event-depth 3` | `executions=6 full=0 blocked=0 depth-limit=0 thread-event-limit=6 max-thread-event-depth=3` |
+
+The first two rows are the point of the feature: the same 94 executions, with
+the three that `--depth 30` silently truncated now attributed to a per-node
+budget you chose, and seven more honestly reported as possibly truncated rather
+than counted as complete interleavings.
+
+The four-node case from the motivating example is more sobering, and the plan's
+estimate for it was wrong. `--nodes 4 --depth 40 --stop-on-prepare` gives
+46164 executions, all `depth-limit`, and reports
+`max-thread-event-depth=14` -- i.e. nodes need 14 events. Under the bound:
+
+| cap | result |
+|---|---|
+| 8 | `executions=227520` all thread-event-limit |
+| 9 | `executions=4166876` all thread-event-limit |
+| 10 | `executions=84043840` all thread-event-limit |
+| 11 | `executions=1310133288 blocked=13104` |
+
+So the first maximal executions appear at `--thread-event-depth 11`, not 8 as
+the plan estimated, and the count is enormous by then. What the bound buys here
+is not free coverage; it is a truthful answer -- `max-thread-event-depth`
+tells you 14 is required, and `thread-event-limit=` tells you when you have
+not got there -- where `--depth` gave a number with no interpretation.
+
+Property checks:
+
+- `--stop-on-prepare --check-agreement --thread-event-depth 8` exits 0 over
+  `full=80 blocked=4`, so the check was not vacuous.
+- `--stop-on-prepare --must-externalize --thread-event-depth 8` exits 1 with
+  `full execution missing EXTERNALIZE envelope from node-index=0 thread=0`: a
+  genuine violation still wins over the inconclusive path.
+- `--stop-on-externalize --must-externalize --thread-event-depth 6` exits 2:
+  all 210 executions sat at the bound, so nothing was evaluated.
+
+A gotcha worth knowing: under a fixed `--depth`, a *tighter* per-node cap can
+*increase* the number of terminal executions, because shorter executions leave
+more search-tree budget for interleavings that used to be cut off. On the
+`bench` S3 scenario (`--nodes 3 --txset-status always-valid --download-time
+below --stop-on-commit --depth 46`), unbounded gives 2,000,256 executions while
+`--thread-event-depth 14` gives 5,965,899. That is not an inconsistency: the
+bound is equivalent to a wrapped program at the *same* `--depth`, not to the
+unbounded run.
+
+Cost, measured back to back in one session on `addict-glad-64ta`, medians of
+five. The `bench` S4 scenario explores exactly 128,750 terminal executions both
+unbounded and at `--thread-event-depth 17`, so that pair isolates the bound's
+own cost on identical work -- and 116,860 of those terminals sit at the bound,
+so the skip fires often:
+
+| S4 | unbounded | `--thread-event-depth 17` | ratio |
+|---|---|---|---|
+| `--workers 1` | 3.40 s | 2.20 s | 0.65x |
+| `--workers 8` | 0.75 s | 0.51 s | 0.68x |
+
+That is the expected direction: the skip happens before `thread_trace_into()`
+and before the thread-function call, which in this harness is
+`captureNextEvent` -> `acquireReplayState` -> possibly a partial SCP node
+replay.
+
+With the bound *off*, the change is not measurable. `bench` was run three times
+each for the pre-change binary, a byte-identical copy of it, and the new binary,
+alternating arms within one session:
+
+- serial (`W="--workers 1"`): every scenario within 0.6% of baseline
+  (S1 1.000x, S2 0.995x, S3 0.999x, S4 0.994x). The unconditional
+  O(thread-count) per-terminal scan for `max-thread-event-depth` does not show
+  up here.
+- parallel (default `--workers 8`): S1 1.00x, S2 1.05x, S3 1.02x, S4 1.07x --
+  all inside the identical-binary control's own 0.96x-1.10x spread on the same
+  runs, so the noise floor swallows them. Reporting these as a regression would
+  be reporting the machine.
+- `--print-stats 1` is the only configuration in which `flush_local_counts`
+  runs mid-exploration, so it is the only one that exercises the shared-atomic
+  fold at all. On S4 at `--workers 8`, medians of five: baseline 0.78 s off /
+  0.77 s on, new binary 0.75 s off / 0.77 s on. No measurable difference in
+  either binary.
+- `bench-dpor.sh scale` ran in **gated** mode (32 usable logical CPUs over 16
+  SMT2 cores, no cgroup quota) and passed both assertions, with the execution
+  count identical at every worker point: 837558 executions; medians 13.33 s at
+  1 worker, 2.70 s at 8 (4.94x), 1.56 s at 16 (8.54x), 1.22 s at 32 (10.93x).
+  So the shorter branches a bound produces did not disturb parallel scaling.
+
+Strict parsing, all exit 1 with the named argument in the message:
+`--thread-event-depth 5x`, `--thread-event-depth -2`,
+`--thread-event-depth 0` ("requires a value greater than 0"),
+`--sync-steps -1`, `--depth -1`, `--max-queued-tasks 7q`,
+`--max-nomination-round 3z`. `--thread-event-depth -1 --stop-on-prepare` is
+accepted and behaves as unbounded with `--depth` left at 12
+(`executions=4 depth-limit=4 thread-event-limit=0`).
+
+The configure-time API probe was confirmed to reject an older checkout: with
+`external/dpor` at the previous pin, `configure` fails with
+`the DPOR checkout at ... is too old (missing
+dpor::algo::TerminalExecutionKind::ThreadEventLimit and/or
+DporConfigT::max_thread_events)` rather than failing later in the build.
 
 ### Capture modes fail when they capture nothing
 
@@ -693,6 +860,25 @@ one at depth 18. That guards against the failure mode that produced the stale
 number above: boundary-envelope broadcasting lengthened these executions, and
 nothing caught that the documented depth had stopped reaching the blocked
 state.
+
+### Property checks are inconclusive, not passing, when nothing was maximal
+
+`--must-externalize` and `--check-agreement` only inspect maximal executions.
+That is correct -- neither property is meaningful on a branch the engine
+truncated -- but it used to mean a run in which *every* execution was excluded
+exited 0, indistinguishable from a real pass. `--stop-on-prepare` already
+reached that state easily, and a per-node cap makes it easier still: with
+`--stop-on-externalize --must-externalize --thread-event-depth 6`, all 210
+executions sit at the bound and nothing is checked.
+
+Maximal executions are exactly `full + blocked`, both of which the library
+already reports, so the runner now returns exit 2 with an `inconclusive:`
+message when a check was requested and that sum is zero. The message names the
+requested flag, the total explored, and how many executions hit `--depth` or
+sat at `--thread-event-depth`. Exit 2 is distinct from the exit 1 used for a
+genuine violation, and a real violation returns 1 before this check runs, so
+exit 2 unambiguously means "the property was never evaluated". No
+`bench-dpor.sh` scenario uses either flag, so no fingerprint moves.
 
 ## Current limitations
 

@@ -32,7 +32,10 @@ struct InvestigationBlockedExecution
 // Full and Blocked partition the maximal executions: Full means every thread
 // completed, Blocked means at least one thread ended waiting on a blocking
 // receive no message can satisfy. Checks over complete interleavings (missing
-// externalize, agreement) must consider both kinds.
+// externalize, agreement) must consider both kinds. DepthLimit and
+// ThreadEventLimit are excluded for free: both mark executions the engine may
+// have truncated, so a property that holds only for complete interleavings
+// cannot be concluded from them.
 inline bool
 isMaximalExecution(
     dpor::algo::TerminalExecutionT<ScpDporValue> const& execution)

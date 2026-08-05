@@ -3,9 +3,9 @@
 At a high level, the model-checker runs the SCP state machine of a few
 nodes (3 by default) in a simulated environment. The model-checker
 calls the SCP API and intercepting all calls from SCP. It collects all
-messages sent  and tries all (up do `--depth` and other boundaries or
-fail-fast options) possible non-equivalent message delivery
-interleavings. But it can also non-deterministically respond to
+messages sent  and tries all (up do `--depth`, `--thread-event-depth`
+and other boundaries or fail-fast options) possible non-equivalent
+message delivery interleavings. But it can also non-deterministically respond to
 certain call and try all possible choices. For example, to exercise
 the effect of parallel txset downloading on the SCP state machine, we
 can  instruct the model-checker to respond to `validateValue()` and
@@ -113,6 +113,55 @@ longer applicable to it. The result is scoped to that node and exact
 value: it does not resolve another value or the same value at another
 node.  The nomination-only override described above still takes
 precedence for nomination-time validation.
+
+## Two depth budgets: `--depth` and `--thread-event-depth`
+
+They bound different things, and mixing them up is the usual reason a run
+"finds nothing".
+
+`--depth N` bounds **DPOR search-tree depth**: distance from the root of the
+search, where an ordinary forward step and a backward revisit each cost one.
+It is not a bound on how big the event graph gets -- a backward revisit builds
+a child with *fewer* events than its parent, at depth+1 -- and it is a single
+budget shared by every node. Its cost therefore grows with the number of
+interleavings, not with how far any one node ran. That is why
+`--nodes 4 --depth 40 --stop-on-prepare` produces 46164 executions of which
+every single one is `depth-limit`: 40 is generous for a node (they need 14
+events here) and hopeless for the tree.
+
+`--thread-event-depth K` bounds **the events any one node may contribute**,
+independently per node. It expresses "let each validator take at most K
+protocol steps" directly, and it costs nothing on the nodes that have not
+reached it. Executions in which the engine declined to ask a node for a
+further event are published as the `thread-event-limit` terminal kind, counted
+separately in `thread-event-limit=`, and excluded from `--must-externalize` and
+`--check-agreement`, which only inspect maximal executions.
+
+Two habits make this usable:
+
+- Read `max-thread-event-depth=` on an unbounded run to learn how deep the
+  deepest node actually got, then pick a cap from that number. The three-node
+  `--stop-on-prepare` scenario reports 8, and at `--thread-event-depth 8` it
+  explores the same 94 executions with `depth-limit=0` instead of 3.
+- Read `thread-event-limit=` on a bounded run to see whether the bound bit. If
+  it accounts for every execution, you learned nothing about complete
+  interleavings -- and if a property check was requested, the runner now says
+  so and exits 2 rather than exiting 0.
+
+Setting `--thread-event-depth` raises `--depth` to 1000 unless `--depth` is
+given explicitly, because the default `--depth 12` truncates first and would
+mask the per-node bound entirely.
+
+Two things that surprise people:
+
+- Under a *fixed* `--depth`, a tighter per-node cap can produce *more* terminal
+  executions, not fewer: shorter executions leave more search-tree budget for
+  interleavings that used to be cut off. The bound is equivalent to a program
+  whose threads stop after K steps, run at the same `--depth` -- not to the
+  unbounded run.
+- An execution with both a capped node and a blocked node is
+  `thread-event-limit`, not `blocked`. `--fail-on-first-blocked` under a cap
+  can therefore find nothing.
 
 ## Native SCP API boundary
 
@@ -338,9 +387,11 @@ repeatable investigation workloads and can be invoked from any directory:
 ./src/scp/test/bench-dpor.sh head
 ```
 
-- `check` prints exact final execution counts for 13 scenarios. Treat its
+- `check` prints exact final execution counts for 14 scenarios. Treat its
   complete output as a semantic fingerprint: a performance-only change must
-  not alter any line.
+  not alter any line. `CE` is C1's scenario under `--thread-event-depth 9`; it
+  splits across full, blocked and thread-event-limit, so it is sensitive to
+  terminal *classification* and not only to the explored count.
 - `bench` times four terminating scenarios and reports the best of three runs.
 - `head` time-boxes the three-node FIFO externalize workload and reports its
   steady-window and overall execution rates.

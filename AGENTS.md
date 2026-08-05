@@ -138,12 +138,35 @@ Notes:
   - `./src/scp-dpor-investigation --depth 12`
   - `./src/scp-dpor-investigation --fail-on-first-terminal --trace-dir "$PWD/dpor-traces" --depth 12`
   - `./src/scp-dpor-investigation --replay-trace-json PATH --replay-node N|all`
+  - `./src/scp-dpor-investigation --stop-on-prepare --thread-event-depth 8`
 - `--fail-on-first-blocked` / `--fail-on-first-terminal` exit nonzero both when
   they capture a matching execution and when they find none, so an exit code of
   0 from them is never a silent "nothing to see". The blocked variant needs a
   depth deep enough to reach a blocking receive: for `--stop-on-prepare
   --txset-status always-downloading --download-time above` that is `--depth 18`,
   not 12.
+- There are two distinct depth budgets, and confusing them is the usual reason
+  a run "finds nothing":
+  - `--depth N` bounds DPOR **search-tree** depth. Backward revisits consume it
+    just like forward steps while producing children with *fewer* events, and
+    it is one budget shared by all nodes, so it scales with the number of
+    interleavings rather than with how far any node got.
+  - `--thread-event-depth K` bounds the events **any single node** may
+    contribute, independently per node -- "let each validator take at most K
+    protocol steps". Setting it raises `--depth` to 1000 unless `--depth` is
+    also given. `-1` means unlimited and leaves `--depth` alone.
+  - Executions the per-node cap may have truncated are reported as
+    `thread-event-limit=`, are not maximal, and are skipped by
+    `--must-externalize` / `--check-agreement`. An execution with both a capped
+    and a blocked node is `thread-event-limit`, not `blocked`, so
+    `--fail-on-first-blocked` under a cap can find nothing.
+  - `max-thread-event-depth=` on the summary and progress lines reports how
+    deep the deepest node actually got. Read it on an unbounded run to pick a
+    cap.
+- `--must-externalize` and `--check-agreement` exit **2** with an
+  `inconclusive:` message when no execution was maximal, so a run that
+  evaluated nothing is no longer indistinguishable from a pass. Exit 1 still
+  means a genuine violation.
 
 ### Benchmarking
 
@@ -161,7 +184,7 @@ before trusting any threshold.
 directory (set `BIN` for an out-of-tree binary). It exits nonzero if any
 scenario process fails, so its output can be trusted rather than silently
 degrading:
-- `bench-dpor.sh check` prints exact execution counts for 13 scenarios — the
+- `bench-dpor.sh check` prints exact execution counts for 14 scenarios — the
   correctness fingerprint. Diff it against a known-good capture.
 - `bench-dpor.sh bench` times four terminating scenarios, best of three.
 - `bench-dpor.sh head` reports the rate for the externalize-boundary scenario
