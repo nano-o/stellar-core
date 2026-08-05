@@ -7,9 +7,7 @@ and the ledger-closing pipeline for the Stellar network.
 
 ## Current work
 
-Branch: `dpor-on-master` (the DPOR work rebased onto upstream `master`, which
-now includes the merged CAP-0083 empty-tx-set feature; the pre-rebase branch
-`skip-ledgers-p26-dpor` remains as reference)
+Branch: `dpor-on-master`.
 
 Status: the first DPOR (Dynamic Partial Order Reduction) integration for SCP
 has already landed. `stellar-core` now has an opt-in, test-only DPOR build
@@ -22,27 +20,49 @@ for scenario work: use it to inspect executions, replay traces, boundary
 behavior, and performance characteristics while iterating on scenarios or
 build-shape changes.
 
-Current phase: optimize DPOR performance and iterate on scenario coverage.
-Prioritize work that:
-- improves replay/exploration throughput or investigation ergonomics
-- expands or hardens scenario coverage for SCP behaviors already modeled
-- tightens smoke tests and investigation workflows around the checked-in
-  integration
-- reduces compile cost or exploration cost without weakening the build island
+Current phase: improve usability, fix any bugs.
 
-Before starting DPOR implementation work, read
+Before starting any DPOR implementation work, read
 [docs/dpor-integration-status.md](docs/dpor-integration-status.md). Use it as
 the source of truth for what is already integrated and what limitations remain.
 For trace-capture or replay work, also read
 [docs/dpor-replay-notes.md](docs/dpor-replay-notes.md).
 
-Previous attempt: branch `dpor-skip-ledgers-p25` (accessible via
-`git log dpor-skip-ledgers-p25` in this repo). That branch has 64 commits of
-working DPOR/SCP integration code. Use it as a reference for what worked, but
-prefer extending the current in-tree decomposition (`types` / `bridge` /
-`node` / `replay` / `scenario`) rather than reviving the old monolithic
-adapter.
+### Subtask: create a skill
 
+An important subtask is to create a skill to allow engineers working
+on the stellar-core SCP implementation to easily make use of the dpor
+model-checker to help them debug their code, speed up development by
+surfacing issues early, and overall improve correctness assurance.
+
+The expect workflow is that an engineer is working on stellar-core on
+a branch (e.g. master) that does not have any dpor integration at all.
+Then the engineer asks Claude, or another agent, to check their code
+with the help of the model checker. The engineer might give some
+hypothesis and properties to focus on.
+
+At this point, the agent should:
+1. Create a new worktree and rebase `dpor-on-master` on the engineer's
+working branch, and make sure the dpor investigation binary builds and
+runs. This might require code changes in the dpor harness if the SCP
+API changed. The agent should make the simple changes possible to make
+a simple scenario work.
+2. Create a planning document with hypothesis and properties to focus
+on and corresponding model-checking scenarios. Scenarios can build on
+the current default scenarios, adding options and tweaking it, or
+create new scenarios. Each scenario should have specific properties to
+check, specifically enable or disable non-determinism at various
+points, and can also terminate uninteresting executions early by not
+producing new events that extend them.
+3. For each hypothesis or property, run a model-checking campaign to
+reach a conclusion and write a report about it.
+4. Finally, consolidate all the reports in a final report.
+
+Two example are here to help design this skill:
+- ~/workspaces/stellar-core-pr5346 In this example, the user had to rebase on a non-dpor branch.
+- ~/workspaces/scp-mc In this example, the user started from
+  dpor-on-master
+    
 ## Build system
 
 stellar-core uses **autotools**, not CMake.
@@ -264,8 +284,10 @@ integration.
 6. Keep [docs/dpor-integration-status.md](docs/dpor-integration-status.md)
    aligned with reality when the DPOR build shape, runtime surface, or verified
    behavior changes.
-
+   
 ## Container environment
+
+There is an optional dev-container setup.
 
 Build and enter the dev container:
 ```bash

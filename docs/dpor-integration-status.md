@@ -1,8 +1,8 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-08-02 for branch `dpor-on-master`, rebased onto
-upstream `master` (`4c0d88c75`), with `external/dpor` pinned to DPOR library
-commit `febae6f`.
+Status snapshot as of 2026-08-05 for branch `dpor-on-master` at `adafc40c6`,
+rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
+DPOR library commit `febae6f`.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -81,8 +81,11 @@ library or harness errors.
 
 - [`configure.ac`](../configure.ac) adds `--enable-dpor`,
   `--with-dpor-dir`, `DPOR_DIR`, `DPOR_CPPFLAGS`, `DPOR_CXXFLAGS`, the
-  `ENABLE_DPOR` automake conditional, and a compile probe for
-  `<dpor/algo/dpor.hpp>`.
+  `ENABLE_DPOR` automake conditional, and two compile probes: one that builds
+  `<dpor/algo/dpor.hpp>` with the configured target flags, and one that
+  `static_assert`s on `dpor::algo::TerminalExecutionKind::Blocked` so an engine
+  checkout predating the blocked-execution API fails configure with an explicit
+  "too old" message naming CPP-DPOR commit `b238b19`.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
@@ -342,6 +345,18 @@ it after confirming no build is active), then rerun configure.
   - `--replay-node N|all`
     - default replay scope is the stored focus node; `all` replays every node
       in focus-first order
+  - `--depth N`
+  - engine and diagnostic tuning knobs that do not change the explored
+    execution set: `--max-queued-tasks`, `--sync-steps`,
+    `--split-poll-interval-steps`, `--progress-counter-flush-interval`,
+    `--progress-poll-interval-steps`, and `--serialize-terminal-callbacks`
+    (which runs terminal observer bodies under one mutex to isolate callback
+    concurrency). The first five reach the engine only through
+    `ParallelVerifyOptions`, so they are inert on the serial path. Like
+    `--replay-slots-per-node`, these are operational rather than scenario
+    options and are not serialized in replay traces.
+  - `--help` / `-h` prints the full current surface, including the plural
+    aliases accepted for the four `--max-*-round` flags
 - Both DPOR binaries enable assert-throw mode at startup
   (`enableAssertThrowMode()` in `src/util/GlobalChecks.h`), so SCP
   `releaseAssert` and `dbgAbort` failures are captured as DPOR error executions
@@ -392,8 +407,20 @@ it after confirming no build is active), then rerun configure.
   - txset status-choice restore and preload behavior
   - txset wait-time restore and preload behavior
   - txset status latch-once-resolved replay behavior
+  - txset wait-time latch-once-timed-out behavior, a wait time answered before
+    validation, and repeated wait-time queries answered consistently
+  - one txset status choice per value per external event, replay rejection of a
+    txset choice the event never requests, and rejection of replay snapshots
+    taken inside an external event or after an implicit txset decision
   - nomination-only forced downloading for txset validation
-  - `download-succeeds-in-round` forcing later txset validation to `valid`
+  - `download-succeeds-in-round` forcing later txset validation to `valid`, and
+    its deferral of that resolution to the next external event
+  - configurable replay-cache capacity
+  - four-validator configuration and the same/unique initial-value presets
+  - absence of error executions under bounded eventually-valid txsets
+  - identification of the first blocked node
+  - rejection of malformed outright-invalid scenario mappings and of trace
+    bundles naming removed txset status modes
   - investigation-style wrapping of thread exceptions into inspectable DPOR
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
@@ -412,9 +439,10 @@ it after confirming no build is active), then rerun configure.
 
 ## Performance status
 
-Commit `4c89f7a03`, together with the pinned engine commit `5f48e8b`, removes
-the dominant replay and graph-materialization costs without changing the
-explored execution set. On the three-node FIFO externalize workload used by
+Commit `4c89f7a03`, together with engine commit `5f48e8b` (the pin at the time,
+since superseded by `23e1998` and then the current `febae6f`), removes the
+dominant replay and graph-materialization costs without changing the explored
+execution set. On the three-node FIFO externalize workload used by
 `bench-dpor.sh head` (`downloading-then-valid`, nomination forced downloading,
 nondeterministic download time, depth 200, eight workers), paired same-session
 medians moved from about 14.5k to about 140k executions/second. Parallel CPU
@@ -473,7 +501,8 @@ medians, with the 13-scenario `bench-dpor.sh check` fingerprint byte-identical
 across all three engines:
 
 S1 — send-heavy (`--txset-status always-valid --download-time below
---stop-on-externalize --depth 200`, 5,600,446 executions):
+--stop-on-externalize --depth 200`, 5,600,446 executions — still exact today,
+since S1 uses only deterministic txset modes):
 
 | workers | before | + wake fix | final |
 |---|---|---|---|
@@ -484,7 +513,10 @@ S1 — send-heavy (`--txset-status always-valid --download-time below
 
 S2 — reads-from/ND-heavy (`--txset-status downloading-then-valid
 --nomination-always-downloading --download-time nondet --stop-on-externalize
---depth 56`, 1,278,277 executions):
+--depth 56`, 1,278,277 executions **when this was measured**; per-event txset
+scoping later cut the same invocation to 837,558, so the absolute times in the
+S2 table no longer reproduce, even though the engine-to-engine comparison they
+encode still holds):
 
 | workers | before | + wake fix | final |
 |---|---|---|---|
@@ -511,12 +543,25 @@ SMT2 physical cores presenting 32 logical CPUs, with a CPU bandwidth quota
 covering all 32), which it constructs with an affinity mask rather than merely
 requiring. Everywhere else it prints the curve and asserts nothing.
 
+Re-run on 2026-08-05 on the same host with `REPS=5`, after per-event txset
+scoping shrank S2: 837,558 executions at every worker count, medians 13.35s /
+2.82s / 1.44s / 1.18s at 1 / 8 / 16 / 32 workers (11.31x at 32), gate `PASS` on
+both its primary and secondary margins. Those wall-clock numbers are not
+comparable to the S2 table above — the workload is about a third smaller — but
+the conclusion the table exists to record, monotone improvement through 32
+workers, is unchanged.
+
 ## Verification in this workspace
 
 The build shape was verified with a clean reconfigure after rebasing onto
 `4c0d88c75` (upstream post-CAP-0083-ungating master). The runtime suites and
-execution fingerprint were rerun after per-event txset scoping landed, with the
-optimized `5f48e8b` engine:
+execution fingerprint were rerun after per-event txset scoping landed, against
+the pinned `febae6f` engine. Every count, exit code and message quoted below was
+re-verified on 2026-08-05 at `adafc40c6` on `addict-glad-64ta` and reproduced
+exactly, the one exception being the standalone-engine test count, which was
+stale and is corrected below. The clean-rebuild bullet was not re-run from
+scratch; it was checked against the configured build's flags
+(`DPOR_CXXFLAGS`, no `-DCAP_0083`, global `-DXDRPP_STRONG_ORDER=1`):
 
 - `./configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20`
   (no next-protocol flag), `make clean`, `make -C lib`, then
@@ -529,8 +574,12 @@ optimized `5f48e8b` engine:
   assertions in 52 test cases.
 - `./src/stellar-core-dpor-tests "[scp]"` passed with 1,607,951 assertions in
   62 test cases.
-- The standalone DPOR suite passed 279/279 tests in the current engine
-  checkout, including the follow-up sparse ordered-import regressions.
+- The standalone DPOR suite passed 290/290 tests in the pinned `febae6f` engine
+  checkout, including the follow-up sparse ordered-import regressions. (This
+  entry previously read 279/279, recorded at engine commit `23e1998`; the
+  parallel-scaling bump to `febae6f` added the remaining 11. The `debug`,
+  `asan`, and `tsan` presets each register all 290; `bench-release` registers
+  none.)
 - `./src/scp/test/bench-dpor.sh check` reproduced the seven deterministic
   scenarios byte-identically and the six nondeterministic ones at their new,
   lower counts; see "Per-event txset decisions" above for the table.
