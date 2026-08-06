@@ -1,8 +1,9 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-08-05 for branch `dpor-on-master` at `adafc40c6`,
+Status snapshot as of 2026-08-06 for branch `dpor-on-master` at `c75f6c1e7`,
 rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
-DPOR library commit `febae6f`.
+DPOR library commit `0c26676`. Entries below that quote an earlier engine pin
+are dated verification records, not stale claims about the current pin.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -92,10 +93,12 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `febae6f`, published
-  upstream as branch `dpor-perf` (not merged to `main`, and untagged, so that
-  branch is what keeps the pin fetchable). The `--with-dpor-dir` override
-  remains available for development against another checkout.
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `0c26676`, which is
+  the tip of upstream `main`. Earlier pins sat on the `dpor-perf` branch, off
+  `main`, so that branch was the only thing keeping them fetchable; `main` has
+  since been fast-forwarded onto that line, and `dpor-perf` is now a stale
+  pointer at the older `febae6f`. The `--with-dpor-dir` override remains
+  available for development against another checkout.
 - Configure no longer couples `--enable-dpor` to the next-protocol option.
   That check existed only to guarantee `CAP_0083` was defined; with CAP-0083
   ungated upstream there is nothing left to enforce.
