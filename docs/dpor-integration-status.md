@@ -2,7 +2,7 @@
 
 Status snapshot as of 2026-08-06 for branch `dpor-on-master` at `c75f6c1e7`,
 rebased onto upstream `master` (`4c0d88c75`), with `external/dpor` pinned to
-DPOR library commit `0c26676`. Entries below that quote an earlier engine pin
+DPOR library commit `562f5be`. Entries below that quote an earlier engine pin
 are dated verification records, not stale claims about the current pin.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
@@ -93,7 +93,7 @@ library or harness errors.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `0c26676`, which is
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `562f5be`, which is
   the tip of upstream `main`. Earlier pins sat on the `dpor-perf` branch, off
   `main`, so that branch was the only thing keeping them fetchable; `main` has
   since been fast-forwarded onto that line, and `dpor-perf` is now a stale
