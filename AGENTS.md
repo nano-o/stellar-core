@@ -42,24 +42,29 @@ with the help of the model checker. The engineer might give some
 hypothesis and properties to focus on.
 
 At this point, the agent should:
+
 1. Create a new worktree and rebase `dpor-on-master` on the engineer's
-working branch, and make sure the dpor investigation binary builds and
-runs. This might require code changes in the dpor harness if the SCP
-API changed. The agent should make the simple changes possible to make
-a simple scenario work.
+   working branch, and make sure the dpor investigation binary builds
+   and runs. This might require code changes in the dpor harness if
+   the SCP API changed. The agent should make the simple changes
+   possible to make a simple scenario work.
+
 2. Create a planning document with hypothesis and properties to focus
-on and corresponding model-checking scenarios. Scenarios can build on
-the current default scenarios, adding options and tweaking it, or
-create new scenarios. Each scenario should have specific properties to
-check, specifically enable or disable non-determinism at various
-points, and can also terminate uninteresting executions early by not
-producing new events that extend them.
+   on and corresponding model-checking scenarios. Scenarios can build
+   on the current default scenarios, adding options and tweaking it,
+   or create new scenarios. Each scenario should have specific
+   properties to check, specifically enable or disable non-determinism
+   at various points, and can also terminate uninteresting executions
+   early by not producing new events that extend them.
+
 3. For each hypothesis or property, run a model-checking campaign to
-reach a conclusion and write a report about it.
+   reach a conclusion and write a report about it.
+
 4. Finally, consolidate all the reports in a final report.
 
 Two example are here to help design this skill:
-- ~/workspaces/stellar-core-pr5346 In this example, the user had to rebase on a non-dpor branch.
+- ~/workspaces/stellar-core-pr5346 In this example, the user had to
+  rebase on a non-dpor branch.
 - ~/workspaces/scp-mc In this example, the user started from
   dpor-on-master
     
