@@ -1,6 +1,8 @@
 # DPOR harness simplification plan
 
-Status: proposed (not started).
+Status: implemented (single commit `780e7a010`, "Simplify SCP DPOR harness")
+and reviewed — see [Implementation review — 2026-08-07] at the end of this
+document. Phase 8 remains open by design.
 
 Decisions so far:
 
@@ -693,3 +695,155 @@ Noted with thanks: the round-1 duplicate-`CA` claim is confirmed closed as
 a tooling false positive; no script change needed.
 
 END RESPONSE
+
+## Implementation review — 2026-08-07
+
+Reviewed: commit `780e7a010` ("Simplify SCP DPOR harness"), the sole commit
+on top of the plan commit `9c9f50f70`. 16 files changed, 978 insertions,
+1,909 deletions (net −931; the plan's ~1,400 estimate counted raw removals
+before replacement helpers and clang-format rewrapping, so the two numbers
+are different metrics, not a shortfall).
+
+Verdict: **approved**. The implementation matches the plan, including every
+point the two review rounds fought over. All verification listed below was
+re-run independently for this review — the baseline was reconstructed by
+rebuilding the parent commit `9c9f50f70` in place, back to back with HEAD on
+the same machine.
+
+### Verification evidence
+
+1. **Correctness fingerprint: exact match.** `bench-dpor.sh check` (all 14
+   scenarios, C1–C9/CA–CE) is byte-identical between the parent commit and
+   HEAD. This is the plan's core no-behavior-change gate and it holds.
+2. **DPOR smoke suite: all pass.**
+   `./src/stellar-core-dpor-tests "[scp][dpor][smoke]"` — 51 test cases, 303
+   assertions, exit 0. (Case count went 55 → 51: one deleted TEST_CASE plus
+   four version-rejection cases merged into one table-driven case, exactly
+   the Phase 5 arithmetic.)
+3. **Dump-format equivalence: byte-identical.** The same deterministic
+   scenario (`--fail-on-first-terminal --trace-dir ... --depth 12`) was
+   captured and replayed (`--replay-node all`) with both binaries; capture
+   stdout (modulo the `trace-json=` path line) and the full replay dump text
+   are identical. This directly discharges the Phase 3 dump-merge risk and
+   confirms Phase 6b changed file shape only, not inspection output.
+4. **Documented flows behave.** `--depth 12` exits 0;
+   `--fail-on-first-terminal` exits 1 and writes a bundle;
+   `--replay-trace-json ... --replay-node all` exits 0;
+   `--stop-on-prepare --thread-event-depth 8` reports a sane summary
+   (`thread-event-limit=10 max-thread-event-depth=8`).
+5. **v8 bundle shape as specified.** A fresh capture reports `version: 8`,
+   `thread_traces` is a positional array of trace arrays, `terminal` carries
+   only `kind`/`failure_message`/`focus_node_index`, and
+   `communication_model` is still written. An old v6 bundle from
+   `dpor-traces/` is rejected with exactly the documented message
+   (`unsupported trace bundle version 6 (supported: 8); capture a fresh
+   trace with the current binary`, exit 1), and the new table-driven smoke
+   test covers versions 1–7 and 9 against that message shape.
+6. **Test-binary failures attributed as pre-existing.** A no-argument
+   `./src/stellar-core-dpor-tests` run shows 4 failing cases ("SCP State"
+   postgres sections, "overlay parallel processing" incl. a SIGSEGV,
+   "ledgerheaders migration works correctly", "schema parity across DB
+   backends"). The identical subset run on a parent-built binary fails
+   identically (same 4 cases, same 7 assertions, same exit 139). All are
+   PostgreSQL-dependent and this container runs no postgres server —
+   environmental, unrelated to this commit. See observation 2 below for the
+   larger lesson.
+
+### Phase-by-phase conformance (review-sensitive points spot-checked)
+
+- **Phase 1**: all dead surface removed; the delegating 2-arg constructor is
+  kept (round-1 item 1); all six functional scenario options and their JSON
+  encode/decode retained (round-1 item 4). The `emitEnvelope` guard removal
+  was re-derived as sound: `mBoundaryEnvelope` is only written on the
+  false→true transition of `mHasReachedBoundary`, and the timer-path
+  transitions that set the flag without an envelope block any later
+  overwrite in both old and new code.
+- **Phase 2**: the four name/parse pairs live in `ScpDporTraceJson.h`, Main
+  imports them, `terminalExecutionKindName` is gone, and parsers compare
+  against the `xName()` calls.
+- **Phase 3**: `stopWithCapture` centralizes the first-failure-wins /
+  dump-once ritual across all five branches; the merged dump core takes a
+  `ReplayDumpErrorPolicy` — `Propagate` for explicit `--replay-trace-json`
+  (a malformed bundle still exits nonzero — verified live) and `BestEffort`
+  only for error-kind live dumps, matching old behavior exactly (round-1
+  item 2); `replayNodeOrder()` preserved; truncation-hint helper keeps the
+  distinct exit codes; parse helpers folded into
+  `parseUnsigned<T>`/`parsePositive<T>`; checkers moved to
+  `ScpDporInvestigationUtils.h` with the maximality gates and their
+  narrative comment intact, returning evidence counts (round-1 item 3);
+  `AgreementFailure::mValue` dropped.
+- **Phase 4**: the three helpers are exact-equivalence refactors (checked by
+  hand: `nonBlocking == timerToFire.has_value()` in all cases; the
+  `is_bottom` path throws the identical message from inside the helper; the
+  `replayTrace` guard is unchanged). `ReplayInspection` public, shims gone;
+  `TimerSetCountEntry` merged so snapshot/restore are plain assignments;
+  `findSlotTimer` template covers all five search sites; `consumeChoice`
+  covers both choice paths; shared `EMPTY:` prefix with the static
+  `hasEmptyTxSetValuePrefix`.
+- **Phase 5**: `explorationFinds` in place; the releaseAssert TEST_CASE is
+  deleted and its unique `BallotProtocol.cpp` assertion lives in the lead-in
+  test; the two property tests use the shipped checkers **and** assert the
+  evidence (`mEmittedEnvelopeCount > 0`, `mExternalizedValueCount >= 2`,
+  plus `maximalExecutionsChecked > 0`), preserving the anti-vacuity
+  coverage; `SingleNodeReplayHarness` replaces the three copies; the
+  replay-cache test keeps only its distinctive assertions.
+- **Phase 6a/6b**: one generic rejection message written once (final
+  wording, as the plan directed for 6a+6b landing together); base64 via
+  decode + re-encode + compare; the `requireUint64`/`requireInt64` rewrite
+  was checked against the vendored jsoncpp — `isIntegral()` is
+  `isInt64() || isUInt64()`, which the old ladder also consulted, so
+  acceptance is bit-for-bit unchanged (including integral reals, negatives,
+  and the int64 range check); `communication_model` optional on read;
+  replay-support small fry all done (`mConsumedStepCount` callers now
+  compute `mConsumedTraceEntries - 1`, matching the invariant at all return
+  sites). Both docs updated and consistent with the decided v8-only story.
+- **Phase 7**: `configure.ac` untouched (both probes keep their distinct
+  diagnostics — round-1 item 6); `RustBridge.h` duplicate dropped;
+  `maybeThrowOrAbort` in GlobalChecks preserves exact behavior (the only
+  production file touched); bench script `$U` reuse verified identical to
+  the flags it replaced, `SCEN` rename, `report_fail` helper.
+- **Phase 8**: correctly **not** implemented — the ~23 `i + 1 < argc`
+  checks and the scale-gate topology forensics are intact. The three
+  go/no-gos remain open, as gated.
+
+### Observations (none blocking)
+
+1. **One commit instead of one per phase.** The plan's protocol asked for a
+   commit per phase with the fingerprint diffed at each step. The endpoint
+   equivalence verified above makes the final state trustworthy, but
+   phase-level attribution is lost: if the fingerprint *had* diverged,
+   bisecting within this work would have required re-deriving the phases.
+   Recorded as a process deviation, not a defect to fix now.
+2. **The plan's protocol step 2 is a trap, discovered during this review.**
+   `./src/stellar-core-dpor-tests` with no arguments runs only the
+   ~144 default-visible stellar-core test cases and **zero** DPOR cases —
+   the runner comes from stellar-core's `runTest` harness, and the DPOR
+   suite executes only under an explicit filter such as
+   `"[scp][dpor][smoke]"`. The protocol's "not just the smoke tag" wording
+   implies the no-args run is a superset of the tag run; the two sets are
+   in fact disjoint. This predates the commit (SCPDporTestMain.cpp is
+   untouched) and CLAUDE.md's documented command already uses the tag. Any
+   future protocol should say: run the tag suite, and treat the no-args run
+   as the (postgres-dependent) stellar-core sanity set, or pass an
+   explicit all-tests filter.
+3. **Diagnostic-wording delta beyond the two approved ones.** Sharing the
+   Phase 2 parsers gave the CLI the trace-layer error strings for bad
+   option values (e.g. `unknown download_time_mode:` became
+   `unknown download-time mode:`). Same spirit as the approved 6a wording
+   change, user-visible only on invalid input; recorded for completeness.
+4. **`findThreadTrace` survives in name.** The plan said 6b "deletes Main's
+   `findThreadTrace` linear search"; the linear search is gone and the
+   name now wraps a bounds-checked positional lookup. Letter vs. spirit —
+   fine as is.
+5. **No Phase 0 artifacts were left behind.** No stashed fingerprint or
+   trace bundle was found in the tree or scratch space, so this review
+   reconstructed the baseline from the parent commit (cheap thanks to
+   sccache, ~30 s per rebuild). For future campaigns, leave the Phase 0
+   capture where the reviewer can find it, or note its location in the
+   final commit message.
+6. **`dpor-traces/` now holds only unreadable bundles** (v1/v4/v6 files from
+   July–August). That directory is untracked scratch, but with v8-only in
+   force the files are dead weight and mildly misleading; consider deleting
+   or archiving them.
+
+END IMPLEMENTATION REVIEW
