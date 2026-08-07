@@ -24,8 +24,6 @@ nextReplaySupportGeneration()
 
 struct ReplayStateCacheEntry
 {
-    uint64_t mGeneration{};
-    std::size_t mNodeIndex{};
     std::unique_ptr<DporScpNode> mNode;
     ScpDporReplaySupport::ReplayCursor mCursor;
     uint64_t mLastUsed{0};
@@ -82,8 +80,7 @@ enqueueTxSetStatusChoices(DporScpNode& node,
 
 void
 enqueueTxSetDownloadWaitTimeChoices(
-    DporScpNode& node,
-    std::vector<std::chrono::milliseconds> const& waitTimes)
+    DporScpNode& node, std::vector<std::chrono::milliseconds> const& waitTimes)
 {
     for (auto const& waitTime : waitTimes)
     {
@@ -102,8 +99,8 @@ KnownTxSetChoices
 decodeKnownTxSetChoices(ThreadTrace const& trace, std::size_t observedIndex)
 {
     KnownTxSetChoices decoded;
-    for (std::size_t choiceIndex = observedIndex + 1; choiceIndex < trace.size();
-         ++choiceIndex)
+    for (std::size_t choiceIndex = observedIndex + 1;
+         choiceIndex < trace.size(); ++choiceIndex)
     {
         auto const& choiceObserved = trace.at(choiceIndex);
         if (choiceObserved.is_bottom())
@@ -151,8 +148,7 @@ ScpDporReplaySupport::ScpDporReplaySupport(
     }
     if (mValidators.size() != mInitialValues.size())
     {
-        throw std::invalid_argument(
-            "initialValues must match validator count");
+        throw std::invalid_argument("initialValues must match validator count");
     }
     if (mReplaySlotsPerNode == 0)
     {
@@ -186,34 +182,19 @@ ScpDporReplaySupport::getNodeBaseline(std::size_t nodeIndex) const
     return mReplayBaselines.at(nodeIndex);
 }
 
-namespace
-{
-
-ReplayStateCacheEntry&
-acquireCacheEntry(uint64_t generation, std::size_t nodeIndex,
-                  SecretKey const& validator, SCPQuorumSet const& qSet,
-                  DporScpNode::Configuration const& config)
-{
-    auto& bucket = bucketFor(generation, nodeIndex);
-    if (bucket.mSlots.empty())
-    {
-        bucket.mSlots.push_back(ReplayStateCacheEntry{
-            generation, nodeIndex,
-            std::make_unique<DporScpNode>(validator, qSet, config),
-            {},
-            0});
-    }
-    return bucket.mSlots.front();
-}
-
-} // namespace
-
 DporScpNode&
 ScpDporReplaySupport::acquireNode(std::size_t nodeIndex) const
 {
-    return *acquireCacheEntry(mGeneration, nodeIndex, mValidators.at(nodeIndex),
-                              mQSet, mConfig)
-                .mNode;
+    auto& slots = bucketFor(mGeneration, nodeIndex).mSlots;
+    if (slots.empty())
+    {
+        slots.push_back(ReplayStateCacheEntry{
+            std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet,
+                                          mConfig),
+            {},
+            0});
+    }
+    return *slots.front().mNode;
 }
 
 ScpDporReplaySupport::ReplayState
@@ -229,7 +210,8 @@ ScpDporReplaySupport::acquireReplayState(std::size_t nodeIndex,
 
     for (auto& entry : slots)
     {
-        if (!leastRecentlyUsed || entry.mLastUsed < leastRecentlyUsed->mLastUsed)
+        if (!leastRecentlyUsed ||
+            entry.mLastUsed < leastRecentlyUsed->mLastUsed)
         {
             leastRecentlyUsed = &entry;
         }
@@ -250,9 +232,8 @@ ScpDporReplaySupport::acquireReplayState(std::size_t nodeIndex,
         if (!std::equal(cursor.mConsumedTrace.rbegin(),
                         cursor.mConsumedTrace.rend(),
                         std::make_reverse_iterator(
-                            trace.begin() +
-                            static_cast<std::ptrdiff_t>(
-                                cursor.mConsumedTrace.size()))))
+                            trace.begin() + static_cast<std::ptrdiff_t>(
+                                                cursor.mConsumedTrace.size()))))
         {
             continue;
         }
@@ -266,7 +247,6 @@ ScpDporReplaySupport::acquireReplayState(std::size_t nodeIndex,
         if (slots.size() < mReplaySlotsPerNode)
         {
             slots.push_back(ReplayStateCacheEntry{
-                mGeneration, nodeIndex,
                 std::make_unique<DporScpNode>(mValidators.at(nodeIndex), mQSet,
                                               mConfig),
                 {},
@@ -299,11 +279,9 @@ ScpDporReplaySupport::restoreBaseline(DporScpNode& node,
 }
 
 ScpDporReplaySupport::ReplayObservationProgress
-ScpDporReplaySupport::replayObservation(DporScpNode& node,
-                                        std::size_t nodeIndex,
-                                        ThreadTrace const& trace,
-                                        std::size_t observedIndex,
-                                        std::optional<int> selectedTimerID) const
+ScpDporReplaySupport::replayObservation(
+    DporScpNode& node, std::size_t nodeIndex, ThreadTrace const& trace,
+    std::size_t observedIndex, std::optional<int> selectedTimerID) const
 {
     static_cast<void>(nodeIndex);
 
@@ -333,7 +311,6 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
         }
         return ReplayObservationProgress{
             .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
-            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
             .mObservedBottom = observedBottom,
         };
     }
@@ -343,13 +320,12 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
             observedIndex + 1 + chosenTxSetChoices.mTraceEntries;
         if (choiceIndex < trace.size())
         {
-            throw std::logic_error(
-                "trace omits a txset status choice before the next observed event");
+            throw std::logic_error("trace omits a txset status choice before "
+                                   "the next observed event");
         }
 
         return ReplayObservationProgress{
             .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
-            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
             .mPendingEvent = makeTxSetStatusChoiceEvent(e.getChoices()),
             .mObservedBottom = observedBottom,
         };
@@ -360,14 +336,14 @@ ScpDporReplaySupport::replayObservation(DporScpNode& node,
             observedIndex + 1 + chosenTxSetChoices.mTraceEntries;
         if (choiceIndex < trace.size())
         {
-            throw std::logic_error(
-                "trace omits a txset wait-time choice before the next observed event");
+            throw std::logic_error("trace omits a txset wait-time choice "
+                                   "before the next observed event");
         }
 
         return ReplayObservationProgress{
             .mConsumedTraceEntries = 1 + chosenTxSetChoices.mTraceEntries,
-            .mConsumedStepCount = chosenTxSetChoices.mTraceEntries,
-            .mPendingEvent = makeTxSetDownloadWaitTimeChoiceEvent(e.getChoices()),
+            .mPendingEvent =
+                makeTxSetDownloadWaitTimeChoiceEvent(e.getChoices()),
             .mObservedBottom = observedBottom,
         };
     }
@@ -432,7 +408,8 @@ ScpDporReplaySupport::replayOneObservedValue(
     }
     if (value.mSlotIndex != mSlotIndex)
     {
-        throw std::logic_error("trace delivered an envelope for the wrong slot");
+        throw std::logic_error(
+            "trace delivered an envelope for the wrong slot");
     }
     node.receiveEnvelope(decodeEnvelope(value));
 }
@@ -452,8 +429,8 @@ ScpDporReplaySupport::makeTxSetStatusChoiceEvent(
         throw std::logic_error("txset status choices must not be empty");
     }
 
-    return EventLabel{NondeterministicChoiceLabel{.value = choices.front(),
-                                                  .choices = std::move(choices)}};
+    return EventLabel{NondeterministicChoiceLabel{
+        .value = choices.front(), .choices = std::move(choices)}};
 }
 
 EventLabel
@@ -472,8 +449,8 @@ ScpDporReplaySupport::makeTxSetDownloadWaitTimeChoiceEvent(
         throw std::logic_error("txset wait-time choices must not be empty");
     }
 
-    return EventLabel{NondeterministicChoiceLabel{.value = choices.front(),
-                                                  .choices = std::move(choices)}};
+    return EventLabel{NondeterministicChoiceLabel{
+        .value = choices.front(), .choices = std::move(choices)}};
 }
 
 void
@@ -482,8 +459,7 @@ ScpDporReplaySupport::rebuildBaselines()
     std::vector<NodeBaseline> replayBaselines;
     replayBaselines.reserve(mValidators.size());
 
-    for (std::size_t nodeIndex = 0; nodeIndex < mValidators.size();
-         ++nodeIndex)
+    for (std::size_t nodeIndex = 0; nodeIndex < mValidators.size(); ++nodeIndex)
     {
         auto baselineConfig = mConfig;
         // Keep the replay baseline stable; hidden txset choices are exposed

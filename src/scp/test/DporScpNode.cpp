@@ -13,12 +13,25 @@
 #include <atomic>
 #include <limits>
 #include <string>
+#include <string_view>
 
 namespace stellar
 {
 
 namespace
 {
+
+constexpr std::string_view EMPTY_TX_SET_PREFIX{"EMPTY:"};
+
+template <typename Range>
+auto
+findSlotTimer(Range& values, uint64 slotIndex, int timerID)
+{
+    return std::find_if(
+        values.begin(), values.end(), [slotIndex, timerID](auto const& value) {
+            return value.mSlotIndex == slotIndex && value.mTimerID == timerID;
+        });
+}
 
 Hash
 getQSetHash(SCPQuorumSet const& qSet)
@@ -53,30 +66,28 @@ allTxSetStatusChoices()
     return supportedChoices;
 }
 
-DporScpTxSetStatus
-consumeTxSetStatusChoice(
-    std::vector<DporScpTxSetStatus> const& pendingChoices,
-    std::size_t& nextChoice,
-    std::vector<DporScpTxSetStatus> const& supportedChoices)
+template <typename ChoiceRequired, typename T>
+T
+consumeChoice(std::vector<T> const& pendingChoices, std::size_t& nextChoice,
+              std::vector<T> const& supportedChoices,
+              std::string_view emptyMessage, std::string_view invalidMessage)
 {
     if (supportedChoices.empty())
     {
-        throw std::logic_error(
-            "supported txset status choices must not be empty");
+        throw std::logic_error(std::string(emptyMessage));
     }
     if (nextChoice >= pendingChoices.size())
     {
-        throw DporScpNode::TxSetStatusChoiceRequired(supportedChoices);
+        throw ChoiceRequired(supportedChoices);
     }
 
-    auto const status = pendingChoices.at(nextChoice++);
-    if (std::find(supportedChoices.begin(), supportedChoices.end(), status) ==
+    auto const choice = pendingChoices.at(nextChoice++);
+    if (std::find(supportedChoices.begin(), supportedChoices.end(), choice) ==
         supportedChoices.end())
     {
-        throw std::logic_error(
-            "preloaded txset status choice is not supported");
+        throw std::logic_error(std::string(invalidMessage));
     }
-    return status;
+    return choice;
 }
 
 std::vector<std::chrono::milliseconds>
@@ -160,7 +171,6 @@ DporScpNode::DporScpNode(SecretKey const& secretKey,
                          Configuration const& config)
     : mSecretKey(secretKey)
     , mSCP(*this, mSecretKey.getPublicKey(), true, localQSet)
-    , mValueHash(defaultValueHash)
 {
     storeQuorumSet(localQSet);
     storeQuorumSet(mSCP.getLocalNode()->getQuorumSet());
@@ -192,17 +202,6 @@ DporScpNode::storeQuorumSet(SCPQuorumSet const& qSet)
     mLastQSetLookup.reset();
 }
 
-SCPQuorumSetPtr
-DporScpNode::getStoredQuorumSet(Hash const& qSetHash) const
-{
-    auto const it = mQuorumSets.find(qSetHash);
-    if (it == mQuorumSets.end())
-    {
-        return nullptr;
-    }
-    return it->second;
-}
-
 bool
 DporScpNode::nominate(uint64 slotIndex, Value const& value,
                       Value const& previousValue)
@@ -226,13 +225,6 @@ DporScpNode::receiveEnvelope(SCPEnvelope const& envelope)
     return mSCP.receiveEnvelope(wrapEnvelope(envelope));
 }
 
-void
-DporScpNode::setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& envelope)
-{
-    ExternalEventScope event(*this);
-    mSCP.setStateFromEnvelope(slotIndex, wrapEnvelope(envelope));
-}
-
 std::vector<SCPEnvelope>
 DporScpNode::takePendingEnvelopes()
 {
@@ -245,12 +237,6 @@ std::vector<SCPEnvelope> const&
 DporScpNode::getEmittedEnvelopes() const
 {
     return mEmittedEnvelopes;
-}
-
-bool
-DporScpNode::hasActiveTimer(uint64 slotIndex, int timerID) const
-{
-    return findTimer(slotIndex, timerID) != nullptr;
 }
 
 std::optional<DporScpNode::TimerState>
@@ -267,11 +253,7 @@ DporScpNode::getTimer(uint64 slotIndex, int timerID) const
 bool
 DporScpNode::fireTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
-                                 [slotIndex, timerID](TimerState const& timer) {
-                                     return timer.mSlotIndex == slotIndex &&
-                                            timer.mTimerID == timerID;
-                                 });
+    auto const it = findSlotTimer(mTimers, slotIndex, timerID);
     if (it == mTimers.end())
     {
         return false;
@@ -483,14 +465,7 @@ DporScpNode::snapshotReplayBaseline(uint64 slotIndex) const
                                 .mTimerID = timer.mTimerID,
                                 .mTimeout = timer.mTimeout});
     }
-    baseline.mTimerSetCounts.reserve(mTimerSetCounts.size());
-    for (auto const& count : mTimerSetCounts)
-    {
-        baseline.mTimerSetCounts.push_back(
-            ReplayTimerSetCountSnapshot{.mSlotIndex = count.mSlotIndex,
-                                        .mTimerID = count.mTimerID,
-                                        .mCount = count.mCount});
-    }
+    baseline.mTimerSetCounts = mTimerSetCounts;
     baseline.mLastTxSetStatusByValue = mLastTxSetStatusByValue;
     baseline.mLastTxSetDownloadWaitTimeByValue =
         mLastTxSetDownloadWaitTimeByValue;
@@ -668,13 +643,7 @@ DporScpNode::restoreReplayBaseline(ReplayBaseline const& baseline)
     }
 
     mEmittedEnvelopes = baseline.mEmittedEnvelopes;
-    for (auto const& timerSetCount : baseline.mTimerSetCounts)
-    {
-        mTimerSetCounts.push_back(
-            TimerSetCountEntry{.mSlotIndex = timerSetCount.mSlotIndex,
-                               .mTimerID = timerSetCount.mTimerID,
-                               .mCount = timerSetCount.mCount});
-    }
+    mTimerSetCounts = baseline.mTimerSetCounts;
     mLastTxSetStatusByValue = baseline.mLastTxSetStatusByValue;
     mLastTxSetDownloadWaitTimeByValue =
         baseline.mLastTxSetDownloadWaitTimeByValue;
@@ -717,23 +686,10 @@ DporScpNode::hasReachedBoundary() const
     return mHasReachedBoundary;
 }
 
-bool
-DporScpNode::hasReachedPrepareBoundary() const
-{
-    return mBoundaryEnvelope &&
-           mBoundaryEnvelope->statement.pledges.type() == SCP_ST_PREPARE;
-}
-
 SCPEnvelope const*
 DporScpNode::getBoundaryEnvelope() const
 {
     return mBoundaryEnvelope ? &*mBoundaryEnvelope : nullptr;
-}
-
-SCPEnvelope const*
-DporScpNode::getPrepareBoundaryEnvelope() const
-{
-    return hasReachedPrepareBoundary() ? getBoundaryEnvelope() : nullptr;
 }
 
 void
@@ -879,20 +835,12 @@ DporScpNode::getTxSetDownloadWaitTime(Value const& value) const
             return recordWaitTime(lastWaitTimeIt->second);
         }
 
-        if (mNextPendingTxSetDownloadWaitTimeChoice >=
-            mPendingTxSetDownloadWaitTimeChoices.size())
-        {
-            throw TxSetDownloadWaitTimeChoiceRequired(supportedChoices);
-        }
-
-        auto const waitTime = mPendingTxSetDownloadWaitTimeChoices.at(
-            mNextPendingTxSetDownloadWaitTimeChoice++);
-        if (std::find(supportedChoices.begin(), supportedChoices.end(),
-                      waitTime) == supportedChoices.end())
-        {
-            throw std::logic_error(
+        auto const waitTime =
+            consumeChoice<TxSetDownloadWaitTimeChoiceRequired>(
+                mPendingTxSetDownloadWaitTimeChoices,
+                mNextPendingTxSetDownloadWaitTimeChoice, supportedChoices,
+                "supported txset wait-time choices must not be empty",
                 "preloaded txset wait-time choice is not supported");
-        }
         return recordWaitTime(waitTime);
     }
 
@@ -925,10 +873,7 @@ DporScpNode::emitEnvelope(SCPEnvelope const& envelope)
     if (reachesBoundaryNow)
     {
         mHasReachedBoundary = true;
-        if (!mBoundaryEnvelope)
-        {
-            mBoundaryEnvelope = envelope;
-        }
+        mBoundaryEnvelope = envelope;
     }
 
     if (mEmittedEnvelopeRecordingEnabled)
@@ -1011,9 +956,11 @@ DporScpNode::validateValue(uint64, Value const& value, bool nomination) const
         }
         else
         {
-            status = consumeTxSetStatusChoice(mPendingTxSetStatusChoices,
-                                              mNextPendingTxSetStatusChoice,
-                                              mSupportedTxSetStatusChoices);
+            status = consumeChoice<TxSetStatusChoiceRequired>(
+                mPendingTxSetStatusChoices, mNextPendingTxSetStatusChoice,
+                mSupportedTxSetStatusChoices,
+                "supported txset status choices must not be empty",
+                "preloaded txset status choice is not supported");
         }
     }
 
@@ -1026,23 +973,25 @@ Value
 DporScpNode::makeEmptyTxSetValueFromValue(Value const& value) const
 {
     Value emptyTxSetValue;
-    emptyTxSetValue.resize(6 + value.size());
-    emptyTxSetValue[0] = 'E';
-    emptyTxSetValue[1] = 'M';
-    emptyTxSetValue[2] = 'P';
-    emptyTxSetValue[3] = 'T';
-    emptyTxSetValue[4] = 'Y';
-    emptyTxSetValue[5] = ':';
-    std::copy(value.begin(), value.end(), emptyTxSetValue.begin() + 6);
+    emptyTxSetValue.reserve(EMPTY_TX_SET_PREFIX.size() + value.size());
+    emptyTxSetValue.insert(emptyTxSetValue.end(), EMPTY_TX_SET_PREFIX.begin(),
+                           EMPTY_TX_SET_PREFIX.end());
+    emptyTxSetValue.insert(emptyTxSetValue.end(), value.begin(), value.end());
     return emptyTxSetValue;
 }
 
 bool
 DporScpNode::isEmptyTxSetValue(Value const& value) const
 {
-    return value.size() >= 6 && value[0] == 'E' && value[1] == 'M' &&
-           value[2] == 'P' && value[3] == 'T' && value[4] == 'Y' &&
-           value[5] == ':';
+    return hasEmptyTxSetValuePrefix(value);
+}
+
+bool
+DporScpNode::hasEmptyTxSetValuePrefix(Value const& value)
+{
+    return value.size() >= EMPTY_TX_SET_PREFIX.size() &&
+           std::equal(EMPTY_TX_SET_PREFIX.begin(), EMPTY_TX_SET_PREFIX.end(),
+                      value.begin());
 }
 
 bool
@@ -1098,17 +1047,12 @@ DporScpNode::computeHashNode(uint64 slotIndex, Value const& prev,
 uint64
 DporScpNode::computeValueHash(uint64, Value const&, int32_t, Value const& value)
 {
-    return mValueHash(value);
+    return defaultValueHash(value);
 }
 
 ValueWrapperPtr
-DporScpNode::combineCandidates(uint64 slotIndex,
-                               ValueWrapperPtrSet const& candidates)
+DporScpNode::combineCandidates(uint64, ValueWrapperPtrSet const& candidates)
 {
-    if (mCombineCandidates)
-    {
-        return mCombineCandidates(slotIndex, candidates);
-    }
     if (candidates.empty())
     {
         throw std::runtime_error("combineCandidates called with no candidates");
@@ -1215,22 +1159,14 @@ DporScpNode::setupTimer(uint64 slotIndex, int timerID,
     auto* setCountEntry = findTimerSetCount(slotIndex, timerID);
     if (!setCountEntry)
     {
-        mTimerSetCounts.push_back(
-            TimerSetCountEntry{.mSlotIndex = slotIndex, .mTimerID = timerID});
+        mTimerSetCounts.push_back(ReplayTimerSetCountSnapshot{
+            .mSlotIndex = slotIndex, .mTimerID = timerID});
         setCountEntry = &mTimerSetCounts.back();
     }
     auto const setCount = ++setCountEntry->mCount;
-    auto const timerSetLimit = [&]() -> std::optional<uint32_t> {
-        if (timerID == Slot::NOMINATION_TIMER)
-        {
-            return mNominationTimerSetLimit;
-        }
-        if (timerID == Slot::BALLOT_PROTOCOL_TIMER)
-        {
-            return mBallotingTimerSetLimit;
-        }
-        return std::nullopt;
-    }();
+    auto const timerSetLimit = timerID == Slot::NOMINATION_TIMER
+                                   ? mNominationTimerSetLimit
+                                   : std::nullopt;
 
     if (timerSetLimit && setCount >= *timerSetLimit)
     {
@@ -1275,14 +1211,6 @@ void
 DporScpNode::applyConfiguration(Configuration const& config)
 {
     mNodeIndexMap = config.mNodeIndexMap;
-    if (config.mValueHash)
-    {
-        mValueHash = config.mValueHash;
-    }
-    if (config.mCombineCandidates)
-    {
-        mCombineCandidates = config.mCombineCandidates;
-    }
     mPrepareBoundaryCounter =
         std::max<uint32_t>(1, config.mPrepareBoundaryCounter);
     mBoundaryMode = config.mBoundaryMode;
@@ -1304,13 +1232,10 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mSupportedTxSetStatusChoices.clear();
     if (mNondeterministicTxSetStatus)
     {
-        mSupportedTxSetStatusChoices = config.mSupportedTxSetStatusChoices;
-        if (mSupportedTxSetStatusChoices.empty())
-        {
-            auto const& defaultChoices = allTxSetStatusChoices();
-            mSupportedTxSetStatusChoices.assign(defaultChoices.begin(),
-                                                defaultChoices.end());
-        }
+        mSupportedTxSetStatusChoices =
+            config.mSupportedTxSetStatusChoices.empty()
+                ? allTxSetStatusChoices()
+                : config.mSupportedTxSetStatusChoices;
 
         auto const& allChoices = allTxSetStatusChoices();
         for (auto const status : mSupportedTxSetStatusChoices)
@@ -1329,41 +1254,23 @@ DporScpNode::applyConfiguration(Configuration const& config)
     mInitialBallotTimeoutMS = config.mInitialBallotTimeoutMS;
     mIncrementBallotTimeoutMS = config.mIncrementBallotTimeoutMS;
 
-    auto const nodeWaitTimesIt =
-        config.mTxSetDownloadWaitTimesByNode.find(getNodeID());
-    if (nodeWaitTimesIt != config.mTxSetDownloadWaitTimesByNode.end())
-    {
-        mTxSetDownloadWaitTimes = nodeWaitTimesIt->second;
-    }
-    else
-    {
-        mTxSetDownloadWaitTimes = config.mTxSetDownloadWaitTimes;
-    }
+    mTxSetDownloadWaitTimes = config.mTxSetDownloadWaitTimes;
     mNondeterministicTxSetDownloadWaitTime =
         config.mNondeterministicTxSetDownloadWaitTime;
     mNominationTimerSetLimit = config.mNominationTimerSetLimit;
-    mBallotingTimerSetLimit = config.mBallotingTimerSetLimit;
 }
 
 DporScpNode::TimerState*
 DporScpNode::findTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
-                                 [slotIndex, timerID](TimerState const& timer) {
-                                     return timer.mSlotIndex == slotIndex &&
-                                            timer.mTimerID == timerID;
-                                 });
+    auto const it = findSlotTimer(mTimers, slotIndex, timerID);
     return it == mTimers.end() ? nullptr : &*it;
 }
 
 DporScpNode::TimerState const*
 DporScpNode::findTimer(uint64 slotIndex, int timerID) const
 {
-    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
-                                 [slotIndex, timerID](TimerState const& timer) {
-                                     return timer.mSlotIndex == slotIndex &&
-                                            timer.mTimerID == timerID;
-                                 });
+    auto const it = findSlotTimer(mTimers, slotIndex, timerID);
     return it == mTimers.end() ? nullptr : &*it;
 }
 
@@ -1381,25 +1288,17 @@ DporScpNode::setTimer(TimerState timer)
 void
 DporScpNode::clearTimer(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(mTimers.begin(), mTimers.end(),
-                                 [slotIndex, timerID](TimerState const& timer) {
-                                     return timer.mSlotIndex == slotIndex &&
-                                            timer.mTimerID == timerID;
-                                 });
+    auto const it = findSlotTimer(mTimers, slotIndex, timerID);
     if (it != mTimers.end())
     {
         mTimers.erase(it);
     }
 }
 
-DporScpNode::TimerSetCountEntry*
+DporScpNode::ReplayTimerSetCountSnapshot*
 DporScpNode::findTimerSetCount(uint64 slotIndex, int timerID)
 {
-    auto const it = std::find_if(
-        mTimerSetCounts.begin(), mTimerSetCounts.end(),
-        [slotIndex, timerID](TimerSetCountEntry const& entry) {
-            return entry.mSlotIndex == slotIndex && entry.mTimerID == timerID;
-        });
+    auto const it = findSlotTimer(mTimerSetCounts, slotIndex, timerID);
     return it == mTimerSetCounts.end() ? nullptr : &*it;
 }
 
@@ -1523,39 +1422,8 @@ DporScpNode::isEnvelopeBoundaryForMode(SCPEnvelope const& envelope) const
         return type == SCP_ST_CONFIRM || type == SCP_ST_EXTERNALIZE;
     case BoundaryMode::Externalize:
         return type == SCP_ST_EXTERNALIZE;
-    case BoundaryMode::NominationRound:
-        if (type != SCP_ST_NOMINATE)
-        {
-            return false;
-        }
-        if (!mMaxNominationRound)
-        {
-            throw std::logic_error(
-                "nomination-round boundary requires max nomination rounds");
-        }
-        return getNominationRoundForEnvelope(envelope) > *mMaxNominationRound;
     }
     throw std::logic_error("unknown replay boundary mode");
-}
-
-uint32_t
-DporScpNode::getNominationRoundForEnvelope(SCPEnvelope const& envelope) const
-{
-    if (envelope.statement.pledges.type() != SCP_ST_NOMINATE)
-    {
-        throw std::logic_error(
-            "nomination round requested for non-nomination envelope");
-    }
-
-    auto slot =
-        const_cast<SCP&>(mSCP).getSlot(envelope.statement.slotIndex, false);
-    if (!slot)
-    {
-        throw std::logic_error(
-            "nomination-round boundary requires local slot state");
-    }
-    return static_cast<uint32_t>(
-        std::max<int32_t>(slot->mNominationProtocol.mRoundNumber, 0));
 }
 
 } // namespace stellar

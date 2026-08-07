@@ -51,47 +51,22 @@ the chosen path as `trace-json=...`, and can reload that artifact later with
 The persisted replay input is not a full schedule. It stores:
 
 - the effective `ScpDporDefaultScenario::Options`
-- terminal metadata such as terminal kind, failure message, and focus thread
-- one raw `ThreadTrace` per thread
+- terminal metadata such as terminal kind, failure message, and focus node
+- a positional array containing one raw `ThreadTrace` per node
 
-Trace bundles are written at schema version 7, and versions 7 and 6 are both
-accepted on read. Both store the txset-status modes as `always-valid`,
-`downloading-then-valid`, or `always-downloading`, txset status choices can
-contain only `valid` or `downloading`, and both record at most one txset status
-choice and one txset wait-time choice per value per external event.
+Trace bundles are written and read exclusively at schema version 8. This is an
+intentional compatibility break approved for the simplification work: there is
+no converter, and versions 1 through 7 must be recaptured with the current
+binary. A rejected bundle reports its version, the supported version, and the
+recapture instruction.
 
-Version 7 differs from version 6 in exactly one way: `terminal.kind` gained the
-spelling `thread-event-limit`, for executions the `--thread-event-depth`
-per-node event bound may have truncated. That widens the serialized value
-domain, so a pre-version-7 reader must reject the bundles we now write --
-hence the bump. In the other direction the change is purely additive: a
-version-6 bundle carries the same scenario options and the same trace
-semantics, and its terminal kinds are a strict subset of version 7's, so it
-still loads and replays. Version 6 is deliberately *not* added to the
-rejection ladder below, which is reserved for the documented semantic
-incompatibilities of versions 1-5. Bundles already sitting in `dpor-traces/`
-keep working.
-
-Version-5 bundles are rejected because they recorded a choice per `SCPDriver`
-call rather than per external event. Such a bundle carries choices the current
-model never asks for, and replay rejects the leftovers rather than letting a
-later event consume one.
-
-Version-4 bundles are rejected because `--download-succeeds-in-round` used to
-take effect in the same event that emitted the triggering `PREPARE`, and now
-takes effect from the next event onward. No measured scenario changed its
-execution count across that shift, but a version-4 trace was captured under
-different semantics and is not guaranteed to replay the same way.
-
-Version-2 and version-3 bundles are rejected before their scenario options or
-trace observations are parsed because they may contain the removed
-downloaded-invalid status or nondeterministic status mode. Replaying either
-under the reduced current model would change the explored behavior.
-
-Version-1 bundles are rejected before scenario options or trace observations
-are parsed. Their `invalid` status meant outright SCP-value invalidity, so
-loading them under any later schema would replay a different protocol
-execution.
+Version 8 flattens `thread_traces` to an array indexed by node and stops storing
+the derivable `observed_count` and `focus_thread_id` fields. A stored
+`communication_model` remains informational and is optional on read. Scenario
+options and observations retain the current txset semantics: status modes are
+`always-valid`, `downloading-then-valid`, or `always-downloading`; choices are
+`valid` or `downloading`; and replay records at most one status and one wait
+time choice per value per external event.
 
 This matches the existing replay seam:
 

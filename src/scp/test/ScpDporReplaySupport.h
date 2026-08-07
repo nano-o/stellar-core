@@ -34,7 +34,6 @@ class ScpDporReplaySupport
     struct ReplayObservationProgress
     {
         std::size_t mConsumedTraceEntries{0};
-        std::size_t mConsumedStepCount{0};
         std::optional<EventLabel> mPendingEvent;
         bool mObservedBottom{false};
     };
@@ -82,35 +81,30 @@ class ScpDporReplaySupport
         }
     };
 
-
     struct ReplayState
     {
         DporScpNode& mNode;
         ReplayCursor& mCursor;
     };
 
-    ScpDporReplaySupport(std::vector<SecretKey> validators, SCPQuorumSet qSet,
-                         uint64_t slotIndex, Value previousValue,
-                         std::vector<Value> initialValues,
-                         DporScpNode::Configuration config = {},
-                         std::size_t replaySlotsPerNode =
-                             DEFAULT_REPLAY_SLOTS_PER_NODE);
+    ScpDporReplaySupport(
+        std::vector<SecretKey> validators, SCPQuorumSet qSet,
+        uint64_t slotIndex, Value previousValue,
+        std::vector<Value> initialValues,
+        DporScpNode::Configuration config = {},
+        std::size_t replaySlotsPerNode = DEFAULT_REPLAY_SLOTS_PER_NODE);
 
     // Copies get a fresh generation so they never adopt thread-local cached
     // nodes that were created for the source object.
     ScpDporReplaySupport(ScpDporReplaySupport const& other);
 
-    ScpDporReplaySupport&
-    operator=(ScpDporReplaySupport const&) = delete;
+    ScpDporReplaySupport& operator=(ScpDporReplaySupport const&) = delete;
 
-    std::size_t
-    size() const;
+    std::size_t size() const;
 
-    NodeBaseline const&
-    getNodeBaseline(std::size_t nodeIndex) const;
+    NodeBaseline const& getNodeBaseline(std::size_t nodeIndex) const;
 
-    DporScpNode&
-    acquireNode(std::size_t nodeIndex) const;
+    DporScpNode& acquireNode(std::size_t nodeIndex) const;
 
     // Picks the cached node whose already-replayed prefix best matches
     // `trace`: the longest valid prefix that `trace` extends and that has not
@@ -120,15 +114,13 @@ class ScpDporReplaySupport
     // replaying from the baseline. When nothing matches, the
     // least-recently-used node is returned with an invalid cursor and the
     // caller is expected to restore the baseline into it.
-    ReplayState
-    acquireReplayState(std::size_t nodeIndex, ThreadTrace const& trace,
-                       std::size_t step) const;
+    ReplayState acquireReplayState(std::size_t nodeIndex,
+                                   ThreadTrace const& trace,
+                                   std::size_t step) const;
 
-    static void
-    clearThreadLocalCacheForCurrentThread();
+    static void clearThreadLocalCacheForCurrentThread();
 
-    void
-    restoreBaseline(DporScpNode& node, std::size_t nodeIndex) const;
+    void restoreBaseline(DporScpNode& node, std::size_t nodeIndex) const;
 
     ReplayObservationProgress
     replayObservation(DporScpNode& node, std::size_t nodeIndex,
@@ -136,27 +128,22 @@ class ScpDporReplaySupport
                       std::optional<int> selectedTimerID) const;
 
   private:
-    void
-    initializeNode(DporScpNode& node, std::size_t nodeIndex) const;
+    void initializeNode(DporScpNode& node, std::size_t nodeIndex) const;
 
-    void
-    restoreNodeBaseline(DporScpNode& node, std::size_t nodeIndex,
-                        DporScpNode::ReplayBaseline const& baseline) const;
+    void restoreNodeBaseline(DporScpNode& node, std::size_t nodeIndex,
+                             DporScpNode::ReplayBaseline const& baseline) const;
 
-    void
-    replayOneObservedValue(DporScpNode& node, ObservedValue const& observed,
-                           std::optional<int> selectedTimerID) const;
+    void replayOneObservedValue(DporScpNode& node,
+                                ObservedValue const& observed,
+                                std::optional<int> selectedTimerID) const;
 
-    EventLabel
-    makeTxSetStatusChoiceEvent(
+    EventLabel makeTxSetStatusChoiceEvent(
         std::vector<DporScpTxSetStatus> const& statuses) const;
 
-    EventLabel
-    makeTxSetDownloadWaitTimeChoiceEvent(
+    EventLabel makeTxSetDownloadWaitTimeChoiceEvent(
         std::vector<std::chrono::milliseconds> const& waitTimes) const;
 
-    void
-    rebuildBaselines();
+    void rebuildBaselines();
 
     std::vector<SecretKey> mValidators;
     SCPQuorumSet mQSet;

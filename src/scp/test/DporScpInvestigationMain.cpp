@@ -31,6 +31,13 @@
 namespace
 {
 
+using stellar::scpdpor::communicationModelName;
+using stellar::scpdpor::downloadTimeModeName;
+using stellar::scpdpor::parseDownloadTimeMode;
+using stellar::scpdpor::parseTxSetStatusMode;
+using stellar::scpdpor::terminalKindName;
+using stellar::scpdpor::txSetStatusModeName;
+
 // When nomination timers are enabled on the command line, cap the nomination
 // timer at this round by default. Without a cap, a single node re-arms its
 // nomination timer every round; because only one timer is then active the
@@ -102,17 +109,6 @@ std::size_t defaultParallelWorkers();
 std::string_view
 initModeName(stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode);
 
-std::string_view downloadTimeModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode);
-
-std::string_view txSetStatusModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mode);
-
-std::string_view communicationModelName(dpor::model::CommunicationModel model);
-
-std::string_view
-terminalExecutionKindName(dpor::algo::TerminalExecutionKind kind);
-
 std::size_t
 defaultParallelWorkers()
 {
@@ -133,74 +129,6 @@ initModeName(stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode mode)
         return "unique";
     }
     throw std::logic_error("unknown init mode");
-}
-
-std::string_view
-downloadTimeModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode mode)
-{
-    using DownloadTimeMode =
-        stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode;
-    switch (mode)
-    {
-    case DownloadTimeMode::BelowThreshold:
-        return "below";
-    case DownloadTimeMode::AboveThreshold:
-        return "above";
-    case DownloadTimeMode::Nondeterministic:
-        return "nondet";
-    }
-    throw std::logic_error("unknown download-time mode");
-}
-
-std::string_view
-txSetStatusModeName(
-    stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode mode)
-{
-    using TxSetStatusMode =
-        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
-    switch (mode)
-    {
-    case TxSetStatusMode::AlwaysValid:
-        return "always-valid";
-    case TxSetStatusMode::DownloadingThenValid:
-        return "downloading-then-valid";
-    case TxSetStatusMode::AlwaysDownloading:
-        return "always-downloading";
-    }
-    throw std::logic_error("unknown txset-status mode");
-}
-
-std::string_view
-communicationModelName(dpor::model::CommunicationModel model)
-{
-    switch (model)
-    {
-    case dpor::model::CommunicationModel::Async:
-        return "async";
-    case dpor::model::CommunicationModel::FifoP2P:
-        return "fifo";
-    }
-    throw std::logic_error("unknown communication model");
-}
-
-std::string_view
-terminalExecutionKindName(dpor::algo::TerminalExecutionKind kind)
-{
-    switch (kind)
-    {
-    case dpor::algo::TerminalExecutionKind::Full:
-        return "full";
-    case dpor::algo::TerminalExecutionKind::Blocked:
-        return "blocked";
-    case dpor::algo::TerminalExecutionKind::Error:
-        return "error";
-    case dpor::algo::TerminalExecutionKind::DepthLimit:
-        return "depth-limit";
-    case dpor::algo::TerminalExecutionKind::ThreadEventLimit:
-        return "thread-event-limit";
-    }
-    throw std::logic_error("unknown terminal execution kind");
 }
 
 void
@@ -377,50 +305,6 @@ printUsage(char const* argv0)
               << "      Show this help message\n";
 }
 
-stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode
-parseDownloadTimeMode(std::string_view value)
-{
-    using DownloadTimeMode =
-        stellar::scpdpor::ScpDporDefaultScenario::DownloadTimeMode;
-
-    if (value == "nondet")
-    {
-        return DownloadTimeMode::Nondeterministic;
-    }
-    if (value == "below")
-    {
-        return DownloadTimeMode::BelowThreshold;
-    }
-    if (value == "above")
-    {
-        return DownloadTimeMode::AboveThreshold;
-    }
-    throw std::invalid_argument("unknown download-time mode: " +
-                                std::string(value));
-}
-
-stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode
-parseTxSetStatusMode(std::string_view value)
-{
-    using TxSetStatusMode =
-        stellar::scpdpor::ScpDporDefaultScenario::TxSetStatusMode;
-
-    if (value == "always-valid")
-    {
-        return TxSetStatusMode::AlwaysValid;
-    }
-    if (value == "downloading-then-valid")
-    {
-        return TxSetStatusMode::DownloadingThenValid;
-    }
-    if (value == "always-downloading")
-    {
-        return TxSetStatusMode::AlwaysDownloading;
-    }
-    throw std::invalid_argument("unknown txset-status mode: " +
-                                std::string(value));
-}
-
 stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode
 parseInitMode(std::string_view value)
 {
@@ -449,7 +333,7 @@ parseInitMode(std::string_view value)
 // branch and represent it as an absent optional.
 template <typename T>
 T
-parseStrictUnsignedValue(std::string_view arg, std::string_view value)
+parseUnsigned(std::string_view arg, std::string_view value)
 {
     T parsed{};
     auto const* const first = value.data();
@@ -469,34 +353,11 @@ parseStrictUnsignedValue(std::string_view arg, std::string_view value)
     return parsed;
 }
 
-uint32_t
-parseUint32Value(std::string_view arg, std::string_view value)
+template <typename T>
+T
+parsePositive(std::string_view arg, std::string_view value)
 {
-    return parseStrictUnsignedValue<uint32_t>(arg, value);
-}
-
-uint32_t
-parsePositiveUint32Value(std::string_view arg, std::string_view value)
-{
-    auto const parsed = parseUint32Value(arg, value);
-    if (parsed == 0)
-    {
-        throw std::invalid_argument(std::string(arg) +
-                                    " requires a value greater than 0");
-    }
-    return parsed;
-}
-
-std::size_t
-parseSizeValue(std::string_view arg, std::string_view value)
-{
-    return parseStrictUnsignedValue<std::size_t>(arg, value);
-}
-
-std::size_t
-parsePositiveSizeValue(std::string_view arg, std::string_view value)
-{
-    auto const parsed = parseSizeValue(arg, value);
+    auto const parsed = parseUnsigned<T>(arg, value);
     if (parsed == 0)
     {
         throw std::invalid_argument(std::string(arg) +
@@ -508,7 +369,7 @@ parsePositiveSizeValue(std::string_view arg, std::string_view value)
 std::size_t
 parseValidatorCountValue(std::string_view arg, std::string_view value)
 {
-    auto const validatorCount = parseSizeValue(arg, value);
+    auto const validatorCount = parseUnsigned<std::size_t>(arg, value);
     if (!stellar::scpdpor::ScpDporDefaultScenario::isSupportedValidatorCount(
             validatorCount))
     {
@@ -631,28 +492,18 @@ stellar::scpdpor::ThreadTrace const&
 findThreadTrace(stellar::scpdpor::TraceBundle const& bundle,
                 dpor::model::ThreadId threadID)
 {
-    auto const it =
-        std::find_if(bundle.mThreadTraces.begin(), bundle.mThreadTraces.end(),
-                     [threadID](auto const& record) {
-                         return record.mThreadID == threadID;
-                     });
-    if (it == bundle.mThreadTraces.end())
+    auto const nodeIndex = static_cast<std::size_t>(threadID);
+    if (nodeIndex >= bundle.mThreadTraces.size())
     {
         throw std::logic_error("missing thread trace for requested thread");
     }
-    return it->mTrace;
+    return bundle.mThreadTraces.at(nodeIndex);
 }
 
 std::chrono::seconds
 parsePositiveSecondsValue(std::string_view arg, std::string_view value)
 {
-    auto const parsed =
-        parseStrictUnsignedValue<unsigned long long>(arg, value);
-    if (parsed == 0)
-    {
-        throw std::invalid_argument(std::string(arg) +
-                                    " requires a value greater than 0");
-    }
+    auto const parsed = parsePositive<unsigned long long>(arg, value);
     if (parsed > static_cast<unsigned long long>(
                      std::numeric_limits<std::chrono::seconds::rep>::max()))
     {
@@ -838,174 +689,83 @@ printThreadReplayTrace(
     }
 }
 
-bool
-isExternalizeEnvelope(stellar::SCPEnvelope const& envelope)
+enum class ReplayDumpErrorPolicy
 {
-    return envelope.statement.pledges.type() == stellar::SCP_ST_EXTERNALIZE;
-}
-
-struct ExternalizedValueRecord
-{
-    std::size_t mNodeIndex{};
-    stellar::Value mValue;
+    Propagate,
+    BestEffort
 };
 
-struct AgreementFailure
-{
-    ExternalizedValueRecord mReference;
-    ExternalizedValueRecord mConflicting;
-};
-
-std::optional<stellar::Value>
-findExternalizedValue(std::vector<stellar::SCPEnvelope> const& envelopes)
-{
-    for (auto const& envelope : envelopes)
-    {
-        if (isExternalizeEnvelope(envelope))
-        {
-            return envelope.statement.pledges.externalize().commit.value;
-        }
-    }
-    return std::nullopt;
-}
-
-std::optional<std::size_t>
-findNodeMissingExternalize(
-    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
-        execution)
-{
-    if (!stellar::scpdpor::isMaximalExecution(execution))
-    {
-        return std::nullopt;
-    }
-
-    for (std::size_t nodeIndex = 0;
-         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
-    {
-        auto const trace = execution.graph.thread_trace(
-            stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
-        auto const inspection =
-            scenario.inspectEmittedEnvelopes(nodeIndex, trace);
-        auto const hasExternalize =
-            std::any_of(inspection.mEmittedEnvelopes.begin(),
-                        inspection.mEmittedEnvelopes.end(),
-                        [](stellar::SCPEnvelope const& envelope) {
-                            return isExternalizeEnvelope(envelope);
-                        });
-        if (!hasExternalize)
-        {
-            return nodeIndex;
-        }
-    }
-    return std::nullopt;
-}
-
-std::optional<AgreementFailure>
-findAgreementFailure(
-    stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-    dpor::algo::TerminalExecutionT<stellar::scpdpor::ScpDporValue> const&
-        execution)
-{
-    if (!stellar::scpdpor::isMaximalExecution(execution))
-    {
-        return std::nullopt;
-    }
-
-    std::optional<ExternalizedValueRecord> reference;
-    for (std::size_t nodeIndex = 0;
-         nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
-    {
-        auto const trace = execution.graph.thread_trace(
-            stellar::scpdpor::threadIdForNodeIndex(nodeIndex));
-        auto const inspection =
-            scenario.inspectEmittedEnvelopes(nodeIndex, trace);
-        auto const externalizedValue =
-            findExternalizedValue(inspection.mEmittedEnvelopes);
-        if (!externalizedValue)
-        {
-            continue;
-        }
-
-        ExternalizedValueRecord current{nodeIndex, *externalizedValue};
-        if (!reference)
-        {
-            reference = std::move(current);
-            continue;
-        }
-
-        if (current.mValue != reference->mValue)
-        {
-            return AgreementFailure{*reference, std::move(current)};
-        }
-    }
-
-    return std::nullopt;
-}
-
 void
-dumpTerminalExecution(std::ostream& out,
-                      stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-                      stellar::scpdpor::TraceBundle const& bundle,
-                      bool dumpReplayTrace)
+dumpExecution(std::ostream& out,
+              stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+              stellar::scpdpor::TraceBundle const& bundle,
+              std::vector<std::size_t> const& nodeOrder,
+              ReplayDumpErrorPolicy errorPolicy, bool includeFailureMessage)
 {
-    auto const& leaderTrace =
-        findThreadTrace(bundle, stellar::scpdpor::threadIdForNodeIndex(0));
-    auto const boundary = scenario.inspectBoundary(0, leaderTrace);
-
-    out << "terminal-kind=" << terminalExecutionKindName(bundle.mTerminal.mKind)
-        << " leader-boundary=" << (boundary.mReachedBoundary ? "true" : "false")
-        << "\n";
-
-    if (!dumpReplayTrace)
+    if (bundle.mTerminal.mKind == dpor::algo::TerminalExecutionKind::Error)
     {
-        return;
+        out << "terminal-kind=error"
+            << " node-index=" << bundle.mTerminal.mFocusNodeIndex << " thread="
+            << stellar::scpdpor::threadIdForNodeIndex(
+                   bundle.mTerminal.mFocusNodeIndex)
+            << "\n";
+    }
+    else
+    {
+        auto const& leaderTrace =
+            findThreadTrace(bundle, stellar::scpdpor::threadIdForNodeIndex(0));
+        auto const boundary = scenario.inspectBoundary(0, leaderTrace);
+        out << "terminal-kind=" << terminalKindName(bundle.mTerminal.mKind)
+            << " leader-boundary="
+            << (boundary.mReachedBoundary ? "true" : "false") << "\n";
+    }
+    if (includeFailureMessage && bundle.mTerminal.mFailureMessage)
+    {
+        out << "failure-message=" << *bundle.mTerminal.mFailureMessage << "\n";
     }
 
-    for (auto const nodeIndex :
-         focusFirstNodeOrder(scenario.options().mValidators.size(),
-                             bundle.mTerminal.mFocusNodeIndex))
+    for (auto const nodeIndex : nodeOrder)
     {
-        auto const tid = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-        auto const& trace = findThreadTrace(bundle, tid);
-        auto inspection = scenario.inspectThreadReplayTrace(nodeIndex, trace);
-        out << "thread=" << tid << " replay\n";
-        printThreadReplayTrace(out, scenario.options().mSlotIndex, inspection);
-    }
-}
-
-void
-dumpErrorExecution(std::ostream& out,
-                   stellar::scpdpor::ScpDporDefaultScenario const& scenario,
-                   stellar::scpdpor::TraceBundle const& bundle)
-{
-    out << "terminal-kind=error"
-        << " node-index=" << bundle.mTerminal.mFocusNodeIndex
-        << " thread=" << bundle.mTerminal.mFocusThreadID << "\n";
-
-    auto dumpThreadReplay = [&](std::size_t nodeIndex) {
         auto const threadID = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-        auto const& trace = findThreadTrace(bundle, threadID);
         out << "thread=" << threadID << " replay\n";
-        try
-        {
+        auto const dumpThread = [&] {
+            auto const& trace = findThreadTrace(bundle, threadID);
             auto const inspection =
                 scenario.inspectThreadReplayTrace(nodeIndex, trace);
             printThreadReplayTrace(out, scenario.options().mSlotIndex,
                                    inspection);
-        }
-        catch (std::exception const& ex)
+        };
+        if (errorPolicy == ReplayDumpErrorPolicy::Propagate)
         {
-            out << "  replay-dump-error=" << ex.what() << "\n";
+            dumpThread();
         }
-    };
-
-    for (auto const nodeIndex :
-         focusFirstNodeOrder(scenario.options().mValidators.size(),
-                             bundle.mTerminal.mFocusNodeIndex))
-    {
-        dumpThreadReplay(nodeIndex);
+        else
+        {
+            try
+            {
+                dumpThread();
+            }
+            catch (std::exception const& ex)
+            {
+                out << "  replay-dump-error=" << ex.what() << "\n";
+            }
+        }
     }
+}
+
+void
+dumpLiveExecution(std::ostream& out,
+                  stellar::scpdpor::ScpDporDefaultScenario const& scenario,
+                  stellar::scpdpor::TraceBundle const& bundle)
+{
+    auto const bestEffort =
+        bundle.mTerminal.mKind == dpor::algo::TerminalExecutionKind::Error;
+    dumpExecution(out, scenario, bundle,
+                  focusFirstNodeOrder(scenario.options().mValidators.size(),
+                                      bundle.mTerminal.mFocusNodeIndex),
+                  bestEffort ? ReplayDumpErrorPolicy::BestEffort
+                             : ReplayDumpErrorPolicy::Propagate,
+                  false);
 }
 
 std::filesystem::path
@@ -1064,36 +824,8 @@ dumpReplayBundle(std::ostream& out, CommandLineOptions const& options,
                  stellar::scpdpor::ScpDporDefaultScenario const& scenario,
                  stellar::scpdpor::TraceBundle const& bundle)
 {
-    if (bundle.mTerminal.mKind == dpor::algo::TerminalExecutionKind::Error)
-    {
-        out << "terminal-kind=error"
-            << " node-index=" << bundle.mTerminal.mFocusNodeIndex
-            << " thread=" << bundle.mTerminal.mFocusThreadID << "\n";
-    }
-    else
-    {
-        auto const& leaderTrace =
-            findThreadTrace(bundle, stellar::scpdpor::threadIdForNodeIndex(0));
-        auto const boundary = scenario.inspectBoundary(0, leaderTrace);
-        out << "terminal-kind="
-            << terminalExecutionKindName(bundle.mTerminal.mKind)
-            << " leader-boundary="
-            << (boundary.mReachedBoundary ? "true" : "false") << "\n";
-    }
-    if (bundle.mTerminal.mFailureMessage)
-    {
-        out << "failure-message=" << *bundle.mTerminal.mFailureMessage << "\n";
-    }
-
-    for (auto const nodeIndex : replayNodeOrder(options, bundle))
-    {
-        auto const threadID = stellar::scpdpor::threadIdForNodeIndex(nodeIndex);
-        auto const& trace = findThreadTrace(bundle, threadID);
-        auto const inspection =
-            scenario.inspectThreadReplayTrace(nodeIndex, trace);
-        out << "thread=" << threadID << " replay\n";
-        printThreadReplayTrace(out, scenario.options().mSlotIndex, inspection);
-    }
+    dumpExecution(out, scenario, bundle, replayNodeOrder(options, bundle),
+                  ReplayDumpErrorPolicy::Propagate, true);
 }
 
 std::string
@@ -1108,11 +840,50 @@ failOnFirstBlockedFailureMessage(
     return message.str();
 }
 
-std::string
-failOnFirstTerminalFailureMessage()
+enum class TruncationHintStyle
 {
-    return "stopped at first terminal execution because "
-           "--fail-on-first-terminal was set for smoke testing";
+    CaptureNoMatch,
+    PropertyInconclusive
+};
+
+template <typename VerifyResult>
+void
+appendTruncationHints(std::ostream& out, VerifyResult const& result,
+                      CommandLineOptions const& options,
+                      TruncationHintStyle style)
+{
+    if (result.depth_limit_executions_explored > 0 &&
+        (style == TruncationHintStyle::PropertyInconclusive ||
+         options.mFailOnFirstBlocked))
+    {
+        out << "; " << result.depth_limit_executions_explored
+            << " execution(s) hit ";
+        if (style == TruncationHintStyle::CaptureNoMatch)
+        {
+            out << "the depth limit, so a greater --depth may reach a blocked"
+                   " execution";
+        }
+        else
+        {
+            out << "--depth " << options.mDepth;
+        }
+    }
+    if (result.thread_event_limit_executions_explored > 0)
+    {
+        out << "; " << result.thread_event_limit_executions_explored
+            << " execution(s) ";
+        if (style == TruncationHintStyle::CaptureNoMatch)
+        {
+            out << "may have been truncated by --thread-event-depth "
+                << options.mThreadEventDepth.value_or(0)
+                << ", so a greater value may reach one";
+        }
+        else
+        {
+            out << "sat at --thread-event-depth "
+                << options.mThreadEventDepth.value_or(0);
+        }
+    }
 }
 
 CommandLineOptions
@@ -1140,38 +911,41 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--workers" && i + 1 < argc)
         {
-            options.mWorkers = parseSizeValue(arg, argv[++i]);
+            options.mWorkers = parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--max-queued-tasks" && i + 1 < argc)
         {
-            options.mMaxQueuedTasks = parseSizeValue(arg, argv[++i]);
+            options.mMaxQueuedTasks =
+                parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--sync-steps" && i + 1 < argc)
         {
-            options.mSyncSteps = parseSizeValue(arg, argv[++i]);
+            options.mSyncSteps = parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--split-poll-interval-steps" && i + 1 < argc)
         {
-            options.mSplitPollIntervalSteps = parseSizeValue(arg, argv[++i]);
+            options.mSplitPollIntervalSteps =
+                parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--progress-counter-flush-interval" && i + 1 < argc)
         {
             options.mProgressCounterFlushInterval =
-                parseSizeValue(arg, argv[++i]);
+                parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--progress-poll-interval-steps" && i + 1 < argc)
         {
-            options.mProgressPollIntervalSteps = parseSizeValue(arg, argv[++i]);
+            options.mProgressPollIntervalSteps =
+                parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--depth" && i + 1 < argc)
         {
-            options.mDepth = parseSizeValue(arg, argv[++i]);
+            options.mDepth = parseUnsigned<std::size_t>(arg, argv[++i]);
             options.mDepthExplicit = true;
             continue;
         }
@@ -1188,7 +962,8 @@ parseOptions(char const* argv0, int argc, char* argv[])
             else
             {
                 // 0 would mean no node ever runs.
-                options.mThreadEventDepth = parsePositiveSizeValue(arg, value);
+                options.mThreadEventDepth =
+                    parsePositive<std::size_t>(arg, value);
             }
             continue;
         }
@@ -1200,21 +975,23 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--replay-slots-per-node" && i + 1 < argc)
         {
             options.mReplaySlotsPerNode =
-                parsePositiveSizeValue(arg, argv[++i]);
+                parsePositive<std::size_t>(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-nomination-round" ||
              arg == "--max-nomination-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxNominationRound = parseUint32Value(arg, argv[++i]);
+            options.mMaxNominationRound =
+                parseUnsigned<uint32_t>(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-balloting-round" ||
              arg == "--max-balloting-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxBallotingRound = parseUint32Value(arg, argv[++i]);
+            options.mMaxBallotingRound =
+                parseUnsigned<uint32_t>(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-nomination-timers-round" ||
@@ -1222,14 +999,15 @@ parseOptions(char const* argv0, int argc, char* argv[])
             i + 1 < argc)
         {
             options.mMaxNominationTimersRound =
-                parseUint32Value(arg, argv[++i]);
+                parseUnsigned<uint32_t>(arg, argv[++i]);
             continue;
         }
         if ((arg == "--max-balloting-timers-round" ||
              arg == "--max-balloting-timers-rounds") &&
             i + 1 < argc)
         {
-            options.mMaxBallotingTimersRound = parseUint32Value(arg, argv[++i]);
+            options.mMaxBallotingTimersRound =
+                parseUnsigned<uint32_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--stop-on-prepare")
@@ -1289,13 +1067,14 @@ parseOptions(char const* argv0, int argc, char* argv[])
         }
         if (arg == "--invalid-proposer" && i + 1 < argc)
         {
-            options.mInvalidProposerIndex = parseSizeValue(arg, argv[++i]);
+            options.mInvalidProposerIndex =
+                parseUnsigned<std::size_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--download-succeeds-in-round" && i + 1 < argc)
         {
             options.mDownloadSucceedsInRound =
-                parsePositiveUint32Value(arg, argv[++i]);
+                parsePositive<uint32_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--print-stats" && i + 1 < argc)
@@ -1340,7 +1119,8 @@ parseOptions(char const* argv0, int argc, char* argv[])
             else
             {
                 options.mReplayAllNodes = false;
-                options.mReplayNodeIndex = parseSizeValue(arg, value);
+                options.mReplayNodeIndex =
+                    parseUnsigned<std::size_t>(arg, value);
             }
             continue;
         }
@@ -1416,192 +1196,126 @@ main(int argc, char* argv[])
         std::recursive_mutex terminalExecutionMutex;
         bool dumpedTerminalExecution = false;
         std::optional<std::string> failureMessage;
-        config
-            .on_terminal_execution = [&](dpor::algo::TerminalExecutionT<
-                                         stellar::scpdpor::ScpDporValue> const&
-                                             execution) {
-            std::unique_lock<std::recursive_mutex> serializedCallbackGuard;
-            if (options.mSerializeTerminalCallbacks)
-            {
-                serializedCallbackGuard =
-                    std::unique_lock<std::recursive_mutex>(
-                        terminalExecutionMutex);
-            }
-
-            auto const errorExecution = stellar::scpdpor::findErrorExecution(
-                scenario.options().mValidators.size(), execution);
-            if (errorExecution)
-            {
-                std::lock_guard<std::recursive_mutex> guard(
-                    terminalExecutionMutex);
-                if (!failureMessage)
+        config.on_terminal_execution =
+            [&](dpor::algo::TerminalExecutionT<
+                stellar::scpdpor::ScpDporValue> const& execution) {
+                std::unique_lock<std::recursive_mutex> serializedCallbackGuard;
+                if (options.mSerializeTerminalCallbacks)
                 {
-                    failureMessage = errorExecution->mMessage;
+                    serializedCallbackGuard =
+                        std::unique_lock<std::recursive_mutex>(
+                            terminalExecutionMutex);
                 }
-                if (!dumpedTerminalExecution)
-                {
-                    auto const bundle = stellar::scpdpor::makeTraceBundle(
-                        scenario, execution, options.mCommunicationModel,
-                        stellar::scpdpor::TerminalMeta{
-                            .mKind = execution.kind,
-                            .mFailureMessage = errorExecution->mMessage,
-                            .mFocusNodeIndex = errorExecution->mNodeIndex,
-                            .mFocusThreadID = errorExecution->mThreadID});
-                    writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                    dumpErrorExecution(std::cout, scenario, bundle);
-                    dumpedTerminalExecution = true;
-                }
-                return dpor::algo::TerminalExecutionAction::Stop;
-            }
 
-            if (options.mMustExternalize)
-            {
-                auto const missingNodeIndex =
-                    findNodeMissingExternalize(scenario, execution);
-                if (missingNodeIndex)
-                {
-                    std::lock_guard<std::recursive_mutex> guard(
-                        terminalExecutionMutex);
-                    if (!failureMessage)
-                    {
-                        std::ostringstream message;
-                        message
-                            << terminalExecutionKindName(execution.kind)
-                            << " execution missing EXTERNALIZE"
-                            << " envelope from node-index=" << *missingNodeIndex
-                            << " thread="
-                            << stellar::scpdpor::threadIdForNodeIndex(
-                                   *missingNodeIndex);
-                        failureMessage = message.str();
-                    }
-                    if (!dumpedTerminalExecution)
-                    {
-                        auto const bundle = stellar::scpdpor::makeTraceBundle(
-                            scenario, execution, options.mCommunicationModel,
-                            stellar::scpdpor::TerminalMeta{
-                                .mKind = execution.kind,
-                                .mFailureMessage = failureMessage,
-                                .mFocusNodeIndex = *missingNodeIndex,
-                                .mFocusThreadID =
-                                    stellar::scpdpor::threadIdForNodeIndex(
-                                        *missingNodeIndex)});
-                        writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                        dumpTerminalExecution(std::cout, scenario, bundle,
-                                              true);
-                        dumpedTerminalExecution = true;
-                    }
-                    return dpor::algo::TerminalExecutionAction::Stop;
-                }
-            }
+                auto stopWithCapture =
+                    [&](std::string message, std::size_t focusNodeIndex,
+                        dpor::algo::TerminalExecutionKind kind) {
+                        std::lock_guard<std::recursive_mutex> guard(
+                            terminalExecutionMutex);
+                        if (!failureMessage)
+                        {
+                            failureMessage = std::move(message);
+                        }
+                        if (!dumpedTerminalExecution)
+                        {
+                            auto const bundle =
+                                stellar::scpdpor::makeTraceBundle(
+                                    scenario, execution,
+                                    options.mCommunicationModel,
+                                    stellar::scpdpor::TerminalMeta{
+                                        .mKind = kind,
+                                        .mFailureMessage = failureMessage,
+                                        .mFocusNodeIndex = focusNodeIndex});
+                            writeTraceBundleToTraceDir(options.mTraceDir,
+                                                       bundle);
+                            dumpLiveExecution(std::cout, scenario, bundle);
+                            dumpedTerminalExecution = true;
+                        }
+                        return dpor::algo::TerminalExecutionAction::Stop;
+                    };
 
-            if (options.mCheckAgreement)
-            {
-                auto const agreementFailure =
-                    findAgreementFailure(scenario, execution);
-                if (agreementFailure)
-                {
-                    std::lock_guard<std::recursive_mutex> guard(
-                        terminalExecutionMutex);
-                    if (!failureMessage)
-                    {
-                        std::ostringstream message;
-                        message
-                            << terminalExecutionKindName(execution.kind)
-                            << " execution has conflicting"
-                            << " EXTERNALIZE values between"
-                            << " node-index="
-                            << agreementFailure->mReference.mNodeIndex
-                            << " thread="
-                            << stellar::scpdpor::threadIdForNodeIndex(
-                                   agreementFailure->mReference.mNodeIndex)
-                            << " and node-index="
-                            << agreementFailure->mConflicting.mNodeIndex
-                            << " thread="
-                            << stellar::scpdpor::threadIdForNodeIndex(
-                                   agreementFailure->mConflicting.mNodeIndex);
-                        failureMessage = message.str();
-                    }
-                    if (!dumpedTerminalExecution)
-                    {
-                        auto const bundle = stellar::scpdpor::makeTraceBundle(
-                            scenario, execution, options.mCommunicationModel,
-                            stellar::scpdpor::TerminalMeta{
-                                .mKind = execution.kind,
-                                .mFailureMessage = failureMessage,
-                                .mFocusNodeIndex =
-                                    agreementFailure->mConflicting.mNodeIndex,
-                                .mFocusThreadID =
-                                    stellar::scpdpor::threadIdForNodeIndex(
-                                        agreementFailure->mConflicting
-                                            .mNodeIndex)});
-                        writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                        dumpTerminalExecution(std::cout, scenario, bundle,
-                                              true);
-                        dumpedTerminalExecution = true;
-                    }
-                    return dpor::algo::TerminalExecutionAction::Stop;
-                }
-            }
-
-            if (options.mFailOnFirstBlocked)
-            {
-                auto const blockedExecution =
-                    stellar::scpdpor::findBlockedExecution(
+                auto const errorExecution =
+                    stellar::scpdpor::findErrorExecution(
                         scenario.options().mValidators.size(), execution);
-                if (blockedExecution)
+                if (errorExecution)
                 {
-                    std::lock_guard<std::recursive_mutex> guard(
-                        terminalExecutionMutex);
-                    if (!failureMessage)
-                    {
-                        failureMessage =
-                            failOnFirstBlockedFailureMessage(*blockedExecution);
-                    }
-                    if (!dumpedTerminalExecution)
-                    {
-                        auto const bundle = stellar::scpdpor::makeTraceBundle(
-                            scenario, execution, options.mCommunicationModel,
-                            stellar::scpdpor::TerminalMeta{
-                                .mKind = execution.kind,
-                                .mFailureMessage = failureMessage,
-                                .mFocusNodeIndex = blockedExecution->mNodeIndex,
-                                .mFocusThreadID = blockedExecution->mThreadID});
-                        writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                        dumpTerminalExecution(std::cout, scenario, bundle,
-                                              true);
-                        dumpedTerminalExecution = true;
-                    }
-                    return dpor::algo::TerminalExecutionAction::Stop;
+                    return stopWithCapture(errorExecution->mMessage,
+                                           errorExecution->mNodeIndex,
+                                           execution.kind);
                 }
-            }
 
-            if (options.mFailOnFirstTerminal)
-            {
-                std::lock_guard<std::recursive_mutex> guard(
-                    terminalExecutionMutex);
-                if (!failureMessage)
+                if (options.mMustExternalize)
                 {
-                    failureMessage = failOnFirstTerminalFailureMessage();
+                    auto const missing =
+                        stellar::scpdpor::findNodeMissingExternalize(scenario,
+                                                                     execution);
+                    if (missing.mMissingNodeIndex)
+                    {
+                        std::ostringstream message;
+                        message << terminalKindName(execution.kind)
+                                << " execution missing EXTERNALIZE"
+                                << " envelope from node-index="
+                                << *missing.mMissingNodeIndex << " thread="
+                                << stellar::scpdpor::threadIdForNodeIndex(
+                                       *missing.mMissingNodeIndex);
+                        return stopWithCapture(message.str(),
+                                               *missing.mMissingNodeIndex,
+                                               execution.kind);
+                    }
                 }
-                if (!dumpedTerminalExecution)
-                {
-                    auto const bundle = stellar::scpdpor::makeTraceBundle(
-                        scenario, execution, options.mCommunicationModel,
-                        stellar::scpdpor::TerminalMeta{
-                            .mKind = dpor::algo::TerminalExecutionKind::Error,
-                            .mFailureMessage = failureMessage,
-                            .mFocusNodeIndex = 0,
-                            .mFocusThreadID =
-                                stellar::scpdpor::threadIdForNodeIndex(0)});
-                    writeTraceBundleToTraceDir(options.mTraceDir, bundle);
-                    dumpErrorExecution(std::cout, scenario, bundle);
-                }
-                dumpedTerminalExecution = true;
-                return dpor::algo::TerminalExecutionAction::Stop;
-            }
 
-            return dpor::algo::TerminalExecutionAction::Continue;
-        };
+                if (options.mCheckAgreement)
+                {
+                    auto const agreement =
+                        stellar::scpdpor::findAgreementFailure(scenario,
+                                                               execution);
+                    if (agreement.mFailure)
+                    {
+                        auto const& agreementFailure = *agreement.mFailure;
+                        std::ostringstream message;
+                        message << terminalKindName(execution.kind)
+                                << " execution has conflicting"
+                                << " EXTERNALIZE values between"
+                                << " node-index="
+                                << agreementFailure.mReferenceNodeIndex
+                                << " thread="
+                                << stellar::scpdpor::threadIdForNodeIndex(
+                                       agreementFailure.mReferenceNodeIndex)
+                                << " and node-index="
+                                << agreementFailure.mConflictingNodeIndex
+                                << " thread="
+                                << stellar::scpdpor::threadIdForNodeIndex(
+                                       agreementFailure.mConflictingNodeIndex);
+                        return stopWithCapture(
+                            message.str(),
+                            agreementFailure.mConflictingNodeIndex,
+                            execution.kind);
+                    }
+                }
+
+                if (options.mFailOnFirstBlocked)
+                {
+                    auto const blockedExecution =
+                        stellar::scpdpor::findBlockedExecution(
+                            scenario.options().mValidators.size(), execution);
+                    if (blockedExecution)
+                    {
+                        return stopWithCapture(
+                            failOnFirstBlockedFailureMessage(*blockedExecution),
+                            blockedExecution->mNodeIndex, execution.kind);
+                    }
+                }
+
+                if (options.mFailOnFirstTerminal)
+                {
+                    return stopWithCapture(
+                        "stopped at first terminal execution because "
+                        "--fail-on-first-terminal was set for smoke testing",
+                        0, dpor::algo::TerminalExecutionKind::Error);
+                }
+
+                return dpor::algo::TerminalExecutionAction::Continue;
+            };
         config.on_fatal_error =
             [](dpor::algo::FatalErrorContextT<
                 stellar::scpdpor::ScpDporValue> const& context) {
@@ -1622,9 +1336,7 @@ main(int argc, char* argv[])
                     << dpor::model::format_graph(
                            context.graph,
                            [](stellar::scpdpor::ScpDporValue const& value) {
-                               std::ostringstream out;
-                               out << value;
-                               return out.str();
+                               return formatWithStream(value);
                            })
                     << std::flush;
             };
@@ -1690,22 +1402,8 @@ main(int argc, char* argv[])
                       << " was set but no matching execution was found in "
                       << result.executions_explored << " executions at --depth "
                       << options.mDepth << ", so no trace was captured";
-            if (options.mFailOnFirstBlocked &&
-                result.depth_limit_executions_explored > 0)
-            {
-                std::cout << "; " << result.depth_limit_executions_explored
-                          << " execution(s) hit the depth limit, so a greater"
-                             " --depth may reach a blocked execution";
-            }
-            if (result.thread_event_limit_executions_explored > 0)
-            {
-                std::cout << "; "
-                          << result.thread_event_limit_executions_explored
-                          << " execution(s) may have been truncated by"
-                             " --thread-event-depth "
-                          << options.mThreadEventDepth.value_or(0)
-                          << ", so a greater value may reach one";
-            }
+            appendTruncationHints(std::cout, result, options,
+                                  TruncationHintStyle::CaptureNoMatch);
             std::cout << "\n" << std::flush;
             return 1;
         }
@@ -1729,18 +1427,8 @@ main(int argc, char* argv[])
                       << result.executions_explored
                       << " executions explored was maximal, so the property was"
                          " never evaluated";
-            if (result.depth_limit_executions_explored > 0)
-            {
-                std::cout << "; " << result.depth_limit_executions_explored
-                          << " execution(s) hit --depth " << options.mDepth;
-            }
-            if (result.thread_event_limit_executions_explored > 0)
-            {
-                std::cout << "; "
-                          << result.thread_event_limit_executions_explored
-                          << " execution(s) sat at --thread-event-depth "
-                          << options.mThreadEventDepth.value_or(0);
-            }
+            appendTruncationHints(std::cout, result, options,
+                                  TruncationHintStyle::PropertyInconclusive);
             std::cout << "\n" << std::flush;
             return 2;
         }

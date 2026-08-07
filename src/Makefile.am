@@ -89,7 +89,6 @@ SCP_DPOR_GENERATED_SOURCE_FILES = \
 	util/xdrquery/XDRQueryScanner.cpp \
 	util/xdrquery/XDRQueryParser.h \
 	util/xdrquery/XDRQueryParser.cpp \
-	rust/RustBridge.h \
 	rust/RustBridge.cpp
 SCP_DPOR_BUILD_ARTIFACTS = \
 	$(XDRC) \

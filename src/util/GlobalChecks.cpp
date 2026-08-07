@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace stellar
 {
@@ -45,6 +46,17 @@ platformAbort()
 #endif
 }
 
+[[noreturn]] static void
+maybeThrowOrAbort(std::string message)
+{
+    if (gAssertThrowMode)
+    {
+        throw std::runtime_error(std::move(message));
+    }
+    platformAbort();
+    std::abort();
+}
+
 // Undef the macro so we can define the out-of-line implementation.
 #undef dbgAbort
 
@@ -54,13 +66,8 @@ dbgAbortImpl(char const* file, int line)
     std::fprintf(stderr, "dbgAbort at %s:%d\n", file, line);
     std::fflush(stderr);
     printCurrentBacktrace();
-    if (gAssertThrowMode)
-    {
-        throw std::runtime_error(
-            std::string("dbgAbort at ") + file + ":" + std::to_string(line));
-    }
-    platformAbort();
-    std::abort();
+    maybeThrowOrAbort(std::string("dbgAbort at ") + file + ":" +
+                      std::to_string(line));
 }
 
 void
@@ -69,12 +76,7 @@ printErrorAndAbort(char const* s1)
     std::fprintf(stderr, "%s\n", s1);
     std::fflush(stderr);
     printCurrentBacktrace();
-    if (gAssertThrowMode)
-    {
-        throw std::runtime_error(s1);
-    }
-    platformAbort();
-    std::abort();
+    maybeThrowOrAbort(s1);
 }
 
 void
@@ -83,12 +85,7 @@ printErrorAndAbort(char const* s1, char const* s2)
     std::fprintf(stderr, "%s%s\n", s1, s2);
     std::fflush(stderr);
     printCurrentBacktrace();
-    if (gAssertThrowMode)
-    {
-        throw std::runtime_error(std::string(s1) + s2);
-    }
-    platformAbort();
-    std::abort();
+    maybeThrowOrAbort(std::string(s1) + s2);
 }
 
 void
@@ -97,13 +94,8 @@ printAssertFailureAndAbort(char const* s1, char const* file, int line)
     std::fprintf(stderr, "%s at %s:%d\n", s1, file, line);
     std::fflush(stderr);
     printCurrentBacktrace();
-    if (gAssertThrowMode)
-    {
-        throw std::runtime_error(
-            std::string(s1) + " at " + file + ":" + std::to_string(line));
-    }
-    platformAbort();
-    std::abort();
+    maybeThrowOrAbort(std::string(s1) + " at " + file + ":" +
+                      std::to_string(line));
 }
 
 void
@@ -112,7 +104,7 @@ printAssertFailureAndThrow(char const* s1, char const* file, int line)
     std::fprintf(stderr, "%s at %s:%d\n", s1, file, line);
     std::fflush(stderr);
     printCurrentBacktrace();
-    throw std::runtime_error(
-        std::string(s1) + " at " + file + ":" + std::to_string(line));
+    throw std::runtime_error(std::string(s1) + " at " + file + ":" +
+                             std::to_string(line));
 }
 }

@@ -480,10 +480,9 @@ it after confirming no build is active), then rerun configure.
     error executions
   - replay-trace inspection preserving the lead-in when SCP throws during
     replay
-  - JSON version-6 round-trips for scenario options, per-node
-    outright-invalid mappings, and raw per-thread traces
-  - explicit rejection of semantically incompatible version-1 through
-    version-5 traces
+  - JSON version-8 round-trips for scenario options, per-node
+    outright-invalid mappings, and positional raw per-node traces
+  - explicit rejection of every non-version-8 trace bundle
   - timeout-driven empty-txset replacement
   - outright-invalid nomination and ballot rejection without replacement
   - empty-txset nomination-versus-ballot validation
@@ -719,9 +718,11 @@ scratch; it was checked against the configured build's flags
     all was maximal no longer passes silently -- see
     [Property checks are inconclusive, not passing, when nothing was
     maximal](#property-checks-are-inconclusive-not-passing-when-nothing-was-maximal).
-  - A captured bundle reports version 7 and round-trips through
-    `--replay-node all`; hand-edited version-4 and version-5 copies of it are
-    both rejected with their own messages, while a version-6 copy still loads.
+  - A captured bundle reports version 8 and round-trips through
+    `--replay-node all`. As an approved simplification exception, the reader is
+    v8-only with no converter: every older bundle is rejected with a generic
+    recapture message. Version 8 stores positional per-node traces and omits
+    derivable observation-count and focus-thread fields.
 - At the previously documented `--depth 12` that same invocation finds no
   blocked execution. It now reports
   `error: --fail-on-first-blocked was set but no matching execution was found

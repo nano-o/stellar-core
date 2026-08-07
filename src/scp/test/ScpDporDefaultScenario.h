@@ -82,14 +82,10 @@ class ScpDporDefaultScenario
         bool operator==(Options const& other) const = default;
     };
 
-    struct BoundaryInspection
+    struct ReplayInspection
     {
         bool mReachedBoundary{false};
         std::optional<SCPEnvelope> mBoundaryEnvelope;
-    };
-
-    struct EmittedEnvelopeInspection
-    {
         std::vector<SCPEnvelope> mEmittedEnvelopes;
     };
 
@@ -120,7 +116,7 @@ class ScpDporDefaultScenario
     };
 
     explicit ScpDporDefaultScenario(
-        Options options = makeDefaultOptions(),
+        Options options = makeDefaultOptions(DEFAULT_VALIDATOR_COUNT),
         std::size_t replaySlotsPerNode =
             ScpDporReplaySupport::DEFAULT_REPLAY_SLOTS_PER_NODE)
         : mOptions(std::move(options))
@@ -140,33 +136,27 @@ class ScpDporDefaultScenario
                 "initialValues must match validator count");
         }
 
-        mScenarioBaselines.reserve(mOptions.mValidators.size());
+        mInitialPendingSendsByNode.reserve(mOptions.mValidators.size());
         for (std::size_t nodeIndex = 0; nodeIndex < mOptions.mValidators.size();
              ++nodeIndex)
         {
-            ScenarioBaseline baseline;
+            std::vector<SendLabel> initialPendingSends;
             auto const& nodeBaseline =
                 mReplaySupport.getNodeBaseline(nodeIndex);
-            baseline.mInitialPendingSends.reserve(
+            initialPendingSends.reserve(
                 nodeBaseline.mInitialPendingEnvelopes.size() *
                 (mOptions.mValidators.size() - 1));
             for (auto const& envelope : nodeBaseline.mInitialPendingEnvelopes)
             {
-                fanOutEnvelope(baseline.mInitialPendingSends, nodeIndex,
-                               envelope);
+                fanOutEnvelope(initialPendingSends, nodeIndex, envelope);
             }
-            mScenarioBaselines.push_back(std::move(baseline));
+            mInitialPendingSendsByNode.push_back(
+                std::move(initialPendingSends));
         }
     }
 
     static Options
-    makeDefaultOptions()
-    {
-        return makeDefaultOptions(DEFAULT_VALIDATOR_COUNT);
-    }
-
-    static Options
-    makeDefaultOptions(std::size_t validatorCount)
+    makeDefaultOptions(std::size_t validatorCount = DEFAULT_VALIDATOR_COUNT)
     {
         Options options;
         if (!isSupportedValidatorCount(validatorCount))
@@ -253,17 +243,13 @@ class ScpDporDefaultScenario
         return program;
     }
 
-    BoundaryInspection
+    ReplayInspection
     inspectBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
     {
-        auto const replayInspection = replayTrace(nodeIndex, trace, true, true);
-        BoundaryInspection inspection;
-        inspection.mReachedBoundary = replayInspection.mReachedBoundary;
-        inspection.mBoundaryEnvelope = replayInspection.mBoundaryEnvelope;
-        return inspection;
+        return replayTrace(nodeIndex, trace, true, true);
     }
 
-    BoundaryInspection
+    ReplayInspection
     inspectPrepareBoundary(std::size_t nodeIndex,
                            ThreadTrace const& trace) const
     {
@@ -275,47 +261,11 @@ class ScpDporDefaultScenario
             .inspectBoundary(nodeIndex, trace);
     }
 
-    bool
-    hasReachedBoundary(std::size_t nodeIndex, ThreadTrace const& trace) const
-    {
-        return inspectBoundary(nodeIndex, trace).mReachedBoundary;
-    }
-
-    std::optional<SCPEnvelope>
-    getBoundaryEnvelope(std::size_t nodeIndex, ThreadTrace const& trace) const
-    {
-        return inspectBoundary(nodeIndex, trace).mBoundaryEnvelope;
-    }
-
-    std::vector<SCPEnvelope>
-    getEmittedEnvelopes(std::size_t nodeIndex, ThreadTrace const& trace) const
-    {
-        return inspectEmittedEnvelopes(nodeIndex, trace).mEmittedEnvelopes;
-    }
-
-    EmittedEnvelopeInspection
+    ReplayInspection
     inspectEmittedEnvelopes(std::size_t nodeIndex,
                             ThreadTrace const& trace) const
     {
-        auto replayInspection = replayTrace(nodeIndex, trace, false, false);
-        EmittedEnvelopeInspection inspection;
-        inspection.mEmittedEnvelopes =
-            std::move(replayInspection.mEmittedEnvelopes);
-        return inspection;
-    }
-
-    bool
-    hasReachedPrepareBoundary(std::size_t nodeIndex,
-                              ThreadTrace const& trace) const
-    {
-        return inspectPrepareBoundary(nodeIndex, trace).mReachedBoundary;
-    }
-
-    std::optional<SCPEnvelope>
-    getPrepareBoundaryEnvelope(std::size_t nodeIndex,
-                               ThreadTrace const& trace) const
-    {
-        return inspectPrepareBoundary(nodeIndex, trace).mBoundaryEnvelope;
+        return replayTrace(nodeIndex, trace, false, false);
     }
 
     ThreadReplayTraceInspection
@@ -342,8 +292,7 @@ class ScpDporDefaultScenario
         } guard(node);
         mReplaySupport.restoreBaseline(node, nodeIndex);
 
-        auto pendingSends =
-            mScenarioBaselines.at(nodeIndex).mInitialPendingSends;
+        auto pendingSends = mInitialPendingSendsByNode.at(nodeIndex);
         std::size_t nextPendingSend = 0;
         std::size_t observedCount = 0;
         std::optional<int> selectedTimerID;
@@ -366,33 +315,10 @@ class ScpDporDefaultScenario
             auto const activeTimers = enabledTimerIDs(node);
             if (!selectedTimerID && activeTimers.size() > 1)
             {
-                std::vector<ScpDporValue> choices;
-                choices.reserve(activeTimers.size());
-                for (auto const timerID : activeTimers)
-                {
-                    choices.push_back(
-                        makeTimerChoiceValue(mOptions.mSlotIndex, timerID));
-                }
-
+                auto choices = makeTimerChoices(activeTimers);
                 auto const& observed = trace.at(observedCount);
-                if (observed.is_bottom())
-                {
-                    throw std::logic_error(
-                        "trace does not contain a timer-choice observation");
-                }
-                auto const& observedValue = observed.value();
-                if (!isTimerChoiceValue(observedValue))
-                {
-                    throw std::logic_error(
-                        "trace entry is not a timer-choice value");
-                }
-                auto const timerID = decodeTimerChoice(observedValue);
-                if (std::find(activeTimers.begin(), activeTimers.end(),
-                              timerID) == activeTimers.end())
-                {
-                    throw std::logic_error(
-                        "trace selected a timer that is not active");
-                }
+                auto const timerID =
+                    decodeAndValidateTimerChoice(observed, activeTimers);
 
                 inspection.mSteps.push_back(ThreadReplayTraceStep{
                     .mKind =
@@ -407,18 +333,12 @@ class ScpDporDefaultScenario
                 continue;
             }
 
-            auto const nonBlocking =
-                selectedTimerID.has_value() || activeTimers.size() == 1;
-            auto timerToFire = selectedTimerID;
-            if (!timerToFire && activeTimers.size() == 1)
-            {
-                timerToFire = activeTimers.front();
-            }
+            auto const timerToFire =
+                resolveTimerToFire(selectedTimerID, activeTimers);
 
             ThreadReplayTraceStep step;
             step.mKind = ThreadReplayTraceStep::Kind::Receive;
-            step.mReceive = nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
-                                        : makeReceiveLabel(nodeIndex);
+            step.mReceive = makeReceiveLabel(timerToFire.has_value());
             step.mObservedValue = trace.at(observedCount);
 
             ScpDporReplaySupport::ReplayObservationProgress replayed;
@@ -469,18 +389,6 @@ class ScpDporDefaultScenario
     }
 
   private:
-    struct ReplayInspection
-    {
-        bool mReachedBoundary{false};
-        std::optional<SCPEnvelope> mBoundaryEnvelope;
-        std::vector<SCPEnvelope> mEmittedEnvelopes;
-    };
-
-    struct ScenarioBaseline
-    {
-        std::vector<SendLabel> mInitialPendingSends;
-    };
-
     static Value
     makeValue(std::string_view bytes)
     {
@@ -624,25 +532,66 @@ class ScpDporDefaultScenario
         return timers;
     }
 
-    ReceiveLabel
-    makeReceiveLabel(std::size_t) const
+    std::vector<ScpDporValue>
+    makeTimerChoices(std::vector<int> const& activeTimers) const
     {
-        auto const matcher =
-            [slotIndex = mOptions.mSlotIndex](ScpDporValue const& value) {
-                return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
-            };
-        return dpor::model::make_receive_label<ScpDporValue>(matcher);
+        std::vector<ScpDporValue> choices;
+        choices.reserve(activeTimers.size());
+        for (auto const timerID : activeTimers)
+        {
+            choices.push_back(
+                makeTimerChoiceValue(mOptions.mSlotIndex, timerID));
+        }
+        return choices;
+    }
+
+    static int
+    decodeAndValidateTimerChoice(ObservedValue const& observed,
+                                 std::vector<int> const& activeTimers)
+    {
+        if (observed.is_bottom())
+        {
+            throw std::logic_error(
+                "trace does not contain a timer-choice observation");
+        }
+        auto const& observedValue = observed.value();
+        if (!isTimerChoiceValue(observedValue))
+        {
+            throw std::logic_error("trace entry is not a timer-choice value");
+        }
+        auto const timerID = decodeTimerChoice(observedValue);
+        if (std::find(activeTimers.begin(), activeTimers.end(), timerID) ==
+            activeTimers.end())
+        {
+            throw std::logic_error("trace selected a timer that is not active");
+        }
+        return timerID;
+    }
+
+    static std::optional<int>
+    resolveTimerToFire(std::optional<int> const& selectedTimerID,
+                       std::vector<int> const& activeTimers)
+    {
+        if (selectedTimerID)
+        {
+            return selectedTimerID;
+        }
+        return activeTimers.size() == 1
+                   ? std::optional<int>{activeTimers.front()}
+                   : std::nullopt;
     }
 
     ReceiveLabel
-    makeNonBlockingReceiveLabel(std::size_t) const
+    makeReceiveLabel(bool nonBlocking) const
     {
         auto const matcher =
             [slotIndex = mOptions.mSlotIndex](ScpDporValue const& value) {
                 return isEnvelopeValue(value) && value.mSlotIndex == slotIndex;
             };
-        return dpor::model::make_nonblocking_receive_label<ScpDporValue>(
-            matcher);
+        return nonBlocking
+                   ? dpor::model::make_nonblocking_receive_label<ScpDporValue>(
+                         matcher)
+                   : dpor::model::make_receive_label<ScpDporValue>(matcher);
     }
 
     void
@@ -764,24 +713,15 @@ class ScpDporDefaultScenario
             if (!observed.is_bottom() && isTimerChoiceValue(observed.value()))
             {
                 auto const activeTimers = enabledTimerIDs(node);
-                auto const timerID = decodeTimerChoice(observed.value());
-                if (std::find(activeTimers.begin(), activeTimers.end(),
-                              timerID) == activeTimers.end())
-                {
-                    throw std::logic_error(
-                        "trace selected a timer that is not active");
-                }
-                selectedTimerID = timerID;
+                selectedTimerID =
+                    decodeAndValidateTimerChoice(observed, activeTimers);
                 ++observedIndex;
                 continue;
             }
 
             auto const activeTimers = enabledTimerIDs(node);
-            auto timerToFire = selectedTimerID;
-            if (!timerToFire && activeTimers.size() == 1)
-            {
-                timerToFire = activeTimers.front();
-            }
+            auto const timerToFire =
+                resolveTimerToFire(selectedTimerID, activeTimers);
 
             auto replayed = mReplaySupport.replayObservation(
                 node, nodeIndex, trace, observedIndex, timerToFire);
@@ -837,13 +777,13 @@ class ScpDporDefaultScenario
         if (!cursor.mValid)
         {
             mReplaySupport.restoreBaseline(node, nodeIndex);
-            cursor.reset(mScenarioBaselines.at(nodeIndex).mInitialPendingSends);
+            cursor.reset(mInitialPendingSendsByNode.at(nodeIndex));
         }
         cursor.mValid = false;
 
         auto const publish =
-            [&cursor](std::optional<EventLabel> label)
-            -> std::optional<EventLabel> {
+            [&cursor](
+                std::optional<EventLabel> label) -> std::optional<EventLabel> {
             cursor.mLabel = std::move(label);
             cursor.mValid = true;
             return cursor.mLabel;
@@ -871,13 +811,7 @@ class ScpDporDefaultScenario
             auto const activeTimers = enabledTimerIDs(node);
             if (!cursor.mSelectedTimerID && activeTimers.size() > 1)
             {
-                std::vector<ScpDporValue> choices;
-                choices.reserve(activeTimers.size());
-                for (auto const timerID : activeTimers)
-                {
-                    choices.push_back(
-                        makeTimerChoiceValue(mOptions.mSlotIndex, timerID));
-                }
+                auto choices = makeTimerChoices(activeTimers);
 
                 if (cursor.mEventCount == step)
                 {
@@ -888,38 +822,24 @@ class ScpDporDefaultScenario
                 ++cursor.mEventCount;
 
                 auto const observedCount = cursor.mConsumedTrace.size();
-                if (observedCount >= trace.size() ||
-                    trace.at(observedCount).is_bottom())
+                if (observedCount >= trace.size())
                 {
                     throw std::logic_error(
                         "trace does not contain a timer-choice observation");
                 }
 
-                auto const& observedValue = trace.at(observedCount).value();
-                if (!isTimerChoiceValue(observedValue))
-                {
-                    throw std::logic_error(
-                        "trace entry is not a timer-choice value");
-                }
-                auto const timerID = decodeTimerChoice(observedValue);
-                if (std::find(activeTimers.begin(), activeTimers.end(),
-                              timerID) == activeTimers.end())
-                {
-                    throw std::logic_error(
-                        "trace selected a timer that is not active");
-                }
-                cursor.mSelectedTimerID = timerID;
+                cursor.mSelectedTimerID = decodeAndValidateTimerChoice(
+                    trace.at(observedCount), activeTimers);
                 cursor.consume(trace.at(observedCount));
                 continue;
             }
 
-            auto const nonBlocking =
-                cursor.mSelectedTimerID.has_value() || activeTimers.size() == 1;
+            auto const timerToFire =
+                resolveTimerToFire(cursor.mSelectedTimerID, activeTimers);
             if (cursor.mEventCount == step)
             {
-                return publish(EventLabel{
-                    nonBlocking ? makeNonBlockingReceiveLabel(nodeIndex)
-                                : makeReceiveLabel(nodeIndex)});
+                return publish(
+                    EventLabel{makeReceiveLabel(timerToFire.has_value())});
             }
             ++cursor.mEventCount;
 
@@ -931,12 +851,6 @@ class ScpDporDefaultScenario
                     "requested step");
             }
 
-            auto timerToFire = cursor.mSelectedTimerID;
-            if (!timerToFire && activeTimers.size() == 1)
-            {
-                timerToFire = activeTimers.front();
-            }
-
             auto replayed = mReplaySupport.replayObservation(
                 node, nodeIndex, trace, observedCount, timerToFire);
             if (replayed.mPendingEvent)
@@ -944,7 +858,7 @@ class ScpDporDefaultScenario
                 // The node stopped part-way through an envelope, so the cursor
                 // cannot describe its state; leave it invalid so the next call
                 // replays from the baseline.
-                cursor.mEventCount += replayed.mConsumedStepCount;
+                cursor.mEventCount += replayed.mConsumedTraceEntries - 1;
                 if (cursor.mEventCount == step)
                 {
                     return replayed.mPendingEvent;
@@ -958,7 +872,7 @@ class ScpDporDefaultScenario
             {
                 cursor.consume(trace.at(observedCount + i));
             }
-            cursor.mEventCount += replayed.mConsumedStepCount;
+            cursor.mEventCount += replayed.mConsumedTraceEntries - 1;
             queuePendingEnvelopeSends(cursor.mPendingSends, node, nodeIndex);
             updateSelectedTimerAfterObservation(node, replayed,
                                                 cursor.mSelectedTimerID);
@@ -967,7 +881,7 @@ class ScpDporDefaultScenario
 
     Options mOptions;
     ScpDporReplaySupport mReplaySupport;
-    std::vector<ScenarioBaseline> mScenarioBaselines;
+    std::vector<std::vector<SendLabel>> mInitialPendingSendsByNode;
 };
 
 } // namespace stellar::scpdpor

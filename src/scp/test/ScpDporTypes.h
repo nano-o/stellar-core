@@ -53,7 +53,8 @@ struct ScpDporEnvelopePayload
     std::size_t mDigest{0};
 
     explicit ScpDporEnvelopePayload(SCPEnvelope envelope)
-        : mEnvelope(std::move(envelope)), mDigest(computeEnvelopeDigest(mEnvelope))
+        : mEnvelope(std::move(envelope))
+        , mDigest(computeEnvelopeDigest(mEnvelope))
     {
     }
 };
@@ -177,36 +178,35 @@ using Program = dpor::algo::ProgramT<ScpDporValue>;
 namespace std
 {
 
-template <>
-struct hash<stellar::scpdpor::ScpDporValue>
+template <> struct hash<stellar::scpdpor::ScpDporValue>
 {
     // Envelope payloads carry a precomputed content digest, so this never
     // serializes.
     std::size_t
     operator()(stellar::scpdpor::ScpDporValue const& value) const
     {
+        auto const combine = [](std::size_t seed, std::size_t part) {
+            return seed ^ (part + 0x9e3779b9 + (seed << 6) + (seed >> 2));
+        };
         std::size_t result =
             std::hash<std::uint8_t>{}(static_cast<std::uint8_t>(value.mKind));
-        result ^= std::hash<uint64_t>{}(value.mSlotIndex) + 0x9e3779b9 +
-                  (result << 6) + (result >> 2);
+        result = combine(result, std::hash<uint64_t>{}(value.mSlotIndex));
 
         switch (value.mKind)
         {
         case stellar::scpdpor::ScpDporValue::Kind::Envelope:
-            result ^= value.envelopeDigest() + 0x9e3779b9 + (result << 6) +
-                      (result >> 2);
+            result = combine(result, value.envelopeDigest());
             break;
         case stellar::scpdpor::ScpDporValue::Kind::TimerChoice:
-            result ^= std::hash<int>{}(value.mTimerID) + 0x9e3779b9 +
-                      (result << 6) + (result >> 2);
+            result = combine(result, std::hash<int>{}(value.mTimerID));
             break;
         case stellar::scpdpor::ScpDporValue::Kind::TxSetDownloadWaitTimeChoice:
-            result ^= std::hash<int64_t>{}(value.mDurationMilliseconds) +
-                      0x9e3779b9 + (result << 6) + (result >> 2);
+            result = combine(result,
+                             std::hash<int64_t>{}(value.mDurationMilliseconds));
             break;
         case stellar::scpdpor::ScpDporValue::Kind::TxSetStatusChoice:
-            result ^= std::hash<std::uint8_t>{}(value.mTxSetStatus) +
-                      0x9e3779b9 + (result << 6) + (result >> 2);
+            result =
+                combine(result, std::hash<std::uint8_t>{}(value.mTxSetStatus));
             break;
         }
         return result;

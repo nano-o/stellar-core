@@ -9,20 +9,15 @@
 
 #include <filesystem>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 namespace stellar::scpdpor
 {
 
-// Version we write. Version 7 widened the serialized value domain of
-// terminal.kind with "thread-event-limit", so an older reader must reject
-// bundles we write from now on. The change is purely additive in the other
-// direction -- a version-6 bundle carries the same scenario options and trace
-// semantics, and its terminal kinds are a strict subset of ours -- so
-// MIN_READABLE_TRACE_BUNDLE_VERSION keeps loading them rather than
-// invalidating every saved debugging artifact.
-inline constexpr int TRACE_BUNDLE_VERSION = 7;
-inline constexpr int MIN_READABLE_TRACE_BUNDLE_VERSION = 6;
+// Version 8 deliberately starts a new, v8-only compatibility line: thread
+// traces are positional and derivable metadata is no longer serialized.
+inline constexpr int TRACE_BUNDLE_VERSION = 8;
 
 struct TerminalMeta
 {
@@ -30,13 +25,6 @@ struct TerminalMeta
         dpor::algo::TerminalExecutionKind::Full};
     std::optional<std::string> mFailureMessage;
     std::size_t mFocusNodeIndex{};
-    dpor::model::ThreadId mFocusThreadID{};
-};
-
-struct ThreadTraceRecord
-{
-    dpor::model::ThreadId mThreadID{};
-    ThreadTrace mTrace;
 };
 
 struct TraceBundle
@@ -46,8 +34,29 @@ struct TraceBundle
     dpor::model::CommunicationModel mCommunicationModel{
         dpor::model::CommunicationModel::Async};
     TerminalMeta mTerminal;
-    std::vector<ThreadTraceRecord> mThreadTraces;
+    // Positional by node index; node N's trace is at index N.
+    std::vector<ThreadTrace> mThreadTraces;
 };
+
+std::string_view
+downloadTimeModeName(ScpDporDefaultScenario::DownloadTimeMode mode);
+
+ScpDporDefaultScenario::DownloadTimeMode
+parseDownloadTimeMode(std::string_view mode);
+
+std::string_view
+txSetStatusModeName(ScpDporDefaultScenario::TxSetStatusMode mode);
+
+ScpDporDefaultScenario::TxSetStatusMode
+parseTxSetStatusMode(std::string_view mode);
+
+std::string_view terminalKindName(dpor::algo::TerminalExecutionKind kind);
+
+dpor::algo::TerminalExecutionKind parseTerminalKind(std::string_view kind);
+
+std::string_view communicationModelName(dpor::model::CommunicationModel model);
+
+dpor::model::CommunicationModel parseCommunicationModel(std::string_view model);
 
 Json::Value toJson(ScpDporValue const& value);
 

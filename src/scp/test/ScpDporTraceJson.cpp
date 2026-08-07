@@ -104,66 +104,32 @@ requireUint32(Json::Value const& value, std::string const& context)
 uint64_t
 requireUint64(Json::Value const& value, std::string const& context)
 {
-    if (value.isUInt64())
-    {
-        return value.asUInt64();
-    }
-    if (value.isUInt())
-    {
-        return value.asUInt();
-    }
-    if (value.isInt64())
-    {
-        auto const parsed = value.asInt64();
-        if (parsed < 0)
-        {
-            throw std::invalid_argument(context +
-                                        " must be a non-negative integer");
-        }
-        return static_cast<uint64_t>(parsed);
-    }
-    if (value.isInt())
-    {
-        auto const parsed = value.asInt();
-        if (parsed < 0)
-        {
-            throw std::invalid_argument(context +
-                                        " must be a non-negative integer");
-        }
-        return static_cast<uint64_t>(parsed);
-    }
+    if (!value.isIntegral())
     {
         throw std::invalid_argument(context + " must be an unsigned integer");
     }
+    if ((value.isInt() || value.isInt64()) && value.asInt64() < 0)
+    {
+        throw std::invalid_argument(context +
+                                    " must be a non-negative integer");
+    }
+    return value.asUInt64();
 }
 
 int64_t
 requireInt64(Json::Value const& value, std::string const& context)
 {
-    if (value.isInt64())
-    {
-        return value.asInt64();
-    }
-    if (value.isInt())
-    {
-        return value.asInt();
-    }
-    if (value.isUInt64())
-    {
-        auto const parsed = value.asUInt64();
-        if (parsed > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
-        {
-            throw std::invalid_argument(context + " is out of int64 range");
-        }
-        return static_cast<int64_t>(parsed);
-    }
-    if (value.isUInt())
-    {
-        return static_cast<int64_t>(value.asUInt());
-    }
+    if (!value.isIntegral())
     {
         throw std::invalid_argument(context + " must be a signed integer");
     }
+    if ((value.isUInt() || value.isUInt64()) &&
+        value.asUInt64() >
+            static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+    {
+        throw std::invalid_argument(context + " is out of int64 range");
+    }
+    return value.asInt64();
 }
 
 std::optional<uint32_t>
@@ -186,6 +152,8 @@ toJsonOptionalUint32(std::optional<uint32_t> value)
     return Json::Value(static_cast<Json::UInt64>(*value));
 }
 
+} // namespace
+
 std::string_view
 downloadTimeModeName(ScpDporDefaultScenario::DownloadTimeMode mode)
 {
@@ -205,19 +173,19 @@ ScpDporDefaultScenario::DownloadTimeMode
 parseDownloadTimeMode(std::string_view mode)
 {
     using DownloadTimeMode = ScpDporDefaultScenario::DownloadTimeMode;
-    if (mode == "below")
+    if (mode == downloadTimeModeName(DownloadTimeMode::BelowThreshold))
     {
         return DownloadTimeMode::BelowThreshold;
     }
-    if (mode == "above")
+    if (mode == downloadTimeModeName(DownloadTimeMode::AboveThreshold))
     {
         return DownloadTimeMode::AboveThreshold;
     }
-    if (mode == "nondet")
+    if (mode == downloadTimeModeName(DownloadTimeMode::Nondeterministic))
     {
         return DownloadTimeMode::Nondeterministic;
     }
-    throw std::invalid_argument("unknown download_time_mode: " +
+    throw std::invalid_argument("unknown download-time mode: " +
                                 std::string(mode));
 }
 
@@ -240,19 +208,19 @@ ScpDporDefaultScenario::TxSetStatusMode
 parseTxSetStatusMode(std::string_view mode)
 {
     using TxSetStatusMode = ScpDporDefaultScenario::TxSetStatusMode;
-    if (mode == "always-valid")
+    if (mode == txSetStatusModeName(TxSetStatusMode::AlwaysValid))
     {
         return TxSetStatusMode::AlwaysValid;
     }
-    if (mode == "downloading-then-valid")
+    if (mode == txSetStatusModeName(TxSetStatusMode::DownloadingThenValid))
     {
         return TxSetStatusMode::DownloadingThenValid;
     }
-    if (mode == "always-downloading")
+    if (mode == txSetStatusModeName(TxSetStatusMode::AlwaysDownloading))
     {
         return TxSetStatusMode::AlwaysDownloading;
     }
-    throw std::invalid_argument("unknown txset_status_mode: " +
+    throw std::invalid_argument("unknown txset-status mode: " +
                                 std::string(mode));
 }
 
@@ -278,23 +246,24 @@ terminalKindName(dpor::algo::TerminalExecutionKind kind)
 dpor::algo::TerminalExecutionKind
 parseTerminalKind(std::string_view kind)
 {
-    if (kind == "full")
+    if (kind == terminalKindName(dpor::algo::TerminalExecutionKind::Full))
     {
         return dpor::algo::TerminalExecutionKind::Full;
     }
-    if (kind == "blocked")
+    if (kind == terminalKindName(dpor::algo::TerminalExecutionKind::Blocked))
     {
         return dpor::algo::TerminalExecutionKind::Blocked;
     }
-    if (kind == "error")
+    if (kind == terminalKindName(dpor::algo::TerminalExecutionKind::Error))
     {
         return dpor::algo::TerminalExecutionKind::Error;
     }
-    if (kind == "depth-limit")
+    if (kind == terminalKindName(dpor::algo::TerminalExecutionKind::DepthLimit))
     {
         return dpor::algo::TerminalExecutionKind::DepthLimit;
     }
-    if (kind == "thread-event-limit")
+    if (kind ==
+        terminalKindName(dpor::algo::TerminalExecutionKind::ThreadEventLimit))
     {
         return dpor::algo::TerminalExecutionKind::ThreadEventLimit;
     }
@@ -317,17 +286,21 @@ communicationModelName(dpor::model::CommunicationModel model)
 dpor::model::CommunicationModel
 parseCommunicationModel(std::string_view model)
 {
-    if (model == "async")
+    if (model == communicationModelName(dpor::model::CommunicationModel::Async))
     {
         return dpor::model::CommunicationModel::Async;
     }
-    if (model == "fifo")
+    if (model ==
+        communicationModelName(dpor::model::CommunicationModel::FifoP2P))
     {
         return dpor::model::CommunicationModel::FifoP2P;
     }
     throw std::invalid_argument("unknown communication model: " +
                                 std::string(model));
 }
+
+namespace
+{
 
 // Encode-side counterparts of parseTimerID/parseTxSetStatus. Unlike the
 // diagnostic timerName/txSetStatusName helpers, these throw on values the
@@ -396,56 +369,10 @@ encodeBytes(std::vector<uint8_t> const& bytes)
     return decoder::encode_b64(bytes);
 }
 
-// The vendored base64 decoder silently skips characters outside the alphabet,
-// so a corrupted string would decode to different bytes instead of failing.
-// Validate the encoding up front so corruption is rejected rather than
-// misparsed.
-void
-requireBase64(std::string const& encoded, std::string const& context)
-{
-    auto const fail = [&]() {
-        throw std::invalid_argument(context + " is not valid base64");
-    };
-
-    if (encoded.size() % 4 != 0)
-    {
-        fail();
-    }
-
-    auto const firstPadding = encoded.find('=');
-    auto const unpaddedSize =
-        firstPadding == std::string::npos ? encoded.size() : firstPadding;
-    if (encoded.size() - unpaddedSize > 2)
-    {
-        fail();
-    }
-
-    auto const isBase64Char = [](char c) {
-        return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-               (c >= '0' && c <= '9') || c == '+' || c == '/';
-    };
-    for (std::size_t i = 0; i < unpaddedSize; ++i)
-    {
-        if (!isBase64Char(encoded[i]))
-        {
-            fail();
-        }
-    }
-    for (std::size_t i = unpaddedSize; i < encoded.size(); ++i)
-    {
-        if (encoded[i] != '=')
-        {
-            fail();
-        }
-    }
-}
-
 template <typename T>
 T
 decodeBytes(std::string const& encoded, std::string const& context)
 {
-    requireBase64(encoded, context);
-
     T bytes;
     try
     {
@@ -455,6 +382,12 @@ decodeBytes(std::string const& encoded, std::string const& context)
     {
         throw std::invalid_argument(context +
                                     " is not valid base64: " + ex.what());
+    }
+    // The vendored decoder skips invalid characters; canonical re-encoding
+    // catches both those and malformed padding.
+    if (encodeBytes(bytes) != encoded)
+    {
+        throw std::invalid_argument(context + " is not valid base64");
     }
     return bytes;
 }
@@ -486,8 +419,6 @@ toJson(TerminalMeta const& terminal)
     }
     root["focus_node_index"] =
         static_cast<Json::UInt64>(terminal.mFocusNodeIndex);
-    root["focus_thread_id"] =
-        static_cast<Json::UInt64>(terminal.mFocusThreadID);
     return root;
 }
 
@@ -511,55 +442,12 @@ terminalMetaFromJson(Json::Value const& value)
     terminal.mFocusNodeIndex = static_cast<std::size_t>(
         requireUint64(requireMember(object, "focus_node_index", "terminal"),
                       "terminal.focus_node_index"));
-    static_assert(sizeof(dpor::model::ThreadId) <= sizeof(uint32_t));
-    terminal.mFocusThreadID = static_cast<dpor::model::ThreadId>(
-        requireUint32(requireMember(object, "focus_thread_id", "terminal"),
-                      "terminal.focus_thread_id"));
     return terminal;
-}
-
-Json::Value
-toJson(ThreadTraceRecord const& record)
-{
-    Json::Value root(Json::objectValue);
-    root["thread"] = static_cast<Json::UInt64>(record.mThreadID);
-    root["observed_count"] = static_cast<Json::UInt64>(record.mTrace.size());
-    root["trace"] = toJson(record.mTrace);
-    return root;
-}
-
-ThreadTraceRecord
-threadTraceRecordFromJson(Json::Value const& value)
-{
-    auto const& object = requireObject(value, "thread_trace record");
-
-    ThreadTraceRecord record;
-    record.mThreadID = static_cast<dpor::model::ThreadId>(
-        requireUint32(requireMember(object, "thread", "thread_trace record"),
-                      "thread_traces[].thread"));
-    record.mTrace = threadTraceFromJson(
-        requireMember(object, "trace", "thread_trace record"));
-
-    auto const observedCount = static_cast<std::size_t>(requireUint64(
-        requireMember(object, "observed_count", "thread_trace record"),
-        "thread_traces[].observed_count"));
-    if (observedCount != record.mTrace.size())
-    {
-        throw std::invalid_argument(
-            "thread_traces[].observed_count does not match decoded trace size");
-    }
-    return record;
 }
 
 void
 validateTraceBundle(TraceBundle const& bundle)
 {
-    if (bundle.mVersion < MIN_READABLE_TRACE_BUNDLE_VERSION ||
-        bundle.mVersion > TRACE_BUNDLE_VERSION)
-    {
-        throw std::invalid_argument("unsupported trace bundle version");
-    }
-
     auto const validatorCount = bundle.mOptions.mValidators.size();
     if (bundle.mThreadTraces.size() != validatorCount)
     {
@@ -569,36 +457,6 @@ validateTraceBundle(TraceBundle const& bundle)
     if (bundle.mTerminal.mFocusNodeIndex >= validatorCount)
     {
         throw std::invalid_argument("focus_node_index is out of range");
-    }
-
-    auto const expectedFocusThread =
-        threadIdForNodeIndex(bundle.mTerminal.mFocusNodeIndex);
-    if (bundle.mTerminal.mFocusThreadID != expectedFocusThread)
-    {
-        throw std::invalid_argument(
-            "focus_thread_id does not match focus_node_index");
-    }
-
-    std::set<dpor::model::ThreadId> seenThreadIDs;
-    for (auto const& record : bundle.mThreadTraces)
-    {
-        if (record.mThreadID >= validatorCount)
-        {
-            throw std::invalid_argument("thread id is out of range");
-        }
-        if (!seenThreadIDs.insert(record.mThreadID).second)
-        {
-            throw std::invalid_argument("duplicate thread id in thread_traces");
-        }
-    }
-
-    for (std::size_t nodeIndex = 0; nodeIndex < validatorCount; ++nodeIndex)
-    {
-        if (!seenThreadIDs.contains(threadIdForNodeIndex(nodeIndex)))
-        {
-            throw std::invalid_argument(
-                "thread_traces must contain one record per node thread");
-        }
     }
 }
 
@@ -614,7 +472,8 @@ toJson(ScpDporValue const& value)
     {
     case ScpDporValue::Kind::Envelope:
         root["kind"] = "envelope";
-        root["envelope_xdr"] = encodeBytes(xdr::xdr_to_opaque(value.envelope()));
+        root["envelope_xdr"] =
+            encodeBytes(xdr::xdr_to_opaque(value.envelope()));
         root["annotation"] = formatWithStream(value);
         return root;
     case ScpDporValue::Kind::TimerChoice:
@@ -971,9 +830,9 @@ toJson(TraceBundle const& bundle)
 
     auto& threadTraces = root["thread_traces"];
     threadTraces = Json::Value(Json::arrayValue);
-    for (auto const& record : bundle.mThreadTraces)
+    for (auto const& trace : bundle.mThreadTraces)
     {
-        threadTraces.append(toJson(record));
+        threadTraces.append(toJson(trace));
     }
 
     return root;
@@ -993,42 +852,12 @@ traceBundleFromJson(Json::Value const& value)
         throw std::invalid_argument("trace bundle.version is out of range");
     }
     bundle.mVersion = static_cast<int>(version);
-    if (bundle.mVersion == 1)
+    if (bundle.mVersion != TRACE_BUNDLE_VERSION)
     {
         throw std::invalid_argument(
-            "trace bundle version 1 uses incompatible pre-CAP-0083 txset "
-            "status semantics; capture a fresh trace with the current binary");
-    }
-    if (bundle.mVersion == 2 || bundle.mVersion == 3)
-    {
-        throw std::invalid_argument(
-            "trace bundle versions 2 and 3 may contain removed "
-            "downloaded-invalid or nondeterministic txset status modes; "
-            "capture a fresh trace with the current binary");
-    }
-    if (bundle.mVersion == 4)
-    {
-        throw std::invalid_argument(
-            "trace bundle version 4 observed a successful txset download in "
-            "the same event that emitted the triggering PREPARE, so it may "
-            "replay differently; capture a fresh trace with the current "
-            "binary");
-    }
-    if (bundle.mVersion == 5)
-    {
-        throw std::invalid_argument(
-            "trace bundle version 5 recorded a txset choice per driver call "
-            "rather than per event, so it carries choices the current model "
-            "never requests; capture a fresh trace with the current binary");
-    }
-    // Versions 1-5 are rejected above for documented semantic
-    // incompatibilities. Version 6 is not: it carries the same scenario options
-    // and trace semantics as version 7, and its terminal kinds are a strict
-    // subset of ours, so it still replays correctly.
-    if (bundle.mVersion < MIN_READABLE_TRACE_BUNDLE_VERSION ||
-        bundle.mVersion > TRACE_BUNDLE_VERSION)
-    {
-        throw std::invalid_argument("unsupported trace bundle version");
+            "unsupported trace bundle version " +
+            std::to_string(bundle.mVersion) +
+            " (supported: 8); capture a fresh trace with the current binary");
     }
 
     auto const& scenario =
@@ -1046,17 +875,19 @@ traceBundleFromJson(Json::Value const& value)
         requireMember(scenario, "options", "trace bundle.scenario"));
     bundle.mTerminal =
         terminalMetaFromJson(requireMember(object, "terminal", "trace bundle"));
-    bundle.mCommunicationModel = parseCommunicationModel(requireString(
-        requireMember(object, "communication_model", "trace bundle"),
-        "trace bundle.communication_model"));
+    if (object.isMember("communication_model"))
+    {
+        bundle.mCommunicationModel = parseCommunicationModel(requireString(
+            object["communication_model"], "trace bundle.communication_model"));
+    }
 
     auto const& threadTraces =
         requireArray(requireMember(object, "thread_traces", "trace bundle"),
                      "trace bundle.thread_traces");
     bundle.mThreadTraces.reserve(threadTraces.size());
-    for (auto const& record : threadTraces)
+    for (auto const& trace : threadTraces)
     {
-        bundle.mThreadTraces.push_back(threadTraceRecordFromJson(record));
+        bundle.mThreadTraces.push_back(threadTraceFromJson(trace));
     }
 
     validateTraceBundle(bundle);
@@ -1077,10 +908,8 @@ makeTraceBundle(ScpDporDefaultScenario const& scenario,
     for (std::size_t nodeIndex = 0;
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
-        auto const threadID = threadIdForNodeIndex(nodeIndex);
-        bundle.mThreadTraces.push_back(ThreadTraceRecord{
-            .mThreadID = threadID,
-            .mTrace = execution.graph.thread_trace(threadID)});
+        bundle.mThreadTraces.push_back(
+            execution.graph.thread_trace(threadIdForNodeIndex(nodeIndex)));
     }
     return bundle;
 }

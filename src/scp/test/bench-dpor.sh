@@ -31,6 +31,13 @@ run_scenario() { # out_file, args...   -> returns the binary's own status
   "$BIN" "$@" $W > "$out" 2>&1
 }
 
+report_fail() { # kind, name, status, output
+  local kind=$1 name=$2 status=$3 out=$4
+  printf '%-5s %-6s FAILED (exit %d)\n' "$kind" "$name" "$status"
+  cat "$out" >&2
+  FAILED=1
+}
+
 bench_one() { # name, args...
   local name=$1; shift
   local best=99999 t out
@@ -41,9 +48,7 @@ bench_one() { # name, args...
     run_scenario "$out" "$@"
     status=$?
     if [ "$status" -ne 0 ]; then
-      printf 'BENCH %-6s FAILED (exit %d)\n' "$name" "$status"
-      cat "$out" >&2
-      FAILED=1
+      report_fail BENCH "$name" "$status" "$out"
       rm -f "$out"
       return
     fi
@@ -62,9 +67,7 @@ check_one() { # name, args...
   run_scenario "$out" "$@"
   status=$?
   if [ "$status" -ne 0 ]; then
-    printf 'CHECK %-6s FAILED (exit %d)\n' "$name" "$status"
-    cat "$out" >&2
-    FAILED=1
+    report_fail CHECK "$name" "$status" "$out"
   else
     printf 'CHECK %-6s %s\n' "$name" "$(tail -1 "$out")"
   fi
@@ -231,9 +234,7 @@ head)
   LOG=$(mktemp)
   # timeout is expected to kill this run, so its status is not a failure signal;
   # the awk stage below fails if no progress lines were produced.
-  timeout "$SECS" "$BIN" --nodes 3 --fifo --txset-status downloading-then-valid \
-      --nomination-always-downloading --download-time nondet --stop-on-externalize \
-      --depth 200 $W --print-stats 5 > "$LOG" 2>&1
+  timeout "$SECS" "$BIN" $U --depth 200 $W --print-stats 5 > "$LOG" 2>&1
   awk '
     /^progress/ {
       for (i=1;i<=NF;i++) { split($i,kv,"="); v[kv[1]]=kv[2] }
@@ -261,13 +262,13 @@ scale)
   # people to ignore it; one that runs everywhere and passes for environmental
   # reasons is worse.
   #
-  # S2 is pinned exactly: it is the scenario that inverts (0.61x at 32 workers
+  # The scenario is pinned exactly: it inverts (0.61x at 32 workers
   # versus 1 worker on the reference host), and the worker points are fixed
   # rather than derived from nproc, because derived points silently move the
   # gate off the counts where the pathology was demonstrated.
   REPS=${REPS:-5}
   MIN_MARGIN=${MIN_MARGIN:-0.10}
-  S2="--nodes 3 --fifo --txset-status downloading-then-valid --nomination-always-downloading --download-time nondet --stop-on-externalize --depth 56"
+  SCEN="$U --depth 56"
   REFERENCE_POINTS="1 8 16 32"
   POINTS=${SCALE_WORKERS:-$REFERENCE_POINTS}
 
@@ -312,7 +313,7 @@ scale)
     for w in $POINTS; do
       out=$(mktemp)
       start=$(date +%s.%N)
-      "${PIN[@]}" "$BIN" $S2 --workers "$w" > "$out" 2>&1
+      "${PIN[@]}" "$BIN" $SCEN --workers "$w" > "$out" 2>&1
       status=$?
       end=$(date +%s.%N)
       if [ "$status" -ne 0 ]; then

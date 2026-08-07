@@ -37,8 +37,7 @@ class DporScpNode : public SCPDriver
         None,
         Prepare,
         Commit,
-        Externalize,
-        NominationRound
+        Externalize
     };
 
     class TxSetDownloadWaitTimeChoiceRequired : public std::runtime_error
@@ -96,9 +95,6 @@ class DporScpNode : public SCPDriver
     struct Configuration
     {
         std::map<NodeID, std::size_t> mNodeIndexMap;
-        std::function<uint64(Value const&)> mValueHash;
-        std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
-            mCombineCandidates;
         uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
         BoundaryMode mBoundaryMode{BoundaryMode::None};
         std::optional<uint32_t> mMaxNominationRound;
@@ -111,11 +107,8 @@ class DporScpNode : public SCPDriver
         std::map<NodeID, std::set<Value>> mOutrightInvalidValuesByNode;
         std::optional<uint32_t> mDownloadSucceedsInBallotRound;
         std::vector<std::chrono::milliseconds> mTxSetDownloadWaitTimes;
-        std::map<NodeID, std::vector<std::chrono::milliseconds>>
-            mTxSetDownloadWaitTimesByNode;
         bool mNondeterministicTxSetDownloadWaitTime{false};
         std::optional<uint32_t> mNominationTimerSetLimit;
-        std::optional<uint32_t> mBallotingTimerSetLimit;
         uint32_t mInitialNominationTimeoutMS{1000};
         uint32_t mIncrementNominationTimeoutMS{1000};
         uint32_t mInitialBallotTimeoutMS{1000};
@@ -255,8 +248,6 @@ class DporScpNode : public SCPDriver
 
     void storeQuorumSet(SCPQuorumSet const& qSet);
 
-    SCPQuorumSetPtr getStoredQuorumSet(Hash const& qSetHash) const;
-
     bool nominate(uint64 slotIndex, Value const& value,
                   Value const& previousValue);
 
@@ -264,13 +255,9 @@ class DporScpNode : public SCPDriver
 
     SCP::EnvelopeState receiveEnvelope(SCPEnvelope const& envelope);
 
-    void setStateFromEnvelope(uint64 slotIndex, SCPEnvelope const& envelope);
-
     std::vector<SCPEnvelope> takePendingEnvelopes();
 
     std::vector<SCPEnvelope> const& getEmittedEnvelopes() const;
-
-    bool hasActiveTimer(uint64 slotIndex, int timerID) const;
 
     std::optional<TimerState> getTimer(uint64 slotIndex, int timerID) const;
 
@@ -313,11 +300,7 @@ class DporScpNode : public SCPDriver
 
     bool hasReachedBoundary() const;
 
-    bool hasReachedPrepareBoundary() const;
-
     SCPEnvelope const* getBoundaryEnvelope() const;
-
-    SCPEnvelope const* getPrepareBoundaryEnvelope() const;
 
     void signEnvelope(SCPEnvelope& envelope) override;
     SCPQuorumSetPtr getQSet(Hash const& qSetHash) override;
@@ -330,6 +313,7 @@ class DporScpNode : public SCPDriver
                                   bool nomination) const override;
     Value makeEmptyTxSetValueFromValue(Value const& value) const override;
     bool isEmptyTxSetValue(Value const& value) const override;
+    static bool hasEmptyTxSetValuePrefix(Value const& value);
     bool isParallelTxSetDownloadEnabled() const override;
     bool protocolAllowsEmptyTxSetValues() const override;
     Hash getHashOf(std::vector<xdr::opaque_vec<>> const& vals) const override;
@@ -351,13 +335,6 @@ class DporScpNode : public SCPDriver
                                              bool isNomination) override;
 
   private:
-    struct TimerSetCountEntry
-    {
-        uint64 mSlotIndex{};
-        int mTimerID{};
-        uint32_t mCount{};
-    };
-
     // What the modeled tx-set state answered for one value during the event
     // currently running. Both answers are pinned once made, so repeated
     // callbacks inside a single handler observe one consistent snapshot the
@@ -379,7 +356,8 @@ class DporScpNode : public SCPDriver
 
     void clearTimer(uint64 slotIndex, int timerID);
 
-    TimerSetCountEntry* findTimerSetCount(uint64 slotIndex, int timerID);
+    ReplayTimerSetCountSnapshot* findTimerSetCount(uint64 slotIndex,
+                                                   int timerID);
 
     void recordReplayDebugEvent(ReplayDebugEvent event) const;
 
@@ -403,14 +381,9 @@ class DporScpNode : public SCPDriver
                                uint32_t incrementTimeoutMS,
                                char const* timerName) const;
 
-    uint32_t getNominationRoundForEnvelope(SCPEnvelope const& envelope) const;
-
     SecretKey mSecretKey;
     SCP mSCP;
     std::map<NodeID, std::size_t> mNodeIndexMap;
-    std::function<uint64(Value const&)> mValueHash;
-    std::function<ValueWrapperPtr(uint64, ValueWrapperPtrSet const&)>
-        mCombineCandidates;
     uint32_t mPrepareBoundaryCounter{DEFAULT_PREPARE_BOUNDARY_COUNTER};
     BoundaryMode mBoundaryMode{BoundaryMode::None};
     std::optional<uint32_t> mMaxNominationRound;
@@ -452,7 +425,6 @@ class DporScpNode : public SCPDriver
     bool mEmittedEnvelopeRecordingEnabled{true};
     mutable std::vector<ReplayDebugEvent> mReplayDebugEvents;
     std::optional<uint32_t> mNominationTimerSetLimit;
-    std::optional<uint32_t> mBallotingTimerSetLimit;
 
     // Restoring a baseline used to rebuild every SCP value/envelope wrapper it
     // mentions, and a node restores the same baseline over and over during
@@ -482,7 +454,7 @@ class DporScpNode : public SCPDriver
     std::vector<SCPEnvelope> mEmittedEnvelopes;
     std::vector<SCPEnvelope> mPendingEnvelopes;
     std::vector<TimerState> mTimers;
-    std::vector<TimerSetCountEntry> mTimerSetCounts;
+    std::vector<ReplayTimerSetCountSnapshot> mTimerSetCounts;
     bool mHasReachedBoundary{false};
     std::optional<SCPEnvelope> mBoundaryEnvelope;
 };
