@@ -17,8 +17,10 @@
 #   dpor-gate.sh buildtime   warm rebuild cost after touching dpor/algo/dpor.hpp
 #
 # Environment:
-#   GATE_ARTIFACTS_ROOT  default $HOME/dpor-gate-artifacts
-#   W                    worker args forwarded to bench-dpor.sh (default "--workers 8")
+#   GATE_ARTIFACTS_ROOT     default $HOME/dpor-gate-artifacts
+#   W                       worker args forwarded to bench-dpor.sh (default "--workers 8")
+#   GATE_STEP_TIMEOUT_SECS  hard time box per step (default 3600); a step that
+#                           exceeds it FAILS — time-boxed evidence only
 #
 # The tree must already be configured per the documented DPOR workflow
 # (configure --enable-dpor --enable-nsc-sccache CC=clang-20 CXX=clang++-20).
@@ -83,17 +85,22 @@ finish() {
   exit "$status"
 }
 
+STEP_TIMEOUT="${GATE_STEP_TIMEOUT_SECS:-3600}"
+
 run_logged() { # logname, cmd...
   local log="$ART/$1.log"
   shift
-  echo "== $* (log: $(basename "$log"))"
+  echo "== $* (log: $(basename "$log"), time box: ${STEP_TIMEOUT}s)"
   local start end rc
   start=$(date +%s.%N)
-  "$@" > "$log" 2>&1
+  timeout --kill-after=30 "$STEP_TIMEOUT" "$@" > "$log" 2>&1
   rc=$?
   end=$(date +%s.%N)
   if [ "$rc" -eq 0 ]; then
     awk -v a="$start" -v b="$end" 'BEGIN{printf "   ok in %.1fs\n", b-a}'
+  elif [ "$rc" -eq 124 ]; then
+    echo "   TIMED OUT after ${STEP_TIMEOUT}s — investigate before raising GATE_STEP_TIMEOUT_SECS" >&2
+    tail -40 "$log" >&2
   else
     awk -v a="$start" -v b="$end" -v r="$rc" 'BEGIN{printf "   FAILED (exit %d) in %.1fs\n", r, b-a}' >&2
     tail -40 "$log" >&2
@@ -117,8 +124,8 @@ case "$MODE" in
 
   check)
     [ -x "$INVESTIGATION_BIN" ] || build_dpor || finish 1
-    echo "== bench-dpor.sh check (fingerprint: fingerprint.txt)"
-    if BIN="$INVESTIGATION_BIN" "$BENCH" check > "$ART/fingerprint.txt" 2>&1; then
+    echo "== bench-dpor.sh check (fingerprint: fingerprint.txt, time box: ${STEP_TIMEOUT}s)"
+    if timeout --kill-after=30 "$STEP_TIMEOUT" env BIN="$INVESTIGATION_BIN" "$BENCH" check > "$ART/fingerprint.txt" 2>&1; then
       cat "$ART/fingerprint.txt"
       finish 0
     else
