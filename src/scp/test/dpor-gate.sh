@@ -93,6 +93,10 @@ run_logged() { # logname, cmd...
   echo "== $* (log: $(basename "$log"), time box: ${STEP_TIMEOUT}s)"
   local start end rc
   start=$(date +%s.%N)
+  # Run from the artifact directory: the test binary logs to stellar0.log in
+  # its cwd, which must land in the archive, not in whatever repo the gate
+  # was invoked from.
+  cd "$ART" || return 1
   timeout --kill-after=30 "$STEP_TIMEOUT" "$@" > "$log" 2>&1
   rc=$?
   end=$(date +%s.%N)
@@ -125,6 +129,7 @@ case "$MODE" in
   check)
     [ -x "$INVESTIGATION_BIN" ] || build_dpor || finish 1
     echo "== bench-dpor.sh check (fingerprint: fingerprint.txt, time box: ${STEP_TIMEOUT}s)"
+    cd "$ART" || finish 1
     if timeout --kill-after=30 "$STEP_TIMEOUT" env BIN="$INVESTIGATION_BIN" "$BENCH" check > "$ART/fingerprint.txt" 2>&1; then
       cat "$ART/fingerprint.txt"
       finish 0
