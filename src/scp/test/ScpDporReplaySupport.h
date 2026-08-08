@@ -34,7 +34,7 @@ class ScpDporReplaySupport
     struct ReplayObservationProgress
     {
         std::size_t mConsumedTraceEntries{0};
-        std::optional<EventLabel> mPendingEvent;
+        std::optional<ThreadAction> mPendingEvent;
         bool mObservedBottom{false};
     };
 
@@ -60,7 +60,7 @@ class ScpDporReplaySupport
         std::size_t mNextPendingSend{0};
         std::size_t mEventCount{0};
         std::optional<int> mSelectedTimerID;
-        std::optional<EventLabel> mLabel;
+        std::optional<ThreadAction> mLabel;
 
         void
         consume(ObservedValue const& observed)
@@ -137,10 +137,10 @@ class ScpDporReplaySupport
                                 ObservedValue const& observed,
                                 std::optional<int> selectedTimerID) const;
 
-    EventLabel makeTxSetStatusChoiceEvent(
+    ThreadAction makeTxSetStatusChoiceEvent(
         std::vector<DporScpTxSetStatus> const& statuses) const;
 
-    EventLabel makeTxSetDownloadWaitTimeChoiceEvent(
+    ThreadAction makeTxSetDownloadWaitTimeChoiceEvent(
         std::vector<std::chrono::milliseconds> const& waitTimes) const;
 
     void rebuildBaselines();

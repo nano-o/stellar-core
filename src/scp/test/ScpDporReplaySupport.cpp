@@ -414,7 +414,7 @@ ScpDporReplaySupport::replayOneObservedValue(
     node.receiveEnvelope(decodeEnvelope(value));
 }
 
-EventLabel
+ThreadAction
 ScpDporReplaySupport::makeTxSetStatusChoiceEvent(
     std::vector<DporScpTxSetStatus> const& statuses) const
 {
@@ -429,11 +429,10 @@ ScpDporReplaySupport::makeTxSetStatusChoiceEvent(
         throw std::logic_error("txset status choices must not be empty");
     }
 
-    return EventLabel{NondeterministicChoiceLabel{
-        .value = choices.front(), .choices = std::move(choices)}};
+    return ThreadAction{ChoiceRequest{.choices = std::move(choices)}};
 }
 
-EventLabel
+ThreadAction
 ScpDporReplaySupport::makeTxSetDownloadWaitTimeChoiceEvent(
     std::vector<std::chrono::milliseconds> const& waitTimes) const
 {
@@ -449,8 +448,7 @@ ScpDporReplaySupport::makeTxSetDownloadWaitTimeChoiceEvent(
         throw std::logic_error("txset wait-time choices must not be empty");
     }
 
-    return EventLabel{NondeterministicChoiceLabel{
-        .value = choices.front(), .choices = std::move(choices)}};
+    return ThreadAction{ChoiceRequest{.choices = std::move(choices)}};
 }
 
 void

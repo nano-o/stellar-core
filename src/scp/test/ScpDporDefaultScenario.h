@@ -101,7 +101,7 @@ class ScpDporDefaultScenario
         Kind mKind{Kind::Send};
         std::optional<SendLabel> mSend;
         std::optional<ReceiveLabel> mReceive;
-        std::optional<NondeterministicChoiceLabel> mChoice;
+        std::optional<ChoiceRequest> mChoice;
         std::optional<ObservedValue> mObservedValue;
         std::vector<ObservedValue> mNestedChoices;
         std::vector<DporScpNode::ReplayDebugEvent> mSideEffects;
@@ -232,13 +232,16 @@ class ScpDporDefaultScenario
         for (std::size_t nodeIndex = 0; nodeIndex < mOptions.mValidators.size();
              ++nodeIndex)
         {
-            auto const threadID = threadIdForNodeIndex(nodeIndex);
-            program.threads[threadID] =
+            // Dense registration in validator order; the assignment must
+            // agree with the validator-index mapping the rest of the harness
+            // looks threads up through.
+            auto const threadID = program.add_thread(
                 [self,
                  nodeIndex](ThreadTrace const& trace,
-                            std::size_t step) -> std::optional<EventLabel> {
+                            std::size_t step) -> std::optional<ThreadAction> {
                 return self->captureNextEvent(nodeIndex, trace, step);
-            };
+                });
+            releaseAssert(threadID == threadIdForNodeIndex(nodeIndex));
         }
         return program;
     }
@@ -324,8 +327,7 @@ class ScpDporDefaultScenario
                     .mKind =
                         ThreadReplayTraceStep::Kind::NondeterministicChoice,
                     .mChoice =
-                        NondeterministicChoiceLabel{.value = choices.front(),
-                                                    .choices =
+                        ChoiceRequest{.choices =
                                                         std::move(choices)},
                     .mObservedValue = observed});
                 selectedTimerID = timerID;
@@ -757,7 +759,7 @@ class ScpDporDefaultScenario
     // sound. The one exception is the nondeterministic-choice event surfaced
     // by `replayObservation`, which is raised from inside a partially applied
     // envelope; that path deliberately leaves the cursor invalid.
-    std::optional<EventLabel>
+    std::optional<ThreadAction>
     captureNextEvent(std::size_t nodeIndex, ThreadTrace const& trace,
                      std::size_t step) const
     {
@@ -783,7 +785,7 @@ class ScpDporDefaultScenario
 
         auto const publish =
             [&cursor](
-                std::optional<EventLabel> label) -> std::optional<EventLabel> {
+                std::optional<ThreadAction> label) -> std::optional<ThreadAction> {
             cursor.mLabel = std::move(label);
             cursor.mValid = true;
             return cursor.mLabel;
@@ -795,7 +797,7 @@ class ScpDporDefaultScenario
             {
                 if (cursor.mEventCount == step)
                 {
-                    return publish(EventLabel{
+                    return publish(ThreadAction{
                         cursor.mPendingSends.at(cursor.mNextPendingSend)});
                 }
                 ++cursor.mNextPendingSend;
@@ -815,9 +817,7 @@ class ScpDporDefaultScenario
 
                 if (cursor.mEventCount == step)
                 {
-                    return publish(EventLabel{NondeterministicChoiceLabel{
-                        .value = choices.front(),
-                        .choices = std::move(choices)}});
+                    return publish(ThreadAction{ChoiceRequest{.choices = std::move(choices)}});
                 }
                 ++cursor.mEventCount;
 
@@ -839,7 +839,7 @@ class ScpDporDefaultScenario
             if (cursor.mEventCount == step)
             {
                 return publish(
-                    EventLabel{makeReceiveLabel(timerToFire.has_value())});
+                    ThreadAction{makeReceiveLabel(timerToFire.has_value())});
             }
             ++cursor.mEventCount;
 

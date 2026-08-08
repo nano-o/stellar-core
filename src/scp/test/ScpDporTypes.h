@@ -167,6 +167,9 @@ using SendLabel = dpor::model::SendLabelT<ScpDporValue>;
 using ReceiveLabel = dpor::model::ReceiveLabelT<ScpDporValue>;
 using NondeterministicChoiceLabel =
     dpor::model::NondeterministicChoiceLabelT<ScpDporValue>;
+// What a thread function returns; the graph stores EventLabel instead.
+using ChoiceRequest = dpor::model::ChoiceRequestT<ScpDporValue>;
+using ThreadAction = dpor::model::ThreadActionT<ScpDporValue>;
 using ObservedValue = dpor::model::ObservedValueT<ScpDporValue>;
 using ExplorationGraph = dpor::model::ExplorationGraphT<ScpDporValue>;
 using ThreadTrace = dpor::algo::ThreadTraceT<ScpDporValue>;

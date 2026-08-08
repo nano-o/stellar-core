@@ -71,25 +71,27 @@ isMaximalExecution(
 inline Program
 wrapProgramExceptionsAsErrorExecutions(Program program)
 {
-    std::vector<dpor::model::ThreadId> threadIDs;
-    threadIDs.reserve(program.threads.size());
-    program.threads.for_each_assigned(
-        [&](dpor::model::ThreadId threadID, ThreadFunction const&) {
-            threadIDs.push_back(threadID);
+    // Collect first, then rewrap: set_thread() mutates the registration the
+    // iteration is walking.
+    std::vector<std::pair<dpor::model::ThreadId, ThreadFunction>> registered;
+    registered.reserve(program.thread_count());
+    program.for_each_thread(
+        [&](dpor::model::ThreadId threadID, ThreadFunction const& fn) {
+            registered.emplace_back(threadID, fn);
         });
 
-    for (auto const threadID : threadIDs)
+    for (auto& [threadID, wrappedThread] : registered)
     {
-        auto wrappedThread = std::move(program.threads[threadID]);
-        program.threads[threadID] =
-            [threadID, wrappedThread = std::move(wrappedThread)](
+        program.set_thread(
+            threadID,
+            [threadID = threadID, wrappedThread = std::move(wrappedThread)](
                 ThreadTrace const& trace,
-                std::size_t step) -> std::optional<EventLabel> {
+                std::size_t step) -> std::optional<ThreadAction> {
             auto makeError = [&](std::string_view exception) {
                 std::ostringstream message;
                 message << "thread=" << threadID << " step=" << step
                         << " exception=" << exception;
-                return EventLabel{
+                return ThreadAction{
                     dpor::model::ErrorLabel{.message = message.str()}};
             };
             try
@@ -104,7 +106,7 @@ wrapProgramExceptionsAsErrorExecutions(Program program)
             {
                 return makeError("<unknown>");
             }
-        };
+            });
     }
     return program;
 }

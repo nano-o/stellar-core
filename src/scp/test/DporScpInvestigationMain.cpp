@@ -556,7 +556,8 @@ printProgressSnapshot(std::ostream& out,
 }
 
 void
-printEventLabel(std::ostream& out, stellar::scpdpor::EventLabel const& event)
+printThreadAction(std::ostream& out,
+                  stellar::scpdpor::ThreadAction const& event)
 {
     std::visit(
         [&](auto const& label) {
@@ -647,16 +648,16 @@ printThreadReplayTrace(
         {
         case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
             Kind::Send:
-            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mSend});
+            printThreadAction(out, stellar::scpdpor::ThreadAction{*step.mSend});
             break;
         case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
             Kind::NondeterministicChoice:
-            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mChoice});
+            printThreadAction(out, stellar::scpdpor::ThreadAction{*step.mChoice});
             out << " selected=" << formatObservedValue(*step.mObservedValue);
             break;
         case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
             Kind::Receive:
-            printEventLabel(out, stellar::scpdpor::EventLabel{*step.mReceive});
+            printThreadAction(out, stellar::scpdpor::ThreadAction{*step.mReceive});
             out << " observed=" << formatObservedValue(*step.mObservedValue);
             break;
         }

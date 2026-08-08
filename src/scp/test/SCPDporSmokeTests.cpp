@@ -27,8 +27,8 @@ namespace
 {
 
 bool
-sameEventLabel(std::optional<EventLabel> const& lhs,
-               std::optional<EventLabel> const& rhs)
+sameThreadAction(std::optional<ThreadAction> const& lhs,
+               std::optional<ThreadAction> const& rhs)
 {
     if (!lhs || !rhs)
     {
@@ -47,11 +47,12 @@ sameEventLabel(std::optional<EventLabel> const& lhs,
         auto const* rhsReceive = std::get_if<ReceiveLabel>(&*rhs);
         return rhsReceive != nullptr && lhsReceive->mode == rhsReceive->mode;
     }
-    if (auto const* lhsChoice = std::get_if<NondeterministicChoiceLabel>(&*lhs))
+    if (auto const* lhsChoice = std::get_if<ChoiceRequest>(&*lhs))
     {
-        auto const* rhsChoice = std::get_if<NondeterministicChoiceLabel>(&*rhs);
-        return rhsChoice != nullptr && lhsChoice->value == rhsChoice->value &&
-               lhsChoice->choices == rhsChoice->choices;
+        // A request carries only the alternatives; the engine picks which one
+        // this branch takes, so there is no selected value to compare.
+        auto const* rhsChoice = std::get_if<ChoiceRequest>(&*rhs);
+        return rhsChoice != nullptr && lhsChoice->choices == rhsChoice->choices;
     }
     return std::holds_alternative<dpor::model::ErrorLabel>(*lhs) ==
            std::holds_alternative<dpor::model::ErrorLabel>(*rhs);
@@ -74,7 +75,7 @@ requireTxSetStatusChoices(DporScpNode& node, uint64 slotIndex,
 }
 
 SendLabel
-requireSendLabel(std::optional<EventLabel> const& event)
+requireSendLabel(std::optional<ThreadAction> const& event)
 {
     REQUIRE(event.has_value());
     auto const* send = std::get_if<SendLabel>(&*event);
@@ -83,7 +84,7 @@ requireSendLabel(std::optional<EventLabel> const& event)
 }
 
 ReceiveLabel
-requireReceiveLabel(std::optional<EventLabel> const& event)
+requireReceiveLabel(std::optional<ThreadAction> const& event)
 {
     REQUIRE(event.has_value());
     auto const* receive = std::get_if<ReceiveLabel>(&*event);
@@ -92,7 +93,7 @@ requireReceiveLabel(std::optional<EventLabel> const& event)
 }
 
 std::vector<Value>
-requireNominateVotes(std::optional<EventLabel> const& event)
+requireNominateVotes(std::optional<ThreadAction> const& event)
 {
     auto const send = requireSendLabel(event);
     auto const envelope = decodeEnvelope(send.value);
@@ -339,9 +340,9 @@ TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
     auto program = scenario.makeProgram();
     auto const& leader = program.threads.at(threadIdForNodeIndex(0));
 
-    REQUIRE(sameEventLabel(leader({}, 0), leader({}, 0)));
-    REQUIRE(sameEventLabel(leader({}, 1), leader({}, 1)));
-    REQUIRE(sameEventLabel(leader({}, 2), leader({}, 2)));
+    REQUIRE(sameThreadAction(leader({}, 0), leader({}, 0)));
+    REQUIRE(sameThreadAction(leader({}, 1), leader({}, 1)));
+    REQUIRE(sameThreadAction(leader({}, 2), leader({}, 2)));
 }
 
 TEST_CASE("scp dpor replay cache capacity is configurable",
@@ -619,11 +620,10 @@ TEST_CASE("scp dpor investigation wraps thread throws as error executions",
           "[scp][dpor][smoke]")
 {
     Program program;
-    auto const tid = threadIdForNodeIndex(0);
-    program.threads[tid] = [](ThreadTrace const&,
-                              std::size_t) -> std::optional<EventLabel> {
+    auto const tid = program.add_thread([](ThreadTrace const&,
+                                           std::size_t) -> std::optional<ThreadAction> {
         throw std::runtime_error("boom");
-    };
+    });
     program = wrapProgramExceptionsAsErrorExecutions(std::move(program));
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -652,13 +652,12 @@ TEST_CASE("scp dpor investigation identifies the first blocked node",
           "[scp][dpor][smoke]")
 {
     Program program;
-    auto const tid = threadIdForNodeIndex(0);
-    program.threads[tid] = [](ThreadTrace const&,
-                              std::size_t) -> std::optional<EventLabel> {
+    auto const tid = program.add_thread([](ThreadTrace const&,
+                                           std::size_t) -> std::optional<ThreadAction> {
         auto matcher = [](ScpDporValue const&) { return true; };
-        return EventLabel{
+        return ThreadAction{
             dpor::model::make_receive_label<ScpDporValue>(matcher)};
-    };
+    });
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = std::move(program);
@@ -1375,12 +1374,13 @@ TEST_CASE("scp dpor exploration finds a follower timer firing before delivery",
          nodeIndex < scenario.options().mValidators.size(); ++nodeIndex)
     {
         auto const threadID = threadIdForNodeIndex(nodeIndex);
-        auto const threadFn = config.program.threads.at(threadID);
-        config.program.threads[threadID] =
+        auto const threadFn = config.program.thread_function(threadID);
+        config.program.set_thread(
+            threadID,
             [threadFn](ThreadTrace const& trace,
-                       std::size_t step) -> std::optional<EventLabel> {
-            return step == 0 ? threadFn(trace, step) : std::nullopt;
-        };
+                       std::size_t step) -> std::optional<ThreadAction> {
+                return step == 0 ? threadFn(trace, step) : std::nullopt;
+            });
     }
     config.max_depth = 3;
     config.on_terminal_execution =
