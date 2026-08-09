@@ -582,13 +582,13 @@ int main()
     dpor::algo::DporConfig config;
     config.max_thread_events = std::size_t(1);
     dpor::algo::VerifyResult result;
-    return static_cast<int>(result.thread_event_limit_executions_explored +
+    return static_cast<int>(result.terminals.thread_event_limit() +
                             result.max_thread_event_depth_reached);
 }
 ]])],
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
-     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old (missing dpor::algo::TerminalExecutionKind::ThreadEventLimit and/or DporConfigT::max_thread_events); update it to commit 0c26676 or later of https://github.com/nano-o/CPP-DPOR.git])])
+     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old or too new for this probe (needs dpor::algo::TerminalExecutionKind::ThreadEventLimit, DporConfigT::max_thread_events, and VerifyResult::terminals); update it to the pinned submodule revision of https://github.com/nano-o/CPP-DPOR.git])])
   CPPFLAGS="$stellar_core_save_CPPFLAGS"
   CXXFLAGS="$stellar_core_save_CXXFLAGS"
 ])
