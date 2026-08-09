@@ -541,12 +541,12 @@ printProgressSnapshot(std::ostream& out,
          << " elapsed_ms=" << std::fixed << std::setprecision(3)
          << elapsedMS.count()
          << " terminal_executions=" << snapshot.terminal_executions
-         << " full_executions=" << snapshot.full_executions
-         << " blocked_executions=" << snapshot.blocked_executions
-         << " error_executions=" << snapshot.error_executions
-         << " depth_limit_executions=" << snapshot.depth_limit_executions
+         << " full_executions=" << snapshot.terminals.full()
+         << " blocked_executions=" << snapshot.terminals.blocked()
+         << " error_executions=" << snapshot.terminals.error()
+         << " depth_limit_executions=" << snapshot.terminals.depth_limit()
          << " thread_event_limit_executions="
-         << snapshot.thread_event_limit_executions
+         << snapshot.terminals.thread_event_limit()
          << " max_thread_event_depth=" << snapshot.max_thread_event_depth
          << " active_workers=" << snapshot.active_workers << "/"
          << snapshot.max_workers << " queued_tasks=" << snapshot.queued_tasks
@@ -853,11 +853,11 @@ appendTruncationHints(std::ostream& out, VerifyResult const& result,
                       CommandLineOptions const& options,
                       TruncationHintStyle style)
 {
-    if (result.depth_limit_executions_explored > 0 &&
+    if (result.terminals.depth_limit() > 0 &&
         (style == TruncationHintStyle::PropertyInconclusive ||
          options.mFailOnFirstBlocked))
     {
-        out << "; " << result.depth_limit_executions_explored
+        out << "; " << result.terminals.depth_limit()
             << " execution(s) hit ";
         if (style == TruncationHintStyle::CaptureNoMatch)
         {
@@ -869,9 +869,9 @@ appendTruncationHints(std::ostream& out, VerifyResult const& result,
             out << "--depth " << options.mDepth;
         }
     }
-    if (result.thread_event_limit_executions_explored > 0)
+    if (result.terminals.thread_event_limit() > 0)
     {
-        out << "; " << result.thread_event_limit_executions_explored
+        out << "; " << result.terminals.thread_event_limit()
             << " execution(s) ";
         if (style == TruncationHintStyle::CaptureNoMatch)
         {
@@ -1376,12 +1376,12 @@ main(int argc, char* argv[])
         std::cout << "kind="
                   << (result.all_explored() ? "all-explored" : "stopped")
                   << " executions=" << result.executions_explored
-                  << " full=" << result.full_executions_explored
-                  << " blocked=" << result.blocked_executions_explored
-                  << " error=" << result.error_executions_explored
-                  << " depth-limit=" << result.depth_limit_executions_explored
+                  << " full=" << result.terminals.full()
+                  << " blocked=" << result.terminals.blocked()
+                  << " error=" << result.terminals.error()
+                  << " depth-limit=" << result.terminals.depth_limit()
                   << " thread-event-limit="
-                  << result.thread_event_limit_executions_explored
+                  << result.terminals.thread_event_limit()
                   << " max-thread-event-depth="
                   << result.max_thread_event_depth_reached << "\n"
                   << std::flush;
@@ -1415,8 +1415,8 @@ main(int argc, char* argv[])
         // is distinct from the exit 1 used for genuine violations, and a real
         // violation has already returned 1 above.
         if ((options.mMustExternalize || options.mCheckAgreement) &&
-            result.full_executions_explored +
-                    result.blocked_executions_explored ==
+            result.terminals.full() +
+                    result.terminals.blocked() ==
                 0)
         {
             char const* const requested = options.mMustExternalize

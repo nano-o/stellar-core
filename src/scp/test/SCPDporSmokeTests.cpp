@@ -640,7 +640,7 @@ TEST_CASE("scp dpor investigation wraps thread throws as error executions",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored == 1);
+    REQUIRE(result.terminals.error() == 1);
     REQUIRE(errorExecution.has_value());
     REQUIRE(errorExecution->mNodeIndex == 0);
     REQUIRE(errorExecution->mThreadID == tid);
@@ -677,7 +677,7 @@ TEST_CASE("scp dpor investigation identifies the first blocked node",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.blocked_executions_explored == 1);
+    REQUIRE(result.terminals.blocked() == 1);
     REQUIRE(blockedExecution.has_value());
     REQUIRE(blockedExecution->mNodeIndex == 0);
     REQUIRE(blockedExecution->mThreadID == tid);
@@ -727,7 +727,7 @@ TEST_CASE("scp dpor replay trace keeps the lead-in to an SCP exception",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored >= 1);
+    REQUIRE(result.terminals.error() >= 1);
     REQUIRE(errorExecution.has_value());
     REQUIRE(errorExecution->mMessage.find(expectedError) != std::string::npos);
     REQUIRE(errorExecution->mMessage.find("BallotProtocol.cpp") !=
@@ -780,7 +780,7 @@ TEST_CASE("scp dpor trace json writes loads and replays an error execution",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored >= 1);
+    REQUIRE(result.terminals.error() >= 1);
     REQUIRE(bundle.has_value());
 
     TraceJsonTempFile tempFile("scp-dpor-trace-json-error");
@@ -877,7 +877,7 @@ TEST_CASE("scp dpor exploration witnesses timeout empty-txset replacement",
             return false;
         },
         dpor::model::CommunicationModel::FifoP2P);
-    REQUIRE(outcome.mResult.error_executions_explored == 0);
+    REQUIRE(outcome.mResult.terminals.error() == 0);
     REQUIRE(outcome.mFound);
 }
 
@@ -908,9 +908,9 @@ TEST_CASE("scp dpor stop-on-prepare reaches a blocked execution",
         config.program = scenario.makeProgram();
         config.max_depth = 12;
         auto const result = dpor::algo::verify(config);
-        REQUIRE(result.blocked_executions_explored == 0);
-        REQUIRE(result.depth_limit_executions_explored > 0);
-        REQUIRE(result.error_executions_explored == 0);
+        REQUIRE(result.terminals.blocked() == 0);
+        REQUIRE(result.terminals.depth_limit() > 0);
+        REQUIRE(result.terminals.error() == 0);
     }
 
     // Depth 18 is the smallest budget that actually reaches a blocked
@@ -921,8 +921,8 @@ TEST_CASE("scp dpor stop-on-prepare reaches a blocked execution",
         config.program = scenario.makeProgram();
         config.max_depth = 18;
         auto const result = dpor::algo::verify(config);
-        REQUIRE(result.blocked_executions_explored > 0);
-        REQUIRE(result.error_executions_explored == 0);
+        REQUIRE(result.terminals.blocked() > 0);
+        REQUIRE(result.terminals.error() == 0);
     }
 }
 
@@ -963,13 +963,13 @@ TEST_CASE("scp dpor thread-event depth bounds each validator independently",
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.error_executions_explored == 0);
-    REQUIRE(result.depth_limit_executions_explored == 0);
-    REQUIRE(result.thread_event_limit_executions_explored > 0);
+    REQUIRE(result.terminals.error() == 0);
+    REQUIRE(result.terminals.depth_limit() == 0);
+    REQUIRE(result.terminals.thread_event_limit() > 0);
     REQUIRE(result.max_thread_event_depth_reached == 3);
     // Exact fingerprint: a change here means the bounded exploration changed.
     REQUIRE(result.executions_explored == 6);
-    REQUIRE(result.thread_event_limit_executions_explored == 6);
+    REQUIRE(result.terminals.thread_event_limit() == 6);
     REQUIRE(observedTerminals == result.executions_explored);
     // A truncated execution is not maximal, so property checks skip it. This
     // is the regression guard for --must-externalize / --check-agreement.
@@ -1007,7 +1007,7 @@ TEST_CASE(
 
     auto const result = dpor::algo::verify(config);
 
-    REQUIRE(result.thread_event_limit_executions_explored == 0);
+    REQUIRE(result.terminals.thread_event_limit() == 0);
     REQUIRE(result.max_thread_event_depth_reached ==
             observedMaxThreadEventDepth);
     REQUIRE(result.max_thread_event_depth_reached == 8);
@@ -1107,7 +1107,7 @@ TEST_CASE("scp dpor exploration witnesses outright-invalid proposer rejection",
             return false;
         },
         dpor::model::CommunicationModel::FifoP2P);
-    REQUIRE(outcome.mResult.error_executions_explored == 0);
+    REQUIRE(outcome.mResult.terminals.error() == 0);
     REQUIRE(outcome.mFound);
 }
 
@@ -1127,7 +1127,7 @@ TEST_CASE("scp dpor bounded eventually-valid txsets have no error executions",
     config.max_depth = 12;
 
     auto const result = dpor::algo::verify(config);
-    REQUIRE(result.error_executions_explored == 0);
+    REQUIRE(result.terminals.error() == 0);
 }
 
 TEST_CASE("scp dpor exploration finds a commit boundary", "[scp][dpor][smoke]")
