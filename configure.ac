@@ -565,30 +565,43 @@ int main()
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
      AC_MSG_ERROR([failed to compile a DPOR probe with DPOR_CPPFLAGS/DPOR_CXXFLAGS])])
-  AC_MSG_CHECKING([whether the DPOR checkout provides the per-thread event-bound API])
+  AC_MSG_CHECKING([whether the DPOR checkout provides the required public API])
   AC_COMPILE_IFELSE(
     [AC_LANG_SOURCE([[
 #include <dpor/algo/dpor.hpp>
 
 #include <cstddef>
+#include <optional>
+
+template <typename ProgramT>
+concept ExposesThreadStorage = requires(ProgramT& program) { program.threads; };
 
 static_assert(static_cast<int>(dpor::algo::TerminalExecutionKind::Blocked) >= 0,
               "DPOR checkout too old");
 static_assert(static_cast<int>(dpor::algo::TerminalExecutionKind::ThreadEventLimit) >= 0,
               "DPOR checkout too old");
+static_assert(!ExposesThreadStorage<dpor::algo::Program>,
+              "DPOR Program thread storage must be private");
 
 int main()
 {
     dpor::algo::DporConfig config;
     config.max_thread_events = std::size_t(1);
+    config.program.set_thread(
+        0, [](const dpor::algo::ThreadTrace&, std::size_t)
+               -> std::optional<dpor::model::ThreadAction> {
+            return std::nullopt;
+        });
+    (void)config.program.thread_function(0);
     dpor::algo::VerifyResult result;
     return static_cast<int>(result.terminals.thread_event_limit() +
-                            result.max_thread_event_depth_reached);
+                            result.max_thread_event_depth_reached +
+                            config.program.thread_count());
 }
 ]])],
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
-     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old or too new for this probe (needs dpor::algo::TerminalExecutionKind::ThreadEventLimit, DporConfigT::max_thread_events, and VerifyResult::terminals); update it to the pinned submodule revision of https://github.com/nano-o/CPP-DPOR.git])])
+     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old or too new for this probe (needs the encapsulated Program registration/access API, dpor::algo::TerminalExecutionKind::ThreadEventLimit, DporConfigT::max_thread_events, and VerifyResult::terminals); update it to the pinned submodule revision of https://github.com/nano-o/CPP-DPOR.git])])
   CPPFLAGS="$stellar_core_save_CPPFLAGS"
   CXXFLAGS="$stellar_core_save_CXXFLAGS"
 ])

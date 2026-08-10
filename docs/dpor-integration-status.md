@@ -1,13 +1,13 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-08-09 for branch `dpor-on-master`, with
-`external/dpor` pinned to DPOR library commit `b439a72`. Entries below that
+Status snapshot as of 2026-08-10 for branch `dpor-on-master`, with
+`external/dpor` pinned to DPOR library commit `f54b793`. Entries below that
 quote an earlier engine pin are dated verification records, not stale claims
 about the current pin.
 
 The engine at this pin has been through the simplification refactoring
 (batches 0-7; see `external/dpor/docs/simplification_refactoring_progress.md`).
-Two changes there are visible from this repo:
+Three changes there are visible from this repo:
 
 - `VerifyResult` reports its per-kind terminal counts through a `terminals`
   member — `result.terminals.full()`, `.blocked()`, `.error()`,
@@ -18,6 +18,9 @@ Two changes there are visible from this repo:
   under `dpor/algo/detail/` and the public types in
   `dpor/algo/verify_result.hpp`. Including `dpor/algo/dpor.hpp` is still all a
   consumer needs, so the include in the harness is unchanged.
+- `ProgramT` now keeps its thread storage private. The harness uses
+  `set_thread`, `thread_function`, and `thread_count`; the configure-time API
+  probe also checks this boundary so a mismatched engine fails before build.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -101,15 +104,16 @@ library or harness errors.
   `--with-dpor-dir`, `DPOR_DIR`, `DPOR_CPPFLAGS`, `DPOR_CXXFLAGS`, the
   `ENABLE_DPOR` automake conditional, and two compile probes: one that builds
   `<dpor/algo/dpor.hpp>` with the configured target flags, and one that
-  `static_assert`s on `dpor::algo::TerminalExecutionKind::Blocked` and reads
-  `VerifyResult::terminals` so an engine checkout that predates the
-  blocked-execution API, the per-thread event bound, or the `terminals`
-  breakdown fails configure with an explicit message pointing at the pinned
-  submodule revision.
+  checks the encapsulated `ProgramT` registration/access API,
+  `static_assert`s on `dpor::algo::TerminalExecutionKind::Blocked`, and reads
+  `VerifyResult::terminals` so an engine checkout that predates the required
+  program boundary, blocked-execution API, per-thread event bound, or
+  `terminals` breakdown fails configure with an explicit message pointing at
+  the pinned submodule revision.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `b439a72`. Earlier pins sat on the `dpor-perf` branch, off
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `f54b793`. Earlier pins sat on the `dpor-perf` branch, off
   `main`, so that branch was the only thing keeping them fetchable; `main` has
   since been fast-forwarded onto that line, and `dpor-perf` is now a stale
   pointer at the older `febae6f`. The `--with-dpor-dir` override remains
@@ -621,6 +625,13 @@ the conclusion the table exists to record, monotone improvement through 32
 workers, is unchanged.
 
 ## Verification in this workspace
+
+The post-refactoring review remediation was reverified on 2026-08-10 against
+the pinned `f54b793` engine. A fresh configure accepted the strengthened
+public-API probe; the DPOR binaries rebuilt; the smoke and full `[scp]` suites
+passed; and all 14 `bench-dpor.sh check` scenarios reproduced the prior
+fingerprint byte-for-byte. The accessor migration and gitlink therefore land
+as one consumer change, with no execution-set drift.
 
 The build shape was verified with a clean reconfigure after rebasing onto
 `4c0d88c75` (upstream post-CAP-0083-ungating master). The runtime suites and

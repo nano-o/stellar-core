@@ -338,7 +338,7 @@ TEST_CASE("scp dpor scenario is deterministic", "[scp][dpor][smoke]")
 {
     ScpDporDefaultScenario scenario;
     auto program = scenario.makeProgram();
-    auto const& leader = program.threads.at(threadIdForNodeIndex(0));
+    auto const& leader = program.thread_function(threadIdForNodeIndex(0));
 
     REQUIRE(sameThreadAction(leader({}, 0), leader({}, 0)));
     REQUIRE(sameThreadAction(leader({}, 1), leader({}, 1)));
@@ -355,7 +355,7 @@ TEST_CASE("scp dpor replay cache capacity is configurable",
     ScpDporDefaultScenario scenario(
         ScpDporDefaultScenario::makeDefaultOptions(), 1);
     auto program = scenario.makeProgram();
-    REQUIRE(program.threads.at(threadIdForNodeIndex(0))({}, 0).has_value());
+    REQUIRE(program.thread_function(threadIdForNodeIndex(0))({}, 0).has_value());
 }
 
 TEST_CASE("scp dpor leader initially sends to both followers then waits",
@@ -363,7 +363,7 @@ TEST_CASE("scp dpor leader initially sends to both followers then waits",
 {
     ScpDporDefaultScenario scenario;
     auto program = scenario.makeProgram();
-    auto const& leader = program.threads.at(threadIdForNodeIndex(0));
+    auto const& leader = program.thread_function(threadIdForNodeIndex(0));
 
     auto const& firstSend = requireSendLabel(leader({}, 0));
     REQUIRE(firstSend.destination == threadIdForNodeIndex(1));
@@ -404,14 +404,14 @@ TEST_CASE("scp dpor default scenario supports four validators",
 
     ScpDporDefaultScenario scenario(options);
     auto program = scenario.makeProgram();
-    REQUIRE(program.threads.size() == 4);
+    REQUIRE(program.thread_count() == 4);
 
     std::optional<std::size_t> initialSender;
     for (std::size_t nodeIndex = 0; nodeIndex < options.mValidators.size();
          ++nodeIndex)
     {
         auto const& thread =
-            program.threads.at(threadIdForNodeIndex(nodeIndex));
+            program.thread_function(threadIdForNodeIndex(nodeIndex));
         auto const firstEvent = thread({}, 0);
         if (firstEvent && std::holds_alternative<SendLabel>(*firstEvent))
         {
@@ -422,7 +422,7 @@ TEST_CASE("scp dpor default scenario supports four validators",
     REQUIRE(initialSender);
 
     auto const& sender =
-        program.threads.at(threadIdForNodeIndex(*initialSender));
+        program.thread_function(threadIdForNodeIndex(*initialSender));
     std::set<dpor::model::ThreadId> destinations;
     for (std::size_t step = 0; step < options.mValidators.size() - 1; ++step)
     {
@@ -445,7 +445,7 @@ TEST_CASE("scp dpor nomination timer round cap disables later timer firings",
     ScpDporDefaultScenario enabledScenario(std::move(enabledOptions));
     auto enabledProgram = enabledScenario.makeProgram();
     auto const& enabledLeader =
-        enabledProgram.threads.at(threadIdForNodeIndex(0));
+        enabledProgram.thread_function(threadIdForNodeIndex(0));
 
     auto const enabledReceive = requireReceiveLabel(enabledLeader({}, 2));
     REQUIRE(enabledReceive.is_nonblocking());
@@ -456,7 +456,7 @@ TEST_CASE("scp dpor nomination timer round cap disables later timer firings",
     ScpDporDefaultScenario cappedScenario(std::move(cappedOptions));
     auto cappedProgram = cappedScenario.makeProgram();
     auto const& cappedLeader =
-        cappedProgram.threads.at(threadIdForNodeIndex(0));
+        cappedProgram.thread_function(threadIdForNodeIndex(0));
 
     auto const cappedReceive = requireReceiveLabel(cappedLeader({}, 2));
     REQUIRE(cappedReceive.is_blocking());
@@ -471,7 +471,7 @@ TEST_CASE("scp dpor scenario supports same and unique initial value presets",
         sameOptions.mValidators.size());
     ScpDporDefaultScenario sameScenario(std::move(sameOptions));
     auto sameProgram = sameScenario.makeProgram();
-    auto const& sameLeader = sameProgram.threads.at(threadIdForNodeIndex(0));
+    auto const& sameLeader = sameProgram.thread_function(threadIdForNodeIndex(0));
     auto const sameVotes = requireNominateVotes(sameLeader({}, 0));
     REQUIRE(sameVotes.size() == 1);
     REQUIRE(sameVotes.front() == sameScenario.options().mInitialValues.at(0));
@@ -487,7 +487,7 @@ TEST_CASE("scp dpor scenario supports same and unique initial value presets",
     ScpDporDefaultScenario uniqueScenario(std::move(uniqueOptions));
     auto uniqueProgram = uniqueScenario.makeProgram();
     auto const& uniqueLeader =
-        uniqueProgram.threads.at(threadIdForNodeIndex(0));
+        uniqueProgram.thread_function(threadIdForNodeIndex(0));
     auto const uniqueVotes = requireNominateVotes(uniqueLeader({}, 0));
     REQUIRE(uniqueVotes.size() == 1);
     REQUIRE(uniqueVotes.front() ==
@@ -568,7 +568,7 @@ TEST_CASE("scp dpor trace json round-trips thread traces", "[scp][dpor][smoke]")
 {
     ScpDporDefaultScenario scenario;
     auto program = scenario.makeProgram();
-    auto const& leader = program.threads.at(threadIdForNodeIndex(0));
+    auto const& leader = program.thread_function(threadIdForNodeIndex(0));
     auto const firstSend = requireSendLabel(leader({}, 0));
 
     ThreadTrace trace;
