@@ -246,6 +246,13 @@ permutations too often. An empty `ChoiceRequest` is not a transition: the
 current action/event API rejects it as a user callback contract error, and
 `std::nullopt` is how a thread terminates.
 
+Send exploration uses an explicit two-level transition. Adding the ordinary
+send advances the parent key once, with the deterministic-event tag, to the
+`ResumeSendRevisits` frame key. Each raw sibling then derives its child key from
+that frame key with either the `SendBackwardRevisit` tag plus target receive ID
+or the distinguished `SendContinuation` tag. Selecting the continuation must
+not apply the ordinary-send transition a second time.
+
 A blocked-receive reschedule removes an engine-injected block instead of adding
 an event. Extend `BlockedReceiveRescheduleResult` to report the unblocked
 thread ID, and derive that transition's key from the reschedule domain tag,
@@ -352,9 +359,12 @@ simplification refactoring:
   resume;
 - ND and receive permutation vectors live in their existing heap-owned typed
   payloads and are constructed only when `config.branch_order` is present;
-- the seeded send slot vector and post-send checkpoint live in a seeded-only
-  payload or indirection, rather than enlarging the ordinary inline
-  `ResumeSendRevisits` state with always-live vectors and checkpoints; and
+- `ResumeSendRevisits` carries a nullable
+  `std::unique_ptr<SeededSendState>` member containing the send slot vector and
+  post-send checkpoint. It is null when ordering is disabled. Prefer this over
+  adding a new frame-variant alternative: it preserves the frame-kind set,
+  variant-index assertions, `kind()` mapping, and existing unwind switch while
+  imposing only the dormant pointer on the unseeded frame; and
 - an unseeded task/frame performs no key derivation, RNG initialization,
   shuffle, or permutation allocation. If carrying a dormant task discriminator
   changes a common type's size, record the before/after size and confirm the
@@ -591,15 +601,14 @@ This metadata explains how the execution was discovered; it is not required to
 replay the saved per-thread traces. Loading a bundle without it must continue
 to work, and replay must not re-run DPOR merely to honor it.
 
-Stellar trace bundles now have a deliberate version-8-only compatibility line;
+Stellar trace bundles have a deliberate version-8-only compatibility line;
 versions 1 through 7 are rejected and must remain rejected with the current
-recapture diagnostic. Keep schema version 8 if the optional field is accepted
-by the current parser, absent metadata remains readable, and an older v8 reader
-ignores the unknown top-level member. Add round-trip tests for present and
-absent metadata plus a checked-in/current v8 bundle without the object. Do not
-restore v6/v7 compatibility as part of this feature. If implementation reveals
-a strict-member check or another incompatibility, bump the schema rather than
-weakening validation accidentally.
+recapture diagnostic. Keep schema version 8. The current parser reads members
+by name and ignores unknown top-level members, so an older v8 reader tolerates
+the optional `exploration` object and a current reader continues to accept
+bundles without it. Add round-trip tests for present and absent metadata plus a
+checked-in/current v8 bundle without the object. Do not restore v6/v7
+compatibility or bump the schema as part of this feature.
 
 Round-trip tests must distinguish an absent `branch_order_seed` (disabled) from
 a present value of zero (enabled with seed zero), and must cover
@@ -623,8 +632,11 @@ option.
 
 Forward it through the POD C ABI without using zero as a sentinel:
 
-- add an explicit enabled byte and a `uint64_t` seed to `BcRunOptions`, with
-  reserved bytes kept deterministic;
+- append an explicit enabled byte, seven bytes of named zero-initialized
+  padding, and a `uint64_t` seed after the current `BcRunOptions` fields. Do not
+  consume `reserved0`, `reserved1`, or `reserved2`: preserving the entire old
+  struct as a prefix makes the ABI extension and old-artifact interpretation
+  explicit;
 - mirror the fields in Rust `BcRunOptions` and update both sides' size,
   alignment, offset, default-value, and runtime cross-check tests; and
 - in `dpor_bridge.cpp`, set `config.branch_order` only when enabled, before
@@ -690,9 +702,12 @@ Update the submodule pin, extend the configure-time minimum-version compile
 probe to reference `BranchOrderOptions` and `DporConfigT::branch_order`, add
 the runner option and provenance output, and add optional trace metadata.
 
-Update the old-API failure message to name the new minimum CPP-DPOR commit that
-contains branch ordering. Preserve the current distinction between "the DPOR
-headers do not compile" and "the checkout compiles but its API is too old."
+Extend the old-API failure message's existing feature list with
+`BranchOrderOptions` and `DporConfigT::branch_order`, and append the new minimum
+CPP-DPOR commit that contains branch ordering. Do not replace the useful
+feature-level diagnostic with only a commit ID. Preserve the current
+distinction between "the DPOR headers do not compile" and "the checkout
+compiles but its API is too old."
 
 Update `docs/dpor-integration-status.md` and `docs/dpor-replay-notes.md` after
 the code and observed behavior are final. Do not describe seed ordering as a
@@ -747,6 +762,9 @@ Add these focused cases in the appropriate targets and helper fixtures:
   changes;
 - blocked-receive rescheduling derives repeatable child keys from the
   unblocked thread ID and its parent-graph event count;
+- an ordinary send advances to its frame key exactly once, and revisit and
+  continuation child keys derive from that frame key rather than reapplying
+  the ordinary-send transition;
 - ND choices all remain present exactly once after seeded ordering;
 - receive bottom appears first, middle, and last for selected seeds;
 - inconsistent receive-source slots are skipped without changing the relative
@@ -1011,3 +1029,144 @@ The old review's minor clarifications are now requirements in the main text:
 frame-lifecycle fast paths may differ while branch semantics stay shared, the
 receive split gate is common, disabled dispatch performs no key work, and the
 existing unconditional live-send guard remains in place.
+
+## Review — 2026-08-11
+
+### Verdict
+
+Accurate against the code it describes and ready to implement as staged. Every
+engine-shape, consumer-surface, and tooling claim checked below was verified
+against engine commit `f54b793` (the revision both consumers currently pin),
+the stellar-core investigation runner, and the Bristlecone checkout at
+`/workspaces/bristlecone`. No claim contradicted the tree.
+
+### Claims verified against the code
+
+Engine (`external/dpor/include/dpor/algo/`):
+
+- The `verify_result`/`support`/`sequential`/`parallel`/`explorer` split, the
+  three resumable frame payloads, the `unique_ptr` rule for `ValueT`-bearing
+  payloads, and `ExplorationContext`'s exclusive owned/borrowed graph variant
+  all match `detail/explorer.hpp`.
+- The continuation is indeed always last and converts the frame to
+  `ExitLinearChild` (`handle_resume_send_revisits_frame`), so the
+  return-to-later-siblings path the plan builds in Phase 1 is genuinely
+  unexercised today.
+- `next_backward_revisit_child()` scans forward from `start_receive_index`;
+  the exact-slot helper is a real missing piece, not a refactor of existing
+  capability.
+- `BlockedReceiveRescheduleResult` carries only `kind` and `graph`; the
+  unblocked-thread-ID extension is genuinely needed for the reschedule key.
+- Bottom is a `bottom_branch_pending` flag, deliberately last and never split;
+  the bottom child already uses `VisitIfConsistent`, so the plan's "no shortcut
+  around consistency" rule preserves current behavior.
+- Revisit children are offered eagerly under `can_spawn()` while ND/receive
+  alternatives are gated on `idle_workers_`, exactly as the plan's handoff
+  policy assumes, and the `nd_splits`/`receive_splits` counters are the only
+  split accounting.
+- The receive split-gate equivalence argument checks out: the current
+  `keeps_local_work = next_candidate + 1 < size || bottom_branch_pending` is
+  precisely "at least one raw slot remains local" under bottom-last order.
+- One-worker parity is preserved behavior, not new work: `max_workers_ <= 1`
+  short-circuits `can_spawn()`, `should_split_to_idle_worker()`, and
+  `try_enqueue()`, so a one-worker parallel run already explores in exact
+  sequential order.
+- `erase_duplicate_nd_choices()` runs before frame construction, empty choice
+  requests are rejected upstream, and scratch is executor-owned (sequential
+  member / parallel `thread_local` `WorkerState`), matching the plan's
+  scratch-threading requirement.
+- The rejection-before-modulo formula is the standard unbiased bounded-integer
+  construction and is stated correctly.
+- `scripts/gate.sh` has the `full`, `stress`, and `axes` modes the plan
+  requires, `run_tsan.sh` exists, and the seven test files named in the test
+  plan all exist under `tests/`. `README.md`, `docs/api.md`, and
+  `docs/architecture.md` exist for the Phase 2 documentation work.
+
+stellar-core:
+
+- `TRACE_BUNDLE_VERSION` is 8 and `traceBundleFromJson` rejects every other
+  version with the recapture diagnostic the plan says must be retained.
+- The runner has `CommandLineOptions` with the `std::optional` style the new
+  seed option copies, plus `--workers`, `--parallel`, and `--replay-trace-json`
+  for the composition and rejection rules.
+- The configure probe exists with distinct "headers do not compile" and
+  "checkout too old" diagnostics; the too-old message currently names required
+  API features. `src/scp/test/dpor-gate.sh` has `smoke`/`check`/`full`.
+
+Bristlecone:
+
+- `BcRunOptions` is a POD mirrored in Rust and C with layout tests; Rust
+  `RunOptions`/`RunRecord` exist; `TRACE_SCHEMA_VERSION` is 2 with an explicit
+  incompatible-version rejection test; the two-record pin
+  (gitlink + `EXPECTED_ENGINE_REVISION`) is real; `dpor/scripts/gate.sh` has
+  `test` and `bench` modes and honors `BRISTLECONE_DPOR_DIR`; the allowlist
+  gate and the `build` subcommand (`Command::Build`) exist; replay and
+  translate are separate commands that do not share exploration arguments.
+
+### Findings
+
+1. **The v8 conditional resolves definitively: keep schema 8.** The plan
+   hedges ("if the optional field is accepted by the current parser").
+   Verified: `traceBundleFromJson` reads members by name and ignores unknown
+   top-level members — `communication_model` is already optional via
+   `isMember` — so an older v8 reader tolerates the `exploration` object and
+   absent metadata stays readable. No schema bump is needed; the round-trip
+   tests remain worthwhile as regression guards.
+
+2. **The deepest assumption is structurally sound, and the plan stages it
+   correctly.** Sibling-order independence of the DPOR tree holds because
+   every frame's child set is a function of that node's graph alone (ND
+   choices post-dedup, compatible unread sends captured at frame creation,
+   `receives_in_destination` captured at send time, reschedule a deterministic
+   graph function) and siblings are separated by rollback. Tree depths are
+   likewise structural, so bound classifications cannot shift under
+   reordering. The plan rightly refuses to rest on this argument and proves it
+   empirically in Phase 1 before adding any randomness; keep that ordering.
+
+3. **Prefer the nullable indirection for seeded send state.** The plan allows
+   either "a seeded-only payload or indirection". A sixth variant alternative
+   would churn the `ExplorationFrameKind` ↔ variant-index `static_assert`s,
+   `kind()`, `rollback_checkpoint()`, and every frame switch; a
+   `unique_ptr`-style seeded-state member inside `ResumeSendRevisits`
+   (null when unseeded, 8 bytes) preserves the frame-kind set and the existing
+   unwind path untouched. Recommend the plan name that as the default choice.
+
+4. **Make the two-level send key scheme explicit.** The intended reading —
+   the send's event addition advances the parent key to the frame key with the
+   deterministic-event tag, and each slot (revisit, continuation) then derives
+   its child key from the frame key with its slot tag — is coherent, but the
+   text's flat transition list ("ordinary sends, … send continuations")
+   admits a double-advance reading. Either is correct; the golden permutation
+   fixtures will freeze whichever is implemented, so one clarifying sentence
+   now avoids a confusing test archaeology later.
+
+5. **Pin the ABI extension layout decision.** "Reserved bytes kept
+   deterministic" leaves open whether the enabled byte occupies existing
+   reserved space (`reserved0`/`reserved1`/`reserved2`) or new fields are
+   appended with fresh explicit padding. The layout tests will catch drift
+   either way, but the plan should state the choice — appending both fields
+   with explicit padding is the simpler story for readers of old artifacts.
+
+6. **Probe message style.** The current too-old diagnostic names missing API
+   features, not commits. Phase 3 asks for the minimum commit to be named;
+   keep the feature-list style (add `BranchOrderOptions` /
+   `DporConfigT::branch_order` to the list) and append the commit, rather than
+   replacing one with the other.
+
+7. **Housekeeping, outside this plan:** both consumers currently pin the same
+   engine commit `f54b793`, which makes the coordinated-advance story in the
+   landing sequence start from a common base — but the repository
+   instructions still describe the pin as `562f5be`. Worth refreshing when the
+   pin next moves.
+
+### Nits
+
+- Filename says "randomized", title and body say "seeded". The body's own
+  terminology rule ("seeded branch order", never sampling language) is
+  followed consistently; the filename mismatch is harmless.
+- The "bottom/continuation first, middle, last" test cases require hunting for
+  seeds that produce those placements on a fixture; that is a fixture-search
+  chore, and the revision-local scoping of seeds already covers the
+  brittleness concern.
+
+END REVIEW
