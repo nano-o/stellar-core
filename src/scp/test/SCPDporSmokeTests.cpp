@@ -10,8 +10,11 @@
 #include "xdrpp/marshal.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -19,6 +22,7 @@
 #include <system_error>
 #include <unistd.h>
 #include <utility>
+#include <vector>
 
 namespace stellar::scpdpor
 {
@@ -28,7 +32,7 @@ namespace
 
 bool
 sameThreadAction(std::optional<ThreadAction> const& lhs,
-               std::optional<ThreadAction> const& rhs)
+                 std::optional<ThreadAction> const& rhs)
 {
     if (!lhs || !rhs)
     {
@@ -312,6 +316,57 @@ explorationFinds(ScpDporDefaultScenario const& scenario, std::size_t maxDepth,
     return outcome;
 }
 
+struct SignatureRun
+{
+    dpor::algo::VerifyResult mResult;
+    std::vector<std::string> mOrder;
+    std::set<std::string> mSignatures;
+};
+
+SignatureRun
+collectSignatures(ScpDporDefaultScenario::Options options,
+                  std::optional<uint64_t> branchOrderSeed,
+                  std::size_t workers = 1)
+{
+    ScpDporDefaultScenario scenario(std::move(options));
+    dpor::algo::DporConfigT<ScpDporValue> config;
+    config.program = scenario.makeProgram();
+    config.max_depth = 12;
+    if (branchOrderSeed)
+    {
+        config.branch_order = dpor::algo::BranchOrderOptions{*branchOrderSeed};
+    }
+
+    SignatureRun run;
+    std::mutex mutex;
+    config.on_terminal_execution =
+        [&](dpor::algo::TerminalExecutionT<ScpDporValue> const& execution) {
+            auto signature = dpor::model::format_graph(
+                execution.graph, [](ScpDporValue const& value) {
+                    return toJson(value).toStyledString();
+                });
+            signature += "terminal-kind=";
+            signature += terminalKindName(execution.kind);
+
+            std::lock_guard<std::mutex> lock(mutex);
+            run.mOrder.emplace_back(signature);
+            run.mSignatures.emplace(std::move(signature));
+            return dpor::algo::TerminalExecutionAction::Continue;
+        };
+
+    if (workers == 1)
+    {
+        run.mResult = dpor::algo::verify(config);
+    }
+    else
+    {
+        dpor::algo::ParallelVerifyOptions parallelOptions;
+        parallelOptions.max_workers = workers;
+        run.mResult = dpor::algo::verify_parallel(config, parallelOptions);
+    }
+    return run;
+}
+
 } // namespace
 
 TEST_CASE("scp dpor value hashing agrees with equality on empty envelopes",
@@ -355,7 +410,8 @@ TEST_CASE("scp dpor replay cache capacity is configurable",
     ScpDporDefaultScenario scenario(
         ScpDporDefaultScenario::makeDefaultOptions(), 1);
     auto program = scenario.makeProgram();
-    REQUIRE(program.thread_function(threadIdForNodeIndex(0))({}, 0).has_value());
+    REQUIRE(
+        program.thread_function(threadIdForNodeIndex(0))({}, 0).has_value());
 }
 
 TEST_CASE("scp dpor leader initially sends to both followers then waits",
@@ -471,7 +527,8 @@ TEST_CASE("scp dpor scenario supports same and unique initial value presets",
         sameOptions.mValidators.size());
     ScpDporDefaultScenario sameScenario(std::move(sameOptions));
     auto sameProgram = sameScenario.makeProgram();
-    auto const& sameLeader = sameProgram.thread_function(threadIdForNodeIndex(0));
+    auto const& sameLeader =
+        sameProgram.thread_function(threadIdForNodeIndex(0));
     auto const sameVotes = requireNominateVotes(sameLeader({}, 0));
     REQUIRE(sameVotes.size() == 1);
     REQUIRE(sameVotes.front() == sameScenario.options().mInitialValues.at(0));
@@ -616,14 +673,54 @@ TEST_CASE("scp dpor smoke explore reaches a terminal execution",
     REQUIRE(result.executions_explored == 1);
 }
 
+TEST_CASE("scp dpor seeded branch ordering preserves a bounded exploration",
+          "[scp][dpor][smoke]")
+{
+    auto options = ScpDporDefaultScenario::makeDefaultOptions();
+    options.mDownloadTimeMode =
+        ScpDporDefaultScenario::DownloadTimeMode::Nondeterministic;
+    options.mTxSetStatusMode =
+        ScpDporDefaultScenario::TxSetStatusMode::DownloadingThenValid;
+
+    auto const unseeded = collectSignatures(options, std::nullopt);
+    auto const seedZero = collectSignatures(options, 0);
+    auto const seedOne = collectSignatures(options, 1);
+    auto const seedOneRepeated = collectSignatures(options, 1);
+    auto const seedMax =
+        collectSignatures(options, std::numeric_limits<uint64_t>::max());
+    auto const parallelSeedOne = collectSignatures(options, 1, 4);
+
+    auto const requireSameExhaustiveResult = [&](SignatureRun const& run) {
+        REQUIRE(run.mResult.all_explored());
+        REQUIRE(run.mResult.executions_explored ==
+                unseeded.mResult.executions_explored);
+        dpor::algo::for_each_terminal_kind([&](auto kind) {
+            REQUIRE(run.mResult.terminals[kind] ==
+                    unseeded.mResult.terminals[kind]);
+        });
+        REQUIRE(run.mSignatures == unseeded.mSignatures);
+        REQUIRE(run.mSignatures.size() == run.mOrder.size());
+    };
+
+    requireSameExhaustiveResult(unseeded);
+    requireSameExhaustiveResult(seedZero);
+    requireSameExhaustiveResult(seedOne);
+    requireSameExhaustiveResult(seedOneRepeated);
+    requireSameExhaustiveResult(seedMax);
+    requireSameExhaustiveResult(parallelSeedOne);
+
+    REQUIRE(seedOne.mOrder == seedOneRepeated.mOrder);
+    REQUIRE(seedZero.mOrder != seedOne.mOrder);
+}
+
 TEST_CASE("scp dpor investigation wraps thread throws as error executions",
           "[scp][dpor][smoke]")
 {
     Program program;
-    auto const tid = program.add_thread([](ThreadTrace const&,
-                                           std::size_t) -> std::optional<ThreadAction> {
-        throw std::runtime_error("boom");
-    });
+    auto const tid = program.add_thread(
+        [](ThreadTrace const&, std::size_t) -> std::optional<ThreadAction> {
+            throw std::runtime_error("boom");
+        });
     program = wrapProgramExceptionsAsErrorExecutions(std::move(program));
 
     dpor::algo::DporConfigT<ScpDporValue> config;
@@ -652,12 +749,12 @@ TEST_CASE("scp dpor investigation identifies the first blocked node",
           "[scp][dpor][smoke]")
 {
     Program program;
-    auto const tid = program.add_thread([](ThreadTrace const&,
-                                           std::size_t) -> std::optional<ThreadAction> {
-        auto matcher = [](ScpDporValue const&) { return true; };
-        return ThreadAction{
-            dpor::model::make_receive_label<ScpDporValue>(matcher)};
-    });
+    auto const tid = program.add_thread(
+        [](ThreadTrace const&, std::size_t) -> std::optional<ThreadAction> {
+            auto matcher = [](ScpDporValue const&) { return true; };
+            return ThreadAction{
+                dpor::model::make_receive_label<ScpDporValue>(matcher)};
+        });
 
     dpor::algo::DporConfigT<ScpDporValue> config;
     config.program = std::move(program);
@@ -1055,11 +1152,32 @@ TEST_CASE("scp dpor trace json round-trips a thread-event-limit terminal",
     REQUIRE_FALSE(json["terminal"].isMember("focus_thread_id"));
     REQUIRE(json["thread_traces"].isArray());
     REQUIRE(json["thread_traces"][0].isArray());
+    REQUIRE_FALSE(json.isMember("exploration"));
 
     auto const reloaded = traceBundleFromJson(json);
     REQUIRE(reloaded.mVersion == TRACE_BUNDLE_VERSION);
     REQUIRE(reloaded.mTerminal.mKind == bundle->mTerminal.mKind);
     REQUIRE(reloaded.mThreadTraces.size() == bundle->mThreadTraces.size());
+    REQUIRE_FALSE(reloaded.mExploration.has_value());
+
+    for (auto const seed : {uint64_t{0}, std::numeric_limits<uint64_t>::max()})
+    {
+        auto withExploration = *bundle;
+        withExploration.mExploration =
+            ExplorationMeta{.mBranchOrderSeed = seed, .mWorkers = 4};
+        auto const explorationJson = toJson(withExploration);
+        REQUIRE(explorationJson["version"].asUInt64() ==
+                static_cast<uint64_t>(TRACE_BUNDLE_VERSION));
+        REQUIRE(
+            explorationJson["exploration"]["branch_order_seed"].asUInt64() ==
+            seed);
+        REQUIRE(explorationJson["exploration"]["workers"].asUInt64() == 4);
+
+        auto const explorationReloaded = traceBundleFromJson(explorationJson);
+        REQUIRE(explorationReloaded.mExploration.has_value());
+        REQUIRE(explorationReloaded.mExploration->mBranchOrderSeed == seed);
+        REQUIRE(explorationReloaded.mExploration->mWorkers == 4);
+    }
 
     ScpDporDefaultScenario reloadedScenario(reloaded.mOptions);
     auto const inspection = reloadedScenario.inspectThreadReplayTrace(

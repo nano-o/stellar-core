@@ -117,11 +117,66 @@ build_dpor() {
     stellar-core-dpor-tests scp-dpor-investigation
 }
 
+expect_cli_success() { # logname, exact-output, args...
+  local logname=$1
+  local expected=$2
+  shift 2
+  local output rc
+  output=$("$INVESTIGATION_BIN" "$@" 2>&1)
+  rc=$?
+  printf '%s\n' "$output" > "$ART/$logname.log"
+  if [ "$rc" -ne 0 ] || [ "$output" != "$expected" ]; then
+    echo "branch-order CLI success check failed: $logname (exit $rc)" >&2
+    diff -u <(printf '%s\n' "$expected") <(printf '%s\n' "$output") >&2
+    return 1
+  fi
+}
+
+expect_cli_failure() { # logname, expected-substring, args...
+  local logname=$1
+  local expected=$2
+  shift 2
+  local output rc
+  output=$("$INVESTIGATION_BIN" "$@" 2>&1)
+  rc=$?
+  printf '%s\n' "$output" > "$ART/$logname.log"
+  if [ "$rc" -eq 0 ] || [[ "$output" != *"$expected"* ]]; then
+    echo "branch-order CLI failure check failed: $logname (exit $rc)" >&2
+    cat "$ART/$logname.log" >&2
+    return 1
+  fi
+}
+
+check_branch_order_cli() {
+  echo "== branch-order CLI parsing and output"
+  expect_cli_success cli-no-seed \
+    "kind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1 thread-event-limit=0 max-thread-event-depth=3" \
+    --depth 6 || return 1
+  expect_cli_success cli-seed-zero \
+    $'branch-order-seed=0 workers=1\nkind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1 thread-event-limit=0 max-thread-event-depth=3' \
+    --branch-order-seed 0 --depth 6 || return 1
+  expect_cli_success cli-seed-max \
+    $'branch-order-seed=18446744073709551615 workers=4\nkind=all-explored executions=1 full=0 blocked=0 error=0 depth-limit=1 thread-event-limit=0 max-thread-event-depth=3' \
+    --branch-order-seed 18446744073709551615 --workers 4 --depth 6 || return 1
+  expect_cli_failure cli-seed-overflow "--branch-order-seed value out of range" \
+    --branch-order-seed 18446744073709551616 || return 1
+  expect_cli_failure cli-seed-negative "--branch-order-seed requires an unsigned integer" \
+    --branch-order-seed -1 || return 1
+  expect_cli_failure cli-seed-trailing "--branch-order-seed requires an unsigned integer" \
+    --branch-order-seed 1x || return 1
+  expect_cli_failure cli-seed-replay \
+    "--branch-order-seed cannot be used with --replay-trace-json" \
+    --branch-order-seed 1 --replay-trace-json does-not-exist.json \
+    --replay-node all || return 1
+  echo "   ok"
+}
+
 manifest "$@"
 
 case "$MODE" in
   smoke)
     build_dpor || finish 1
+    check_branch_order_cli || finish 1
     run_logged smoke-tests "$TESTS_BIN" "[scp][dpor][smoke]" || finish 1
     finish 0
     ;;
@@ -141,6 +196,7 @@ case "$MODE" in
 
   full)
     build_dpor || finish 1
+    check_branch_order_cli || finish 1
     run_logged smoke-tests "$TESTS_BIN" "[scp][dpor][smoke]" || finish 1
     run_logged full-scp-tests "$TESTS_BIN" "[scp]" || finish 1
     finish 0

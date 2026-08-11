@@ -59,6 +59,7 @@ struct CommandLineOptions
     std::optional<stellar::scpdpor::ScpDporDefaultScenario::InitialValueMode>
         mInitMode;
     std::size_t mWorkers{1};
+    std::optional<uint64_t> mBranchOrderSeed;
     std::size_t mDepth{12};
     bool mDepthExplicit{false};
     // Absent means unlimited, which is also how -1 is spelled on the command
@@ -145,6 +146,11 @@ printUsage(char const* argv0)
               << "      Use the host parallelism shortcut"
               << " (default: off; this machine: " << defaultParallelWorkers()
               << " workers)\n"
+              << "  --branch-order-seed N\n"
+              << "      Exhaustively randomize sibling traversal priority"
+              << " with a deterministic unsigned 64-bit seed. Works with"
+              << " --workers but does not uniformly sample executions; an"
+              << " incomplete run proves nothing (default: disabled)\n"
               << "  --max-queued-tasks N\n"
               << "      Parallel worker queue budget; 0 uses DPOR default"
               << " (default: " << parallelDefaults.max_queued_tasks << ")\n"
@@ -652,12 +658,14 @@ printThreadReplayTrace(
             break;
         case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
             Kind::NondeterministicChoice:
-            printThreadAction(out, stellar::scpdpor::ThreadAction{*step.mChoice});
+            printThreadAction(out,
+                              stellar::scpdpor::ThreadAction{*step.mChoice});
             out << " selected=" << formatObservedValue(*step.mObservedValue);
             break;
         case stellar::scpdpor::ScpDporDefaultScenario::ThreadReplayTraceStep::
             Kind::Receive:
-            printThreadAction(out, stellar::scpdpor::ThreadAction{*step.mReceive});
+            printThreadAction(out,
+                              stellar::scpdpor::ThreadAction{*step.mReceive});
             out << " observed=" << formatObservedValue(*step.mObservedValue);
             break;
         }
@@ -857,8 +865,7 @@ appendTruncationHints(std::ostream& out, VerifyResult const& result,
         (style == TruncationHintStyle::PropertyInconclusive ||
          options.mFailOnFirstBlocked))
     {
-        out << "; " << result.terminals.depth_limit()
-            << " execution(s) hit ";
+        out << "; " << result.terminals.depth_limit() << " execution(s) hit ";
         if (style == TruncationHintStyle::CaptureNoMatch)
         {
             out << "the depth limit, so a greater --depth may reach a blocked"
@@ -913,6 +920,11 @@ parseOptions(char const* argv0, int argc, char* argv[])
         if (arg == "--workers" && i + 1 < argc)
         {
             options.mWorkers = parseUnsigned<std::size_t>(arg, argv[++i]);
+            continue;
+        }
+        if (arg == "--branch-order-seed" && i + 1 < argc)
+        {
+            options.mBranchOrderSeed = parseUnsigned<uint64_t>(arg, argv[++i]);
             continue;
         }
         if (arg == "--max-queued-tasks" && i + 1 < argc)
@@ -1134,6 +1146,12 @@ parseOptions(char const* argv0, int argc, char* argv[])
         throw std::invalid_argument(
             "--replay-node requires --replay-trace-json");
     }
+    if (options.mReplayTraceJsonPath && options.mBranchOrderSeed)
+    {
+        throw std::invalid_argument(
+            "--branch-order-seed cannot be used with --replay-trace-json; "
+            "the stored thread traces are the replay input");
+    }
     // Bound the nomination-round timer loop by default when nomination timers
     // are enabled; an explicit --max-nomination-timers-round wins.
     if (options.mWithNominationTimers && !options.mMaxNominationTimersRound)
@@ -1181,6 +1199,18 @@ main(int argc, char* argv[])
         config.max_depth = options.mDepth;
         config.max_thread_events = options.mThreadEventDepth.value_or(0);
         config.communication_model = options.mCommunicationModel;
+        if (options.mBranchOrderSeed)
+        {
+            config.branch_order = dpor::algo::BranchOrderOptions{
+                .seed = *options.mBranchOrderSeed};
+        }
+        std::optional<stellar::scpdpor::ExplorationMeta> explorationMeta;
+        if (options.mBranchOrderSeed)
+        {
+            explorationMeta = stellar::scpdpor::ExplorationMeta{
+                .mBranchOrderSeed = *options.mBranchOrderSeed,
+                .mWorkers = options.mWorkers};
+        }
         if (options.mPrintStatsInterval)
         {
             config.progress_report_interval =
@@ -1226,7 +1256,8 @@ main(int argc, char* argv[])
                                     stellar::scpdpor::TerminalMeta{
                                         .mKind = kind,
                                         .mFailureMessage = failureMessage,
-                                        .mFocusNodeIndex = focusNodeIndex});
+                                        .mFocusNodeIndex = focusNodeIndex},
+                                    explorationMeta);
                             writeTraceBundleToTraceDir(options.mTraceDir,
                                                        bundle);
                             dumpLiveExecution(std::cout, scenario, bundle);
@@ -1368,6 +1399,13 @@ main(int argc, char* argv[])
                 *options.mProgressPollIntervalSteps;
         }
 
+        if (options.mBranchOrderSeed)
+        {
+            std::cout << "branch-order-seed=" << *options.mBranchOrderSeed
+                      << " workers=" << options.mWorkers << "\n"
+                      << std::flush;
+        }
+
         auto const result =
             options.mWorkers > 1
                 ? dpor::algo::verify_parallel(config, parallelOptions)
@@ -1415,9 +1453,7 @@ main(int argc, char* argv[])
         // is distinct from the exit 1 used for genuine violations, and a real
         // violation has already returned 1 above.
         if ((options.mMustExternalize || options.mCheckAgreement) &&
-            result.terminals.full() +
-                    result.terminals.blocked() ==
-                0)
+            result.terminals.full() + result.terminals.blocked() == 0)
         {
             char const* const requested = options.mMustExternalize
                                               ? "--must-externalize"

@@ -2,15 +2,19 @@
 
 ## Status
 
-This document proposes a smaller first step toward better bug finding than the
+Implemented and verified on 2026-08-11. CPP-DPOR commit `0b2b788` provides the
+engine API and traversal semantics; stellar-core pins that commit and exposes
+the runner/trace integration; bristlecone commit `c62c555` carries the matching
+Rust/C ABI, CLI, provenance, tests, documentation, and coordinated pin.
+
+This document records the smaller first step toward better bug finding than the
 branch-sampling designs in `dpor-branch-sampling-plan.md`,
 `dpor-branch-sampling-v2-plan.md`, and
 `dpor-branch-sampling-simplified-plan.md`.
 
-If adopted, this is the implementation plan for the initial feature. The
-sampling documents remain design history and possible follow-up work; this
-plan does not require their sampling, weighting, estimation, or campaign
-machinery.
+The sampling documents remain design history and possible follow-up work; this
+implementation does not require their sampling, weighting, estimation, or
+campaign machinery.
 
 The findings from the 2026-08-07 review and the 2026-08-11 post-simplification
 review have been incorporated into this plan. The latter refreshes the engine

@@ -54,6 +54,12 @@ The persisted replay input is not a full schedule. It stores:
 - terminal metadata such as terminal kind, failure message, and focus node
 - a positional array containing one raw `ThreadTrace` per node
 
+When the failure was discovered with `--branch-order-seed N`, the bundle also
+stores an optional top-level `exploration` object containing the unsigned
+64-bit seed and effective worker count. This is discovery provenance, not part
+of the replay input. An unseeded capture omits the object; seed zero is present
+and enabled rather than treated as a sentinel.
+
 Trace bundles are written and read exclusively at schema version 8. This is an
 intentional compatibility break approved for the simplification work: there is
 no converter, and versions 1 through 7 must be recaptured with the current
@@ -67,6 +73,14 @@ options and observations retain the current txset semantics: status modes are
 `always-valid`, `downloading-then-valid`, or `always-downloading`; choices are
 `valid` or `downloading`; and replay records at most one status and one wait
 time choice per value per external event.
+
+Current readers accept version-8 bundles both with and without the optional
+`exploration` object, and older name-based v8 readers ignore it. The schema
+therefore remains version 8. `--branch-order-seed` is rejected together with
+`--replay-trace-json`: replay never reruns DPOR, and silently accepting a new
+traversal order there would be misleading. In parallel mode the seed fixes each
+frame's sibling priority but not the order in which worker callbacks arrive;
+the stored per-thread traces are what make a captured result reproducible.
 
 This matches the existing replay seam:
 

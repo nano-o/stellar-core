@@ -7,6 +7,8 @@
 #include "lib/json/json.h"
 #include "scp/test/ScpDporDefaultScenario.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string_view>
@@ -27,12 +29,19 @@ struct TerminalMeta
     std::size_t mFocusNodeIndex{};
 };
 
+struct ExplorationMeta
+{
+    uint64_t mBranchOrderSeed{};
+    std::size_t mWorkers{1};
+};
+
 struct TraceBundle
 {
     int mVersion{TRACE_BUNDLE_VERSION};
     ScpDporDefaultScenario::Options mOptions;
     dpor::model::CommunicationModel mCommunicationModel{
         dpor::model::CommunicationModel::Async};
+    std::optional<ExplorationMeta> mExploration;
     TerminalMeta mTerminal;
     // Positional by node index; node N's trace is at index N.
     std::vector<ThreadTrace> mThreadTraces;
@@ -82,7 +91,8 @@ TraceBundle
 makeTraceBundle(ScpDporDefaultScenario const& scenario,
                 dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
                 dpor::model::CommunicationModel communicationModel,
-                TerminalMeta terminal);
+                TerminalMeta terminal,
+                std::optional<ExplorationMeta> exploration = std::nullopt);
 
 void writeTraceBundle(std::filesystem::path const& path,
                       TraceBundle const& bundle);

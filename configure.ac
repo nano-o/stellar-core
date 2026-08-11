@@ -587,6 +587,9 @@ int main()
 {
     dpor::algo::DporConfig config;
     config.max_thread_events = std::size_t(1);
+    dpor::algo::BranchOrderOptions branch_order;
+    branch_order.seed = 0;
+    config.branch_order = branch_order;
     config.program.set_thread(
         0, [](const dpor::algo::ThreadTrace&, std::size_t)
                -> std::optional<dpor::model::ThreadAction> {
@@ -601,7 +604,7 @@ int main()
 ]])],
     [AC_MSG_RESULT([yes])],
     [AC_MSG_RESULT([no])
-     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old or too new for this probe (needs the encapsulated Program registration/access API, dpor::algo::TerminalExecutionKind::ThreadEventLimit, DporConfigT::max_thread_events, and VerifyResult::terminals); update it to the pinned submodule revision of https://github.com/nano-o/CPP-DPOR.git])])
+     AC_MSG_ERROR([the DPOR checkout at $DPOR_DIR is too old or too new for this probe (needs the encapsulated Program registration/access API, dpor::algo::TerminalExecutionKind::ThreadEventLimit, DporConfigT::max_thread_events, dpor::algo::BranchOrderOptions, DporConfigT::branch_order, and VerifyResult::terminals; minimum CPP-DPOR commit 0b2b788); update it to the pinned submodule revision of https://github.com/nano-o/CPP-DPOR.git])])
   CPPFLAGS="$stellar_core_save_CPPFLAGS"
   CXXFLAGS="$stellar_core_save_CXXFLAGS"
 ])

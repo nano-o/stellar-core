@@ -1,13 +1,13 @@
 # DPOR Integration Status
 
-Status snapshot as of 2026-08-10 for branch `dpor-on-master`, with
-`external/dpor` pinned to DPOR library commit `f54b793`. Entries below that
+Status snapshot as of 2026-08-11 for branch `dpor-on-master`, with
+`external/dpor` pinned to DPOR library commit `0b2b788`. Entries below that
 quote an earlier engine pin are dated verification records, not stale claims
 about the current pin.
 
 The engine at this pin has been through the simplification refactoring
 (batches 0-7; see `external/dpor/docs/simplification_refactoring_progress.md`).
-Three changes there are visible from this repo:
+Four changes there are visible from this repo:
 
 - `VerifyResult` reports its per-kind terminal counts through a `terminals`
   member — `result.terminals.full()`, `.blocked()`, `.error()`,
@@ -21,6 +21,12 @@ Three changes there are visible from this repo:
 - `ProgramT` now keeps its thread storage private. The harness uses
   `set_thread`, `thread_function`, and `thread_count`; the configure-time API
   probe also checks this boundary so a mismatched engine fails before build.
+- `DporConfigT::branch_order` accepts an optional
+  `BranchOrderOptions{seed}`. When enabled, the engine deterministically
+  permutes exhaustive ND, receive-source/bottom, and send-revisit/continuation
+  sibling order using path-local integer state that is safe to hand between
+  parallel workers. Absence leaves the old traversal hot path unchanged;
+  seed zero is enabled and distinct from absence.
 
 The DPOR build targets **post-CAP-0083 (empty-tx-set) `stellar-core`**, which
 is now simply `master`: upstream's "Ungate CAP-0083 and CAP-0085, bump to
@@ -106,14 +112,15 @@ library or harness errors.
   `<dpor/algo/dpor.hpp>` with the configured target flags, and one that
   checks the encapsulated `ProgramT` registration/access API,
   `static_assert`s on `dpor::algo::TerminalExecutionKind::Blocked`, and reads
-  `VerifyResult::terminals` so an engine checkout that predates the required
+  `VerifyResult::terminals`, `BranchOrderOptions`, and
+  `DporConfigT::branch_order` so an engine checkout that predates the required
   program boundary, blocked-execution API, per-thread event bound, or
-  `terminals` breakdown fails configure with an explicit message pointing at
-  the pinned submodule revision.
+  `terminals` breakdown or seeded-order API fails configure with an explicit
+  feature list and the minimum commit `0b2b788`.
 - Configure looks for DPOR in `external/dpor` first and `../dpor` second. The
   default DPOR target flags are `-std=c++20 -DFMT_CONSTEVAL=
   -DSTELLAR_DISABLE_LOGGING`.
-- `external/dpor` is a submodule pinned to CPP-DPOR commit `f54b793`. Earlier pins sat on the `dpor-perf` branch, off
+- `external/dpor` is a submodule pinned to CPP-DPOR commit `0b2b788`. Earlier pins sat on the `dpor-perf` branch, off
   `main`, so that branch was the only thing keeping them fetchable; `main` has
   since been fast-forwarded onto that line, and `dpor-perf` is now a stale
   pointer at the older `febae6f`. The `--with-dpor-dir` override remains
@@ -352,6 +359,21 @@ it after confirming no build is active), then rerun configure.
       behavior for every existing workflow
     - prefer an explicit `--workers N`. See
       [Parallel scaling](#parallel-scaling) for what to set it to.
+  - `--branch-order-seed N`
+    - parses the full unsigned 64-bit range strictly; zero is a valid enabled
+      seed, while omission preserves the historical order and output
+    - exhaustively changes sibling priority rather than sampling or pruning;
+      a completed run has the normal exhaustive meaning, while an incomplete
+      run proves nothing about the unexplored suffix
+    - works in serial and parallel modes. A fixed sequential seed repeats its
+      terminal order for the same engine revision and configuration. Parallel
+      terminal callback order remains scheduler-dependent, so reproduction
+      uses the saved trace rather than the seed.
+    - when enabled, the runner prints and flushes
+      `branch-order-seed=N workers=W` immediately before exploration. With no
+      seed, output remains unchanged.
+    - rejected with `--replay-trace-json`, because replay consumes saved thread
+      traces and does not invoke DPOR.
   - `--replay-slots-per-node N`
     - positive per-validator, per-worker replay-cache capacity; defaults to 64
     - this is an investigation/performance option, not a scenario option, and
@@ -429,6 +451,12 @@ it after confirming no build is active), then rerun configure.
   prints the chosen path as `trace-json=...`, can reload that artifact for
   deterministic replay without rerunning DPOR, and exits nonzero with the
   recorded failure message.
+- A seeded capture adds optional discovery provenance under the version-8
+  top-level `exploration` object: `branch_order_seed` and the effective
+  `workers`. Unseeded bundles omit the object, including when read and written
+  by current code. The metadata is not replay input; v8 bundles without it
+  remain valid, and seed zero and `UINT64_MAX` round-trip as JSON unsigned
+  integers.
 - The summary line and `--print-stats` progress lines report the blocked
   count (`blocked=` / `blocked_executions=`) alongside full, error, and
   depth-limit counts, and trace bundles serialize the `blocked` terminal kind.
@@ -625,6 +653,36 @@ the conclusion the table exists to record, monotone improvement through 32
 workers, is unchanged.
 
 ## Verification in this workspace
+
+Seeded exhaustive branch ordering was verified on 2026-08-11 against the
+pinned `0b2b788` engine on `addict-glad-64ta`:
+
+- CPP-DPOR's `full`, `stress`, and `axes` gates passed, including ASAN/UBSAN,
+  TSAN, 240 repeated stress runs, fixed permutation fixtures, serial/one-worker
+  order equality, parallel exact-set comparisons, and stop/exception unwind.
+- The configure API probe accepted the new pin; both dedicated binaries built
+  with the required nsc/sccache configuration.
+- `dpor-gate.sh smoke`, `check`, and `full` passed. The smoke suite reported
+  373 assertions in 52 cases and the full `[scp]` suite 1,608,058 assertions in
+  62 cases.
+- The bounded SCP regression compared unseeded, seed 0, seed 1,
+  `UINT64_MAX`, repeated serial seed 1, and four-worker seed 1 runs. All six
+  produced the same 12 distinct terminal signatures and terminal-kind counts;
+  the repeated serial order matched, while seeds 0 and 1 differed.
+- All 14 `bench-dpor.sh check` lines were byte-identical without a seed and
+  with seed 1, including the 306,003-execution `CD` case and the mixed
+  full/blocked/thread-event-limit `CE` case.
+- A seed-0 first-terminal bundle recorded its optional exploration metadata
+  and replayed all nodes successfully without a command-line seed. Strict CLI
+  gate cases covered zero, `UINT64_MAX`, overflow, negative and trailing input,
+  and the replay conflict.
+- Engine 2PC measurements found about 0.3% dormant overhead and about 13.7%
+  enabled overhead over 7,262,928 terminals. Stellar's three paired
+  best-of-three batches at eight workers had unseeded/seed-1 medians of
+  0.42/0.47 s, 0.90/0.92 s, 2.48/2.95 s, and 0.74/0.88 s for S1-S4; baseline
+  spread was large on S3, so these are ordering-cost observations rather than
+  broad regression claims. The paired 60-second head windows reported about
+  191k/s unseeded and 180k/s seeded.
 
 The post-refactoring review remediation was reverified on 2026-08-10 against
 the pinned `f54b793` engine. A fresh configure accepted the strengthened

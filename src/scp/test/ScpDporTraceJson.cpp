@@ -116,6 +116,17 @@ requireUint64(Json::Value const& value, std::string const& context)
     return value.asUInt64();
 }
 
+std::size_t
+requireSize(Json::Value const& value, std::string const& context)
+{
+    auto const parsed = requireUint64(value, context);
+    if (parsed > std::numeric_limits<std::size_t>::max())
+    {
+        throw std::invalid_argument(context + " is out of size_t range");
+    }
+    return static_cast<std::size_t>(parsed);
+}
+
 int64_t
 requireInt64(Json::Value const& value, std::string const& context)
 {
@@ -827,6 +838,15 @@ toJson(TraceBundle const& bundle)
     root["terminal"] = toJson(bundle.mTerminal);
     root["communication_model"] =
         std::string(communicationModelName(bundle.mCommunicationModel));
+    if (bundle.mExploration)
+    {
+        auto& exploration = root["exploration"];
+        exploration = Json::Value(Json::objectValue);
+        exploration["branch_order_seed"] =
+            static_cast<Json::UInt64>(bundle.mExploration->mBranchOrderSeed);
+        exploration["workers"] =
+            static_cast<Json::UInt64>(bundle.mExploration->mWorkers);
+    }
 
     auto& threadTraces = root["thread_traces"];
     threadTraces = Json::Value(Json::arrayValue);
@@ -880,6 +900,19 @@ traceBundleFromJson(Json::Value const& value)
         bundle.mCommunicationModel = parseCommunicationModel(requireString(
             object["communication_model"], "trace bundle.communication_model"));
     }
+    if (object.isMember("exploration"))
+    {
+        auto const& exploration =
+            requireObject(object["exploration"], "trace bundle.exploration");
+        bundle.mExploration = ExplorationMeta{
+            .mBranchOrderSeed =
+                requireUint64(requireMember(exploration, "branch_order_seed",
+                                            "trace bundle.exploration"),
+                              "trace bundle.exploration.branch_order_seed"),
+            .mWorkers = requireSize(requireMember(exploration, "workers",
+                                                  "trace bundle.exploration"),
+                                    "trace bundle.exploration.workers")};
+    }
 
     auto const& threadTraces =
         requireArray(requireMember(object, "thread_traces", "trace bundle"),
@@ -898,11 +931,13 @@ TraceBundle
 makeTraceBundle(ScpDporDefaultScenario const& scenario,
                 dpor::algo::TerminalExecutionT<ScpDporValue> const& execution,
                 dpor::model::CommunicationModel communicationModel,
-                TerminalMeta terminal)
+                TerminalMeta terminal,
+                std::optional<ExplorationMeta> exploration)
 {
     TraceBundle bundle;
     bundle.mOptions = scenario.options();
     bundle.mCommunicationModel = communicationModel;
+    bundle.mExploration = exploration;
     bundle.mTerminal = std::move(terminal);
     bundle.mThreadTraces.reserve(scenario.options().mValidators.size());
     for (std::size_t nodeIndex = 0;

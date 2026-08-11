@@ -246,7 +246,8 @@ SSH instead, override the push URL locally rather than editing `.gitmodules`:
 `git -C external/dpor remote set-url --push origin git@github.com:nano-o/CPP-DPOR.git`.
 
 DPOR is header-only C++20 and pinned as the `external/dpor` submodule at
-commit `562f5be`, which is the tip of upstream `main`. (The pin used to sit on
+commit `0b2b788`, which contains seeded exhaustive branch ordering and is the
+tip of upstream `main`. (The pin used to sit on
 the `dpor-perf` branch, off `main`, so that branch was the only thing keeping
 it reachable. `main` was fast-forwarded onto that line, so the pin is now on
 `main` and `dpor-perf` is a stale pointer at the older `febae6f`.) Initialize
