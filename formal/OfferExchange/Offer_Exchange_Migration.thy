@@ -305,9 +305,9 @@ text \<open>
   \<^item> Full-take and existential witness: @{thm [source]
     exchange_v10_nonstaying_matches_positive_adjustment}, @{thm [source]
     exchange_against_unlimited_counterparty_does_not_leave_wheat}, @{thm
-    [source] maximum_capacity_taker_equations}, and the proof structures of
-    @{thm [source] posted_offers_remain_takeable_exact} and @{thm [source]
-    fully_taken_posted_offer_exchanges_posted_amount_exact}.
+    [source] maximum_capacity_taker_equations}, and the proof structure of
+    @{thm [source]
+    fully_taken_posted_offer_exchanges_posted_amount_exact_any_symmetric}.
 \<close>
 
 subsection \<open>Persistent liability compatibility\<close>

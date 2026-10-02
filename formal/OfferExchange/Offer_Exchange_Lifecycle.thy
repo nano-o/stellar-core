@@ -1312,13 +1312,10 @@ text \<open>
   balance or limit changes, provided it remains well formed and still covers
   the posted offer's liabilities.  The successful fill may depend
   on the changed maker state; only existence and positivity are required.
-  \<open>posted_offers_remain_takeable_exact\<close> below proves the property at the mixed
-  record
-  @{term "\<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"};
-  the migration theory strengthens it to @{const repaired_exchange_options}
-  and restates it through the protocol mapping as
-  \<open>posted_offers_remain_takeable_repaired\<close> and
-  \<open>posted_offers_remain_takeable_p29\<close>.
+  The migration theory proves the property at
+  @{const repaired_exchange_options} as
+  \<open>posted_offers_remain_takeable_repaired\<close> and restates it through the
+  protocol mapping as \<open>posted_offers_remain_takeable_p29\<close>.
 \<close>
 
 subsubsection \<open>Exact amount when a posted offer is fully taken\<close>
@@ -1491,16 +1488,6 @@ proof -
   show ?thesis
     using favored unfolding result_record make_exchange_result_def by simp
 qed
-
-theorem rounding_favors_offer_that_stays_exact:
-  "rounding_favors_offer_that_stays \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
-  text \<open>
-    The preceding result is flag-independent, so instantiating the intended
-    property with the exact receive cap requires no additional arithmetic case.
-  \<close>
-  unfolding rounding_favors_offer_that_stays_def
-  using successful_exchange_favors_offer_that_stays
-  by blast
 
 subsubsection \<open>Unchanged-maker adjustment stability\<close>
 
@@ -2326,18 +2313,17 @@ proof -
     by simp
 qed
 
-subsubsection \<open>Takeability after maker-state changes\<close>
+subsubsection \<open>Release, replay and capacity lemmas for posted offers\<close>
 
 text \<open>
-  The third intended property is the changed-state liveness claim
-  @{term "posted_offers_remain_takeable \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"}.
-  This subsection contains its
-  supporting arithmetic and lifecycle lemmas and closes with the universal
-  theorem.  The proof first recovers the positive unlimited adjustment
-  represented by the posted offer and identifies its selling and buying
-  liabilities.  Liability coverage then exposes enough capacity after release
-  for the exact-cap adjustment and for all guarded balance movements.  An
-  unlimited well-formed taker witnesses a successful positive crossing.
+  These lemmas support the changed-state properties: the coverage and
+  fully-taken results below, and the protocol-29 takeability results of the
+  migration theory.  They recover the positive facts and the liabilities of
+  a successful post, show that liability coverage exposes enough capacity
+  after release for the posted offer and for all guarded balance movements,
+  and show that a positive adjustment result replays unchanged against
+  unlimited caps and against an exact receive cap that covers its booked
+  buying liability.
 \<close>
 lemma post_created_positive_facts:
   assumes post:
@@ -4597,276 +4583,6 @@ proof -
     using acquire adjusted_posted acquired_after by simp
 qed
 
-theorem posted_offers_remain_takeable_exact:
-  "posted_offers_remain_takeable \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
-text \<open>
-  Proof sketch: a successful post supplies positive prices and a positive
-  adjusted amount.  Liability coverage lets crossing release the posted
-  liabilities and leaves enough selling capacity for the entire offer and
-  enough exact receive capacity for its rounded payment, so the preventative
-  adjustment returns the posted amount unchanged.  Choose a taker with
-  maximum selling balance and buying limit.  Its crossing exchange is the
-  same positive adjustment calculation; the exchange bounds make every
-  guarded balance movement succeed, and consuming the full posted amount
-  leaves no liability to reacquire.
-\<close>
-proof -
-  show ?thesis
-    unfolding posted_offers_remain_takeable_def
-  proof (intro allI impI)
-    fix price_n price_d amount maker_at_post posted maker_after
-      maker_at_cross
-    assume lifecycle_premises:
-      "party_state_wf maker_at_post \<and>
-       party_state_wf maker_at_cross \<and>
-       post_offer price_n price_d amount maker_at_post \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-         Cxx_Ok (Post_Created posted maker_after) \<and>
-       maker_covers_offer_liabilities price_n price_d posted maker_at_cross"
-    then obtain post_wf cross_wf post cover where
-      post_wf: "party_state_wf maker_at_post"
-      and cross_wf: "party_state_wf maker_at_cross"
-      and post:
-        "post_offer price_n price_d amount maker_at_post \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok (Post_Created posted maker_after)"
-      and cover:
-        "maker_covers_offer_liabilities price_n price_d posted
-          maker_at_cross"
-      by blast
-    note positive = post_created_positive_facts [OF post]
-    have pn: "0 < sint price_n" and pd: "0 < sint price_d"
-      and amount_positive: "0 < sint amount"
-      and posted_positive: "0 < sint posted"
-      using positive by simp_all
-
-    note post' = post[unfolded post_offer_def preflight_offer_def Let_def]
-    obtain requested_buying where requested_buying:
-        "offer_buying_liabilities price_n price_d amount =
-          Cxx_Ok requested_buying"
-      using post'
-      by (cases "offer_buying_liabilities price_n price_d amount")
-         (simp_all split: if_splits)
-    obtain requested_selling where requested_selling:
-        "offer_selling_liabilities price_n price_d amount =
-          Cxx_Ok requested_selling"
-      using post' requested_buying
-      by (cases "offer_selling_liabilities price_n price_d amount")
-         (simp_all split: if_splits)
-    obtain adjusted where adjusted:
-        "adjust_offer_with_options price_n price_d
-           (signed_min64 amount (can_sell_at_most maker_at_post))
-           (can_buy_at_most maker_at_post) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok adjusted"
-      using post' requested_buying requested_selling
-      by (cases "adjust_offer_with_options price_n price_d
-           (signed_min64 amount (can_sell_at_most maker_at_post))
-           (can_buy_at_most maker_at_post) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>")
-         (simp_all split: if_splits)
-    obtain acquired where acquired:
-        "acquire_offer_liabilities price_n price_d adjusted maker_at_post =
-          Cxx_Ok acquired"
-      using post' requested_buying requested_selling adjusted
-      by (cases "acquire_offer_liabilities price_n price_d adjusted
-           maker_at_post")
-         (simp_all split: if_splits)
-    have adjusted_posted: "adjusted = posted"
-      using post' requested_buying requested_selling adjusted acquired
-      by (simp split: if_splits)
-    have posting_adjustment:
-        "adjust_offer_with_options price_n price_d
-           (signed_min64 amount (can_sell_at_most maker_at_post))
-           (can_buy_at_most maker_at_post) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok posted"
-      using adjusted adjusted_posted by simp
-
-    have post_sell_nonnegative:
-        "0 \<le> sint (can_sell_at_most maker_at_post)"
-      using can_sell_at_most_nonnegative [OF post_wf] .
-    have post_buy_nonnegative:
-        "0 \<le> sint (can_buy_at_most maker_at_post)"
-      using can_buy_at_most_nonnegative [OF post_wf] .
-    have posting_send_nonnegative:
-        "0 \<le> sint
-          (signed_min64 amount (can_sell_at_most maker_at_post))"
-      using amount_positive post_sell_nonnegative
-      by (auto simp add: signed_min64_def split: if_splits)
-    have unlimited_adjustment:
-        "adjust_offer_with_options price_n price_d posted int64_max \<lparr>exact_receive_cap = False, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok posted"
-      using positive_adjustment_replays_unlimited
-        [OF pn pd posting_send_nonnegative post_buy_nonnegative
-          posting_adjustment posted_positive] .
-
-    obtain selling buying released where selling:
-        "offer_selling_liabilities price_n price_d posted = Cxx_Ok selling"
-      and buying:
-        "offer_buying_liabilities price_n price_d posted = Cxx_Ok buying"
-      and release:
-        "release_offer_liabilities price_n price_d posted maker_at_cross =
-          Cxx_Ok released"
-      and released_wf: "party_state_wf released"
-      and selling_fits:
-        "sint selling \<le> sint (can_sell_at_most released)"
-      and buying_fits:
-        "sint buying \<le> sint (can_buy_at_most released)"
-      using covered_offer_release
-        [OF pn pd less_imp_le[OF posted_positive] cross_wf cover]
-      by blast
-    have selling_posted: "selling = posted"
-      and buying_positive: "0 < sint buying"
-      using unlimited_positive_adjustment_identifies_liabilities
-        [OF posted_positive unlimited_adjustment selling buying]
-      by simp_all
-    have posted_fits:
-        "sint posted \<le> sint (can_sell_at_most released)"
-      using selling_fits selling_posted by simp
-    have released_buy_nonnegative:
-        "0 \<le> sint (can_buy_at_most released)"
-      using can_buy_at_most_nonnegative [OF released_wf] .
-    have maker_send:
-        "signed_min64 posted (can_sell_at_most released) = posted"
-      using posted_fits by (simp add: signed_min64_def)
-    have preventative_adjustment:
-        "adjust_offer_with_options price_n price_d posted (can_buy_at_most released) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok posted"
-      using exact_cap_replays_unlimited_positive_adjustment
-        [OF pn pd posted_positive released_buy_nonnegative
-          unlimited_adjustment buying buying_fits] .
-
-    let ?taker =
-      "\<lparr>sell_balance = int64_max, sell_liabilities = 0,
-        buy_limit = int64_max, buy_balance = 0, buy_liabilities = 0\<rparr>"
-    have taker_wf: "party_state_wf ?taker" by eval
-    have taker_buy: "can_buy_at_most ?taker = int64_max" by eval
-    have taker_sell: "can_sell_at_most ?taker = int64_max" by eval
-    have taker_buy_positive: "0 < sint (can_buy_at_most ?taker)"
-      using taker_buy by (simp add: int64_max_def)
-    have taker_send:
-        "signed_min64 int64_max (can_sell_at_most ?taker) = int64_max"
-      using taker_sell by (simp add: signed_min64_def)
-    have taker_send_positive:
-        "0 < sint
-          (signed_min64 int64_max (can_sell_at_most ?taker))"
-      using taker_send by (simp add: int64_max_def)
-
-    obtain exchanged where exchange:
-        "exchange_v10_with_options price_n price_d posted int64_max int64_max
-           (can_buy_at_most released) Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok exchanged"
-      and wheat: "num_wheat_received exchanged = posted"
-      using preventative_adjustment
-      by (cases "exchange_v10_with_options price_n price_d posted int64_max int64_max
-           (can_buy_at_most released) Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>")
-         (simp_all add: adjust_offer_with_options_def)
-    have wheat_positive:
-        "0 < sint (num_wheat_received exchanged)"
-      using posted_positive wheat by simp
-    have sheep_positive:
-        "0 < sint (num_sheep_send exchanged)"
-      using exchange_normal_positive_wheat_has_positive_sheep
-        [OF exchange wheat_positive] .
-    note exchange_bounds =
-      exchange_normal_positive_result_bounds_any_cap
-        [OF exchange wheat_positive]
-    have sheep_fits_maker:
-        "sint (num_sheep_send exchanged) \<le>
-          sint (can_buy_at_most released)"
-      using exchange_bounds(2) by simp
-    have wheat_fits_maker:
-        "sint (num_wheat_received exchanged) \<le>
-          sint (can_sell_at_most released)"
-      using wheat posted_fits by simp
-    have wheat_fits_taker:
-        "sint (num_wheat_received exchanged) \<le>
-          sint (can_buy_at_most ?taker)"
-      using sint64_upper_bound[of "num_wheat_received exchanged"] taker_buy
-      by (simp add: int64_max_def)
-    have sheep_fits_taker:
-        "sint (num_sheep_send exchanged) \<le>
-          sint (can_sell_at_most ?taker)"
-      using sint64_upper_bound[of "num_sheep_send exchanged"] taker_sell
-      by (simp add: int64_max_def)
-
-    obtain maker_credited where maker_receive:
-        "party_receive_buy_asset released (num_sheep_send exchanged) =
-          Cxx_Ok maker_credited"
-      and maker_credited_wf: "party_state_wf maker_credited"
-      and maker_sell_unchanged:
-        "can_sell_at_most maker_credited = can_sell_at_most released"
-      using party_receive_within_capacity
-        [OF released_wf sheep_positive sheep_fits_maker]
-      by blast
-    have wheat_fits_maker_credited:
-        "sint (num_wheat_received exchanged) \<le>
-          sint (can_sell_at_most maker_credited)"
-      using wheat_fits_maker maker_sell_unchanged by simp
-    obtain maker_moved where maker_spend:
-        "party_spend_sell_asset maker_credited
-           (num_wheat_received exchanged) = Cxx_Ok maker_moved"
-      and maker_moved_wf: "party_state_wf maker_moved"
-      using party_spend_within_capacity
-        [OF maker_credited_wf wheat_positive wheat_fits_maker_credited]
-      by blast
-    obtain taker_credited where taker_receive:
-        "party_receive_buy_asset ?taker (num_wheat_received exchanged) =
-          Cxx_Ok taker_credited"
-      and taker_credited_wf: "party_state_wf taker_credited"
-      and taker_sell_unchanged:
-        "can_sell_at_most taker_credited = can_sell_at_most ?taker"
-      using party_receive_within_capacity
-        [OF taker_wf wheat_positive wheat_fits_taker]
-      by blast
-    have sheep_fits_taker_credited:
-        "sint (num_sheep_send exchanged) \<le>
-          sint (can_sell_at_most taker_credited)"
-      using sheep_fits_taker taker_sell_unchanged by simp
-    obtain taker_after where taker_spend:
-        "party_spend_sell_asset taker_credited (num_sheep_send exchanged) =
-          Cxx_Ok taker_after"
-      and taker_after_wf: "party_state_wf taker_after"
-      using party_spend_within_capacity
-        [OF taker_credited_wf sheep_positive sheep_fits_taker_credited]
-      by blast
-    have no_stays: "\<not> result_wheat_stays exchanged"
-      using exchange_against_unlimited_counterparty_does_not_leave_wheat
-        [OF pn pd less_imp_le[OF posted_positive]
-          released_buy_nonnegative exchange] .
-
-    let ?crossed =
-      "make_cross_result (num_wheat_received exchanged)
-         (num_sheep_send exchanged) (result_wheat_stays exchanged) 0
-         maker_moved taker_after"
-    have crossed:
-        "cross_offer_v10 price_n price_d posted maker_at_cross ?taker
-           int64_max Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok ?crossed"
-      using taker_buy taker_sell taker_send release maker_send
-        preventative_adjustment exchange maker_receive maker_spend
-        taker_receive taker_spend no_stays
-      by (simp add: cross_offer_v10_def Let_def int64_max_def)
-    show
-      "\<exists>taker taker_amount crossed.
-        party_state_wf taker \<and>
-        0 < sint (can_buy_at_most taker) \<and>
-        0 < sint
-          (signed_min64 taker_amount (can_sell_at_most taker)) \<and>
-        cross_offer_v10 price_n price_d posted maker_at_cross taker
-          taker_amount Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok crossed \<and>
-        0 < sint (cross_wheat_received crossed) \<and>
-        0 < sint (cross_sheep_send crossed)"
-      using taker_wf taker_buy_positive taker_send_positive crossed
-        wheat_positive sheep_positive
-      by (intro exI[of _ ?taker] exI[of _ int64_max] exI[of _ ?crossed])
-         (simp add: make_cross_result_def)
-  qed
-qed
-
-subsubsection \<open>Coverage implies adjustment stability with the exact receive cap\<close>
-
-text \<open>
-  The proof factors the adjustment prefix already used by the exact-cap
-  takeability theorem.  The symmetric maximality repair above does
-  not affect this result: @{const adjust_offer_with_options} crosses against an unlimited
-  counteroffer, so the wheat offer never stays and the repaired wheat-stays
-  branch is unreachable.
-\<close>
-
 lemma post_created_replays_unlimited:
   assumes post_wf: "party_state_wf maker_at_post"
     and post:
@@ -4939,103 +4655,6 @@ proof -
     using positive_adjustment_replays_unlimited
       [OF pn pd posting_send_nonnegative post_buy_nonnegative
         posting_adjustment posted_positive] .
-qed
-
-theorem cover_implies_adjust_stable_exact:
-  "cover_implies_adjust_stable \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
-  text \<open>
-    Proof sketch: a successful post can be replayed as an unlimited adjustment
-    returning the posted amount.  Liability coverage and release expose enough
-    selling capacity for that amount and enough buying capacity for its booked
-    rounded payment.  The exact receive cap turns those two capacity bounds
-    back into the same adjustment result, so the crossing-time preventative
-    adjustment is the identity.
-  \<close>
-proof -
-  show ?thesis
-    unfolding cover_implies_adjust_stable_def
-  proof (intro allI impI)
-    fix price_n price_d amount maker_at_post posted maker_after
-      maker_at_cross released
-    assume lifecycle_premises:
-      "party_state_wf maker_at_post \<and>
-       party_state_wf maker_at_cross \<and>
-       post_offer price_n price_d amount maker_at_post \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-         Cxx_Ok (Post_Created posted maker_after) \<and>
-       maker_covers_offer_liabilities price_n price_d posted
-         maker_at_cross \<and>
-       release_offer_liabilities price_n price_d posted maker_at_cross =
-         Cxx_Ok released"
-    have post_wf: "party_state_wf maker_at_post"
-      using lifecycle_premises by blast
-    have cross_wf: "party_state_wf maker_at_cross"
-      using lifecycle_premises by blast
-    have post:
-        "post_offer price_n price_d amount maker_at_post \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok (Post_Created posted maker_after)"
-      using lifecycle_premises by blast
-    have cover:
-        "maker_covers_offer_liabilities price_n price_d posted maker_at_cross"
-      using lifecycle_premises by blast
-    have release:
-        "release_offer_liabilities price_n price_d posted maker_at_cross =
-          Cxx_Ok released"
-      using lifecycle_premises by blast
-    note positive = post_created_positive_facts [OF post]
-    have pn: "0 < sint price_n" and pd: "0 < sint price_d"
-      and posted_positive: "0 < sint posted"
-      using positive by simp_all
-    have unlimited_adjustment:
-        "adjust_offer_with_options price_n price_d posted int64_max \<lparr>exact_receive_cap = False, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok posted"
-      using post_created_replays_unlimited [OF post_wf post] .
-    obtain selling buying released' where selling:
-        "offer_selling_liabilities price_n price_d posted = Cxx_Ok selling"
-      and buying:
-        "offer_buying_liabilities price_n price_d posted = Cxx_Ok buying"
-      and release':
-        "release_offer_liabilities price_n price_d posted maker_at_cross =
-          Cxx_Ok released'"
-      and released_wf': "party_state_wf released'"
-      and selling_fits':
-        "sint selling \<le> sint (can_sell_at_most released')"
-      and buying_fits':
-        "sint buying \<le> sint (can_buy_at_most released')"
-      using covered_offer_release
-        [OF pn pd less_imp_le[OF posted_positive] cross_wf cover]
-      by blast
-    have released_eq: "released' = released"
-      using release release' by simp
-    have released_wf: "party_state_wf released"
-      using released_wf' released_eq by simp
-    have selling_fits:
-        "sint selling \<le> sint (can_sell_at_most released)"
-      using selling_fits' released_eq by simp
-    have buying_fits:
-        "sint buying \<le> sint (can_buy_at_most released)"
-      using buying_fits' released_eq by simp
-    have selling_posted: "selling = posted"
-      using unlimited_positive_adjustment_identifies_liabilities
-        [OF posted_positive unlimited_adjustment selling buying]
-      by simp
-    have posted_fits:
-        "sint posted \<le> sint (can_sell_at_most released)"
-      using selling_fits selling_posted by simp
-    have released_buy_nonnegative:
-        "0 \<le> sint (can_buy_at_most released)"
-      using can_buy_at_most_nonnegative [OF released_wf] .
-    have maker_send:
-        "signed_min64 posted (can_sell_at_most released) = posted"
-      using posted_fits by (simp add: signed_min64_def)
-    have preventative_adjustment:
-        "adjust_offer_with_options price_n price_d posted (can_buy_at_most released) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
-          Cxx_Ok posted"
-      using exact_cap_replays_unlimited_positive_adjustment
-        [OF pn pd posted_positive released_buy_nonnegative
-          unlimited_adjustment buying buying_fits] .
-    show "adjust_stable price_n price_d posted released \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
-      using maker_send preventative_adjustment
-      by (simp add: adjust_stable_def)
-  qed
 qed
 
 subsubsection \<open>Maximality of positive normal crossings with both repairs\<close>
@@ -8765,8 +8384,8 @@ text \<open>
   These predicates capture a useful, strong comparison, but choosing the
   unconstrained-maker fill as normative would additionally require maker-side
   headroom and the resulting \<open>wheatStays\<close> decision to be observationally
-  irrelevant.  The counterexamples below record that the shipped behavior and
-  the current exact-receive-cap candidate do not satisfy this comparison; they
+  irrelevant.  The counterexamples below record that protocol 28 and
+  protocol 29 do not satisfy this comparison; they
   do not by themselves establish that the implementation should be changed to
   satisfy it.
 \<close>
@@ -8825,12 +8444,12 @@ subsubsection \<open>The exact receive cap repairs the walkthrough, not the
   benchmark comparison\<close>
 
 text \<open>
-  With the flag on, the walkthrough griefing disappears: the preventative
+  At protocol 29, the walkthrough griefing disappears: the preventative
   adjustment values Alice's one-USD headroom as enough for her last unit of
   wheat, so the same crossing that filled nothing under the plain cap now
   fills her offer completely.  The lemma repeats
-  @{thm [source] carol_griefs_alice} with the exact receive cap and is
-  proved by evaluating both sides.
+  @{thm [source] carol_griefs_alice} at @{const repaired_exchange_options}
+  and is proved by evaluating both sides.
 \<close>
 
 lemma exact_receive_cap_repairs_the_walkthrough:
@@ -8841,7 +8460,7 @@ lemma exact_receive_cap_repairs_the_walkthrough:
       buy_limit = 2, buy_balance = 1, buy_liabilities = 1\<rparr>
      \<lparr>sell_balance = 2, sell_liabilities = 0,
       buy_limit = 1000, buy_balance = 0, buy_liabilities = 0\<rparr>
-     2 Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
+     2 Exchange_Normal repaired_exchange_options =
    Cxx_Ok
      (Post_Created 1
         \<lparr>sell_balance = 1, sell_liabilities = 1,
@@ -8860,8 +8479,8 @@ lemma exact_receive_cap_repairs_the_walkthrough:
   by eval
 
 text \<open>
-  The benchmark comparison nevertheless stays false, because the fix deliberately
-  leaves the \<open>wheatStays\<close> comparison in
+  The benchmark comparison nevertheless stays false, because protocol 29
+  deliberately leaves the \<open>wheatStays\<close> comparison in
   \<open>exchangeV10WithoutPriceErrorThresholds\<close> on the plain truncating
   values.  A maker whose sheep headroom equals its
   booked buying liability presents a wheat value up to
@@ -8887,9 +8506,9 @@ text \<open>
 \<close>
 
 lemma exact_receive_cap_does_not_restore_trade_as_written:
-  "\<not> posted_offers_trade_as_written \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
+  "\<not> posted_offers_trade_as_written repaired_exchange_options"
 proof
-  assume asm: "posted_offers_trade_as_written \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
+  assume asm: "posted_offers_trade_as_written repaired_exchange_options"
   let ?alice_at_post =
     "\<lparr>sell_balance = 1, sell_liabilities = 0,
       buy_limit = 2, buy_balance = 0, buy_liabilities = 0\<rparr>"
@@ -8913,7 +8532,7 @@ proof
     "party_state_wf ?alice_at_post \<and>
      party_state_wf ?alice_at_cross \<and>
      party_state_wf ?bob \<and>
-     post_offer 101 100 1 ?alice_at_post \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
+     post_offer 101 100 1 ?alice_at_post repaired_exchange_options =
        Cxx_Ok (Post_Created 1 ?alice_after) \<and>
      maker_covers_offer_liabilities 101 100 1 ?alice_at_cross \<and>
      0 < sint (can_buy_at_most ?bob) \<and>
@@ -8921,10 +8540,10 @@ proof
     by eval
   have real_cross:
     "cross_offer_v10 101 100 1 ?alice_at_cross ?bob 1
-       Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok ?crossed"
+       Exchange_Normal repaired_exchange_options = Cxx_Ok ?crossed"
     by eval
   have benchmark:
-    "exchange_unconstrained_maker 101 100 1 ?bob 1 Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
+    "exchange_unconstrained_maker 101 100 1 ?bob 1 Exchange_Normal repaired_exchange_options =
        Cxx_Ok ?unconstrained"
     by eval
   have selector_values:
@@ -8945,7 +8564,7 @@ proof
     using selector_values by simp
   have violated:
     "\<not> maker_non_interference_at 101 100 1 ?alice_at_cross ?bob 1
-       Exchange_Normal \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
+       Exchange_Normal repaired_exchange_options"
     unfolding maker_non_interference_at_def
     using real_cross benchmark comparison_fails
     by simp
@@ -9325,11 +8944,16 @@ lemma cover_implies_adjust_stable_exact_any_symmetric:
   shows "cover_implies_adjust_stable
      \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = sym_cap\<rparr>"
 text \<open>
-  Proof sketch: normalize a successful post to a false symmetric option and
-  apply @{thm [source] cover_implies_adjust_stable_exact}.  Covered liability
-  release yields a well-formed released state and non-negative adjustment caps;
-  symmetric irrelevance then transports the stable result back to the original
-  arbitrary symmetric option.
+  Proof sketch: normalize a successful post to a false symmetric option.  The
+  normalized post can be replayed as an unlimited adjustment returning the
+  posted amount.  Liability coverage and release expose enough selling
+  capacity for that amount and enough buying capacity for its booked rounded
+  payment.  The exact receive cap turns those two capacity bounds back into
+  the same adjustment result, so at a false symmetric option the
+  crossing-time preventative adjustment is the identity.  Covered liability
+  release yields a well-formed released state and non-negative adjustment
+  caps; symmetric irrelevance then transports the stable result back to the
+  original arbitrary symmetric option.
 \<close>
 proof -
   show ?thesis
@@ -9367,17 +8991,13 @@ proof -
            \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
          Cxx_Ok (Post_Created posted maker_after)"
       using post_offer_symmetric_irrelevant_if_created [OF post_wf post] .
-    have stable_plain:
-        "adjust_stable price_n price_d posted released
-           \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
-      using cover_implies_adjust_stable_exact
-        [unfolded cover_implies_adjust_stable_def]
-        post_wf cross_wf post_plain cover release
-      by blast
     note positive = post_created_positive_facts [OF post]
     have pn: "0 < sint price_n" and pd: "0 < sint price_d"
       and posted_positive: "0 < sint posted"
       using positive by simp_all
+    have unlimited_adjustment:
+        "adjust_offer_with_options price_n price_d posted int64_max \<lparr>exact_receive_cap = False, symmetric_exact_receive_cap = False\<rparr> = Cxx_Ok posted"
+      using post_created_replays_unlimited [OF post_wf post_plain] .
     obtain selling buying released' where selling:
         "offer_selling_liabilities price_n price_d posted = Cxx_Ok selling"
       and buying:
@@ -9386,6 +9006,10 @@ proof -
         "release_offer_liabilities price_n price_d posted maker_at_cross =
          Cxx_Ok released'"
       and released_wf': "party_state_wf released'"
+      and selling_fits':
+        "sint selling \<le> sint (can_sell_at_most released')"
+      and buying_fits':
+        "sint buying \<le> sint (can_buy_at_most released')"
       using covered_offer_release
         [OF pn pd less_imp_le[OF posted_positive] cross_wf cover]
       by blast
@@ -9393,6 +9017,36 @@ proof -
       using release release' by simp
     have released_wf: "party_state_wf released"
       using released_wf' released_eq by simp
+    have selling_fits:
+        "sint selling \<le> sint (can_sell_at_most released)"
+      using selling_fits' released_eq by simp
+    have buying_fits:
+        "sint buying \<le> sint (can_buy_at_most released)"
+      using buying_fits' released_eq by simp
+    have selling_posted: "selling = posted"
+      using unlimited_positive_adjustment_identifies_liabilities
+        [OF posted_positive unlimited_adjustment selling buying]
+      by simp
+    have posted_fits:
+        "sint posted \<le> sint (can_sell_at_most released)"
+      using selling_fits selling_posted by simp
+    have released_buy_nonnegative:
+        "0 \<le> sint (can_buy_at_most released)"
+      using can_buy_at_most_nonnegative [OF released_wf] .
+    have maker_send:
+        "signed_min64 posted (can_sell_at_most released) = posted"
+      using posted_fits by (simp add: signed_min64_def)
+    have preventative_adjustment:
+        "adjust_offer_with_options price_n price_d posted (can_buy_at_most released) \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr> =
+          Cxx_Ok posted"
+      using exact_cap_replays_unlimited_positive_adjustment
+        [OF pn pd posted_positive released_buy_nonnegative
+          unlimited_adjustment buying buying_fits] .
+    have stable_plain:
+        "adjust_stable price_n price_d posted released
+           \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = False\<rparr>"
+      using maker_send preventative_adjustment
+      by (simp add: adjust_stable_def)
     have sell_nonnegative:
         "0 \<le> sint (can_sell_at_most released)"
       using can_sell_at_most_nonnegative [OF released_wf] .
@@ -9593,7 +9247,7 @@ proof -
     using that [OF release adjustment exchange] fields by blast
 qed
 
-theorem fully_taken_posted_offer_exchanges_posted_amount_exact:
+theorem fully_taken_posted_offer_exchanges_posted_amount_exact_any_symmetric:
   fixes sym_cap :: bool
   shows "fully_taken_posted_offer_exchanges_posted_amount
      \<lparr>exact_receive_cap = True, symmetric_exact_receive_cap = sym_cap\<rparr>"
@@ -9753,7 +9407,7 @@ text \<open>
   Proof sketch: instantiate the exact-cap theorem at a true symmetric cap,
   retaining the user-requested both-enabled packaging.
 \<close>
-  using fully_taken_posted_offer_exchanges_posted_amount_exact [of True] .
+  using fully_taken_posted_offer_exchanges_posted_amount_exact_any_symmetric [of True] .
 
 theorem fully_taken_posted_offer_exchanges_posted_amount_legacy_false:
   "\<not> fully_taken_posted_offer_exchanges_posted_amount
