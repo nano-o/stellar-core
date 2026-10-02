@@ -9,6 +9,9 @@ start with [RESULTS.md](RESULTS.md).
 
 - `OfferExchange/`: the Isabelle session, with the model, its proofs, and
   the executable test interface.
+- `Demo/`: a separate `Demo` session of short introductory proofs about
+  64-bit words, independent of the model; see
+  [Introductory demos](#introductory-demos).
 - `differential/`: the harness that compares the extracted model with
   stellar-core.
 - `differential/golden/`: the committed expected-result subset, checked by
@@ -75,6 +78,36 @@ isabelle build -D formal/OfferExchange
 That builds the model, checks every proof, and writes
 `OfferExchange/output/document.pdf`. It takes well under a minute on a warm
 `HOL` heap.
+
+## Introductory demos
+
+`Demo/` shows the method on code small enough to read in full, before the
+offer exchange. Each theory models a few lines of C++, runs the model, tests
+it with Quickcheck, and proves it:
+
+- `Overflow_Check.thy`: the `a + b < a` overflow check on `uint64_t`,
+  proved right for all inputs. It ends with an off-by-one variant that
+  Quickcheck does not catch.
+- `Double_Word_Add.thy`: 128-bit addition from two 64-bit halves, proved
+  commutative, which takes a fact about the carry.
+- `Pretty_Numerals.thy`, imported by both, prints numerals near 2^64 and
+  2^128 as, for example, `2 ^ 64 - 1`.
+
+They need only Isabelle2025-2: no TeX and no tooling. The files use
+Isabelle's ASCII notation for symbols (`\<open>`, `\<Rightarrow>`), so read
+them in Isabelle/jEdit rather than on the web:
+
+```bash
+isabelle jedit -l HOL-Library formal/Demo/Overflow_Check.thy
+```
+
+The first run builds the `HOL-Library` image, which takes a few minutes;
+later runs open at once. Step through the file with the cursor and watch the
+*Output* panel. To check both theories headless:
+
+```bash
+isabelle build -D formal/Demo
+```
 
 ## Setting up the Isabelle tooling
 

@@ -1,0 +1,8 @@
+session Demo = HOL +
+  description "Introductory proofs about 64-bit words: an overflow check and double-word addition."
+  options [timeout = 600, document = false]
+  sessions
+    "HOL-Library"
+  theories
+    Overflow_Check
+    Double_Word_Add
