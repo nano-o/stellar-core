@@ -3,7 +3,7 @@
 Size and coverage figures for the Isabelle/HOL model of the offer exchange,
 collected for a talk. Every number here comes from `generated.md`, which the
 scripts in this directory regenerate. The figures below are for the theories,
-C++ and differential harness as of commit `e54c31586`, the commit named in the
+C++ and differential harness as of commit `21e9dfb8f`, the commit named in the
 header of `generated.md`.
 
 | File | What it is |
@@ -34,24 +34,24 @@ ManageSell/ManageBuy frames. The largest uncovered part is
 `ManageOfferOpFrameBase::doApply`: 53 of its 275 code lines are modelled
 (only the new-offer path that does not cross).
 
-**Isabelle.** There are 25,485 lines in 9 theories (24,414 non-blank):
+**Isabelle.** There are 25,233 lines in 10 theories (24,160 non-blank):
 
 | Kind | Lines |
 |---|---|
-| Proofs | 13,477 |
-| Theorem statements | 4,000 |
-| Prose (`text` and `section` blocks, comments) | 4,195 |
+| Proofs | 13,181 |
+| Theorem statements | 3,999 |
+| Prose (`text` and `section` blocks, comments) | 4,234 |
 | Definitions | 2,657 |
 
-The session has **397 theorems** and no `sorry`. (One unfinished theorem
+The session has **395 theorems** and no `sorry`. (One unfinished theorem
 sits inside a `(* *)` comment in `Offer_Exchange_Specification.thy`, lines
 560–594. It is not part of the session, and its lines count as prose.) Of
-the 397, 42 are concrete checks proved by `by eval` alone. The median proof
-is 12 lines, the mean 34, and the longest 446. 93 proofs are one-liners and
-29 run to 100 lines or more. There are about 2,860 Isar steps (`have` 2,050,
-`show` 650, `obtain` 161). Counting the first method of each `by` or
-`apply`: `simp` 1,580, `linarith` 175, `auto` 162, `cases` 133, `blast` 118,
-`simp_all` 88, `meson` 19, `metis` 5, and no `smt`.
+the 395, 42 are concrete checks proved by `by eval` alone. The median proof
+is 12 lines, the mean 33, and the longest 446. 94 proofs are one-liners and
+29 run to 100 lines or more. There are about 2,810 Isar steps (`have` 2,014,
+`show` 646, `obtain` 149). Counting the first method of each `by` or
+`apply`: `simp` 1,564, `linarith` 175, `auto` 161, `cases` 128, `blast` 104,
+`simp_all` 85, `meson` 19, `metis` 5, and no `smt`.
 
 **Definition lines by layer** (comment lines excluded):
 
@@ -68,9 +68,9 @@ is 12 lines, the mean 34, and the longest 446. 93 proofs are one-liners and
 | Repeated in `Offer_Exchange_Posting_Refinement.thy` (7 more `C++:` tags) | 169 |
 
 **Ratios.**
-- About 17 proof lines per modelled C++ code line (13,477 / 790), or 26 per
-  line that is not just a brace or `else` (13,477 / 520).
-- About 32 theory lines per modelled C++ code line (25,485 / 790).
+- About 17 proof lines per modelled C++ code line (13,181 / 790), or 25 per
+  line that is not just a brace or `else` (13,181 / 520).
+- About 32 theory lines per modelled C++ code line (25,233 / 790).
 - The tagged definitions are 685 lines, against 790 lines of C++ code. About
   155 of the 685 are a second form of a function that already has one:
   - `big_divide_or_throw`, `big_divide_or_throw128` and `big_multiply`,
@@ -110,7 +110,7 @@ and three are tagged `[exchangerandom]` as well. `OfferExchange.cpp/.h` gain
 32 lines, all test-only entry points under `BUILD_TESTS`.
 
 **Build.** The last recorded `OfferExchange` build on this machine took
-27 s elapsed and 136 s CPU on 8 threads. That figure is read from the
+26 s elapsed and 143 s CPU on 8 threads. That figure is read from the
 Isabelle log database; it was not re-measured.
 
 ## How the numbers are computed
@@ -255,7 +255,7 @@ Counting rules:
   - `_at_version`, `_with_options` and `_core` variants.
 - **The build time is a single cached measurement.**
 - **The `eval` count is not a theorem count.** 42 theorems are proved by
-  `by eval` alone, while `eval` is the first method 93 times.
+  `by eval` alone, while `eval` is the first method 90 times.
 
 ## Review checklist
 
