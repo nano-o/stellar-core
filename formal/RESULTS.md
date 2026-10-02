@@ -219,14 +219,15 @@ stellar-core.
   that are not definitions.
 - **Differential testing.** `differential/run.sh` generates a deterministic
   corpus of boundary, regression, exhaustive small-domain and randomized
-  cases: 666,816 records across 19 tags. It evaluates the exported model on
+  cases: 667,238 records across 19 tags. It evaluates the exported model on
   them and compares every result, including which failure fires, with
   stellar-core built from this tree, through the `[isabelle-offer-exchange]`
   test case in `src/transactions/test/ExchangeTests.cpp`.
   - The arithmetic, adjustment and liability tags run at ledger versions 28
     and 29.
   - The two lifecycle tags apply real ManageSell or ManageBuy, ChangeTrust
-    and ManageBuy-counteroffer transactions in a protocol-28 ledger.
+    and ManageBuy-counteroffer transactions, 211 cases each in a protocol-28
+    and in a protocol-29 ledger.
   - For every tag, a perturbed result and a rotated error code must both be
     rejected, so a comparison that silently checks nothing cannot pass.
   - A committed 40-record-per-tag subset, `differential/golden/expected.tsv`,
@@ -255,11 +256,10 @@ stellar-core.
   described above; it needs a protocol-design decision.
 - The overlay-admission filter (`offerCanClearForZero` and
   `ManageOfferOpFrameBase::doCheckValidForOverlay`) is not modeled.
-- The lifecycle differential tags run at protocol 28 only. Protocol 29 is
-  the current protocol in this tree, so a protocol-29 lifecycle ledger and a
-  protocol-28-post, protocol-29-cross regression can now be added.
-  Protocol-29 posting and crossing are currently covered by the proofs and
-  by the arithmetic tags, which call the versioned functions directly.
+- Each lifecycle differential row posts and crosses within one protocol. No
+  C++ test yet posts an offer at protocol 28, upgrades the ledger to 29 and
+  crosses it; the migration theorems above cover that path in the model
+  only.
 - Not modeled: liquidity pools, order-book offer selection and
   `convertWithOffers`, and the rest of the path-payment machinery above
   `exchangeV10`.

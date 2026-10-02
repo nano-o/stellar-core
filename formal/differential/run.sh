@@ -109,9 +109,9 @@ fi
 # each 211-row per-protocol corpus so an
 # early-exit-only tag cannot appear complete.
 lifecycle_tags=(offer_lifecycle_sell offer_lifecycle_buy)
-# Only protocol-28 lifecycle rows are generated; see generate_cases.py and
-# ExchangeTests.cpp.
-lifecycle_versions=(28)
+# Lifecycle rows are generated at protocols 28 and 29, each against its own
+# real ledger; see generate_cases.py and ExchangeTests.cpp.
+lifecycle_versions=(28 29)
 for lifecycle_tag in "${lifecycle_tags[@]}"; do
     for lifecycle_version in "${lifecycle_versions[@]}"; do
         coverage="$({

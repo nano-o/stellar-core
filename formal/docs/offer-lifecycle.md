@@ -645,22 +645,23 @@ fractional price, which would not correspond to the abstract direct taker.
 ### Differential transport and real-ledger oracle
 
 The extracted interface has two tags, `offer_lifecycle_sell` and
-`offer_lifecycle_buy`, with 211 isolated records apiece.  Inputs flatten the
-raw request, the ledger version, the maker's five fields, and the requested
-new buying limit.  Every result is `OK` plus exactly 27 values (28 output
+`offer_lifecycle_buy`, with 422 isolated records apiece: 211 cases, each at
+protocols 28 and 29.  Inputs flatten the raw request, the ledger version, the
+maker's five fields, and the requested new buying limit.  Every result is `OK` plus exactly 27 values (28 output
 fields; 41 TSV fields including the 13 inputs).  The stage enum is stable: 1
 malformed; 2 line full; 3 underfunded; 4 no offer; 5 invalid limit; 6–8 posting
 assertion/overflow/runtime; 9–11 crossing assertion/overflow/runtime; and 12
 successful crossing.  Every party group is serialized in the same order:
 sell balance, sell liabilities, buy limit, buy balance, buy liabilities.
 
-The real-ledger oracle uses fresh accounts and issuer-scoped assets per row
-in one protocol-28 application.  It materializes nonzero pre-existing liabilities with
-auxiliary offers, applies the
-posting transaction, reads the actual canonical offer and liabilities, applies
-`ChangeTrust`, submits the exact-receive counteroffer, and reads the final
-ledger state.  The harness requires each operation tag to cover posting
-rejection, offer creation, an admissible limit change, and a positive cross;
+The real-ledger oracle uses fresh accounts and issuer-scoped assets per row,
+in one long-lived application per protocol (28 and 29) chosen by the row's
+ledger version.  It materializes nonzero pre-existing liabilities with
+auxiliary offers, applies the posting transaction, reads the actual canonical
+offer and liabilities, applies `ChangeTrust`, submits the exact-receive
+counteroffer, and reads the final ledger state.  The harness requires each
+operation tag, at each protocol, to cover posting rejection, offer creation,
+an admissible limit change, and a positive cross;
 it also corrupts a successful transfer independently for each tag and requires
 the C++ comparison to reject both alterations.
 

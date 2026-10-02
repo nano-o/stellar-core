@@ -216,14 +216,13 @@ The overlay-admission filter (`offerCanClearForZero`, reached through
 `ManageOfferOpFrameBase::doCheckValidForOverlay`) is not modeled, so neither
 the corpus nor the modeled lifecycle has an overlay stage.
 
-Lifecycle records carry a `ledger_version` too, but only protocol-28 rows are
-generated, and the C++ oracle runs them against a single protocol-28 ledger.
-It rejects a protocol-29 lifecycle row loudly rather than comparing it
-against that ledger. Protocol 29 is the current protocol in this tree.
-Covering it means adding version 29 to `LIFECYCLE_LEDGER_VERSIONS` in
-`generate_cases.py` and a protocol-29 ledger to the oracle. Until then, the
-protocol-29 arithmetic is covered by the exchange, adjustment and liability
-dimensions, which call the versioned functions directly.
+Lifecycle records carry a `ledger_version` too, and every lifecycle case is
+generated at protocols 28 and 29, one row after the other. The C++ oracle
+runs one long-lived application per protocol and applies each row's
+transactions in the ledger its `ledger_version` names; it rejects a
+lifecycle row at any other version loudly. Each row still starts and ends
+within one protocol: crossing a protocol-28 offer at protocol 29 is covered
+by the migration theorems, not by the corpus.
 
 ## Running the differential test
 
@@ -257,11 +256,11 @@ masquerade as a pass. The three tags with no `ERR` rows
 script, so a corpus that loses its failure coverage fails rather than
 skipping.
 
-The default corpus has 666,816 records across 19 tags. Each of its two
-stateful lifecycle dimensions contains 211 isolated protocol-28 records. In
-both the sell and the buy dimension, the script separately requires an
-ordinary posting rejection, a created offer, an admissible limit change, and
-a positive crossing.
+The default corpus has 667,238 records across 19 tags. Each of its two
+stateful lifecycle dimensions contains 422 isolated records, 211 at each of
+protocols 28 and 29. For the sell and the buy dimension at each protocol,
+the script separately requires an ordinary posting rejection, a created
+offer, an admissible limit change, and a positive crossing.
 
 Before a run, check that the exported model is the proved one:
 
@@ -378,7 +377,8 @@ The stable stage enum:
 
 Stage `0`, which once meant overlay rejection, is retired.
 
-The C++ oracle works in one real protocol-28 application:
+The C++ oracle works in a real application at the row's protocol, one for
+protocol 28 and one for protocol 29:
 - it creates reachable, isolated accounts and auxiliary offers;
 - it posts the sell or buy offer;
 - it applies `ChangeTrust`;

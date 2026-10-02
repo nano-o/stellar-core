@@ -1950,20 +1950,35 @@ TEST_CASE("Isabelle offer-exchange differential", "[isabelle-offer-exchange]")
     // row's protocol. They use fresh accounts and issuer-scoped assets per
     // row, so no order book or liabilities leak between records.
     //
-    // The lifecycle corpus is generated at protocol 28 only, against one
-    // long-lived protocol-28 application, and the guard below fails loudly
-    // rather than silently comparing a protocol-29 row against a protocol-28
-    // ledger. The protocol-29 arithmetic is covered by the exchange,
-    // adjustment and liability dimensions, which call the versioned functions
-    // directly.
-    VirtualClock lifecycleClock;
-    auto lifecycleConfig = getTestConfig(0, Config::TESTDB_IN_MEMORY);
-    lifecycleConfig.TESTING_UPGRADE_LEDGER_PROTOCOL_VERSION =
+    // The lifecycle corpus is generated at protocols 28 and 29, so there is
+    // one long-lived application per protocol, each with its own clock,
+    // config instance and in-memory database, and each row runs against the
+    // application its ledger_version names. A row at any other version fails
+    // loudly rather than being compared against the wrong ledger.
+    auto const lifecycleLegacyVersion =
         static_cast<uint32_t>(ProtocolVersion::V_28);
-    lifecycleConfig.LEDGER_PROTOCOL_VERSION =
-        static_cast<uint32_t>(ProtocolVersion::V_28);
-    auto lifecycleApp = createTestApplication(lifecycleClock, lifecycleConfig);
-    auto lifecycleRoot = lifecycleApp->getRoot();
+    auto const lifecycleRepairedVersion =
+        static_cast<uint32_t>(ProtocolVersion::V_29);
+    auto makeLifecycleConfig = [](int instanceNumber, uint32_t ledgerVersion) {
+        auto config = getTestConfig(instanceNumber, Config::TESTDB_IN_MEMORY);
+        config.TESTING_UPGRADE_LEDGER_PROTOCOL_VERSION = ledgerVersion;
+        config.LEDGER_PROTOCOL_VERSION = ledgerVersion;
+        return config;
+    };
+    VirtualClock lifecycleLegacyClock;
+    auto lifecycleLegacyApp = createTestApplication(
+        lifecycleLegacyClock, makeLifecycleConfig(0, lifecycleLegacyVersion));
+    VirtualClock lifecycleRepairedClock;
+    auto lifecycleRepairedApp = createTestApplication(
+        lifecycleRepairedClock,
+        makeLifecycleConfig(1, lifecycleRepairedVersion));
+    for (auto const& [app, version] :
+         {std::make_pair(lifecycleLegacyApp, lifecycleLegacyVersion),
+          std::make_pair(lifecycleRepairedApp, lifecycleRepairedVersion)})
+    {
+        LedgerTxn ltx(app->getLedgerTxnRoot());
+        REQUIRE(ltx.loadHeader().current().ledgerVersion == version);
+    }
 
     std::size_t lifecycleIndex = 0;
     struct LifecycleCoverage
@@ -1977,12 +1992,13 @@ TEST_CASE("Isabelle offer-exchange differential", "[isabelle-offer-exchange]")
         bool positiveCross{false};
     };
     // One entry per (operation, protocol) pair, so a stage covered only at one
-    // protocol cannot make the other look complete.
-    std::array<LifecycleCoverage, 2> lifecycleCoverage{
-        LifecycleCoverage{"offer_lifecycle_sell",
-                          static_cast<uint32_t>(ProtocolVersion::V_28)},
-        LifecycleCoverage{"offer_lifecycle_buy",
-                          static_cast<uint32_t>(ProtocolVersion::V_28)}};
+    // protocol cannot make the other look complete. The index is
+    // 2 * isBuy + (protocol is 29).
+    std::array<LifecycleCoverage, 4> lifecycleCoverage{
+        LifecycleCoverage{"offer_lifecycle_sell", lifecycleLegacyVersion},
+        LifecycleCoverage{"offer_lifecycle_sell", lifecycleRepairedVersion},
+        LifecycleCoverage{"offer_lifecycle_buy", lifecycleLegacyVersion},
+        LifecycleCoverage{"offer_lifecycle_buy", lifecycleRepairedVersion}};
 
     std::unordered_set<std::string> caseIds;
     std::string line;
@@ -2749,11 +2765,17 @@ TEST_CASE("Isabelle offer-exchange differential", "[isabelle-offer-exchange]")
             auto const priceD = parseInt32(fields[4], "price_d");
             auto const ledgerVersion = static_cast<uint32_t>(
                 parseInt64(fields[5], "ledger_version"));
-            INFO("the lifecycle oracle runs a protocol-28 ledger only, so "
-                 "lifecycle rows must be generated at a pre-29 ledger version");
-            REQUIRE(protocolVersionIsBefore(ledgerVersion,
-                                            ProtocolVersion::V_29));
-            auto& coverage = lifecycleCoverage[isBuy ? 1 : 0];
+            INFO("the lifecycle oracle runs protocol-28 and protocol-29 "
+                 "ledgers only");
+            REQUIRE((ledgerVersion == lifecycleLegacyVersion ||
+                     ledgerVersion == lifecycleRepairedVersion));
+            bool const isRepaired = ledgerVersion == lifecycleRepairedVersion;
+            auto& coverage =
+                lifecycleCoverage[(isBuy ? 2 : 0) + (isRepaired ? 1 : 0)];
+            REQUIRE(coverage.ledgerVersion == ledgerVersion);
+            auto const& lifecycleApp =
+                isRepaired ? lifecycleRepairedApp : lifecycleLegacyApp;
+            auto const lifecycleRoot = lifecycleApp->getRoot();
             auto const amount = parseInt64(fields[6], "amount");
             auto const makerSellBalance =
                 parseInt64(fields[7], "maker_sell_balance");

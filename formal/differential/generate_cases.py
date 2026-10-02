@@ -252,7 +252,7 @@ LEGACY_LEDGER_VERSION = 28
 REPAIRED_LEDGER_VERSION = 29
 # Lifecycle rows need a real ledger at their protocol; see the note in
 # generate_offer_lifecycle_cases.
-LIFECYCLE_LEDGER_VERSIONS = (LEGACY_LEDGER_VERSION,)
+LIFECYCLE_LEDGER_VERSIONS = (LEGACY_LEDGER_VERSION, REPAIRED_LEDGER_VERSION)
 
 
 @dataclass(frozen=True)
@@ -2156,7 +2156,7 @@ def generate_adjustment_price_amount_cases(
 
 
 def generate_offer_lifecycle_cases(seed: int) -> list[OfferLifecycleCase]:
-    """Generate isolated, reachable protocol-27 lifecycle states.
+    """Generate isolated, reachable lifecycle states at protocols 28 and 29.
 
     Positive-price liability estimates mirror the operation-level caps only
     to choose useful reachable balances.  The expected outcomes themselves
@@ -2210,11 +2210,9 @@ def generate_offer_lifecycle_cases(seed: int) -> list[OfferLifecycleCase]:
             new_buy_limit,
         )
         # Lifecycle rows run real transactions, so they need a ledger at the
-        # row's protocol. Only protocol 28 is generated: the C++ oracle runs a
-        # single protocol-28 ledger and rejects a p29 lifecycle row loudly.
-        # The record carries the field, so covering protocol 29 means adding
-        # it to LIFECYCLE_LEDGER_VERSIONS and a protocol-29 ledger to the
-        # oracle.
+        # row's protocol. Each case is generated at protocols 28 and 29, one
+        # row after the other, and the C++ oracle runs one long-lived ledger
+        # per protocol and picks it from the row's ledger_version.
         for ledger_version in LIFECYCLE_LEDGER_VERSIONS:
             case_id = f"{tag}_{name}_v{ledger_version}"
             if case_id in case_ids:
