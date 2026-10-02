@@ -1237,6 +1237,34 @@ text \<open>
   nonzero fill to every counterparty.
 \<close>
 
+definition buy_limit_adjustment_stable :: "uint32 \<Rightarrow> bool"
+  where
+    "buy_limit_adjustment_stable ledger_version \<longleftrightarrow>
+      (\<forall>price_n price_d buy_amount maker_at_post posted maker_after
+         new_sheep_limit.
+        party_state_wf maker_at_post \<and>
+        post_buy_offer ledger_version price_n price_d buy_amount
+            maker_at_post = Cxx_Ok (Post_Created posted maker_after) \<longrightarrow>
+        (let maker_at_cross =
+           maker_after\<lparr>buy_limit := new_sheep_limit\<rparr>
+         in party_state_wf maker_at_cross \<longrightarrow>
+           (\<exists>taker taker_amount crossed.
+             party_state_wf taker \<and>
+             0 < sint (can_buy_at_most taker) \<and>
+             0 < sint
+               (signed_min64 taker_amount (can_sell_at_most taker)) \<and>
+             cross_offer_v10 price_d price_n posted maker_at_cross taker
+               taker_amount Exchange_Normal
+               (exchange_options_at_version ledger_version) =
+                 Cxx_Ok crossed \<and>
+             0 < sint (cross_wheat_received crossed) \<and>
+             0 < sint (cross_sheep_send crossed))))"
+
+text \<open>
+  @{const buy_limit_adjustment_stable} is @{const limit_adjustment_stable} for
+  the ManageBuy route, with the same inversion of the canonical price.
+\<close>
+
 definition offer_limit_adjustment_stable ::
     "int32 \<Rightarrow> int32 \<Rightarrow> int64 \<Rightarrow> bool"
   where
@@ -1312,10 +1340,43 @@ text \<open>
   balance or limit changes, provided it remains well formed and still covers
   the posted offer's liabilities.  The successful fill may depend
   on the changed maker state; only existence and positivity are required.
-  The migration theory proves the property at
+  The stored-offer theory proves the property at
   @{const repaired_exchange_options} as
   \<open>posted_offers_remain_takeable_repaired\<close> and restates it through the
   protocol mapping as \<open>posted_offers_remain_takeable_p29\<close>.
+\<close>
+
+definition posted_buy_offers_remain_takeable :: "uint32 \<Rightarrow> bool"
+  where
+    "posted_buy_offers_remain_takeable ledger_version \<longleftrightarrow>
+      (\<forall>price_n price_d buy_amount maker_at_post posted maker_after
+         maker_at_cross.
+        party_state_wf maker_at_post \<and>
+        party_state_wf maker_at_cross \<and>
+        post_buy_offer ledger_version price_n price_d buy_amount
+            maker_at_post = Cxx_Ok (Post_Created posted maker_after) \<and>
+        maker_covers_offer_liabilities price_d price_n posted
+          maker_at_cross \<longrightarrow>
+        (\<exists>taker taker_amount crossed.
+          party_state_wf taker \<and>
+          0 < sint (can_buy_at_most taker) \<and>
+          0 < sint
+            (signed_min64 taker_amount (can_sell_at_most taker)) \<and>
+          cross_offer_v10 price_d price_n posted maker_at_cross taker
+            taker_amount Exchange_Normal
+            (exchange_options_at_version ledger_version) = Cxx_Ok crossed \<and>
+          0 < sint (cross_wheat_received crossed) \<and>
+          0 < sint (cross_sheep_send crossed)))"
+
+text \<open>
+  @{const posted_buy_offers_remain_takeable} is
+  @{const posted_offers_remain_takeable} for the ManageBuy route.  It is
+  indexed by a ledger version rather than an option record because
+  @{const post_buy_offer} is: the same version selects the request
+  liabilities, the posting adjustment, and the crossing arithmetic.  The
+  offer's canonical price is the submitted price inverted, so both the
+  coverage hypothesis and the crossing call use
+  @{term "(price_d, price_n)"}.
 \<close>
 
 subsubsection \<open>Exact amount when a posted offer is fully taken\<close>
@@ -2318,7 +2379,7 @@ subsubsection \<open>Release, replay and capacity lemmas for posted offers\<clos
 text \<open>
   These lemmas support the changed-state properties: the coverage and
   fully-taken results below, and the protocol-29 takeability results of the
-  migration theory.  They recover the positive facts and the liabilities of
+  stored-offer theory.  They recover the positive facts and the liabilities of
   a successful post, show that liability coverage exposes enough capacity
   after release for the posted offer and for all guarded balance movements,
   and show that a positive adjustment result replays unchanged against
@@ -10029,6 +10090,15 @@ text \<open>
   itself, phrased through @{const exchange_options_at_version} so that the
   hypothesis is a ledger version rather than a choice of flags.  Each is a
   short specialization: no property is re-proved here.
+
+  Takeability after maker-state changes and limit-adjustment stability need
+  the stored-offer invariant, so their protocol-29 forms are proved in the
+  stored-offer theory: \<open>posted_offers_remain_takeable_p29\<close>,
+  \<open>limit_adjustment_stable_p29\<close> and
+  \<open>limit_adjustment_stable_p28_false\<close> for the ManageSell route,
+  \<open>posted_buy_offers_remain_takeable_p29\<close> and
+  \<open>buy_limit_adjustment_stable_p29\<close> for the ManageBuy route, and
+  \<open>posted_request_offers_remain_takeable_p29\<close> for both.
 \<close>
 
 corollary positive_normal_crosses_are_maximal_p29:

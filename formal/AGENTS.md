@@ -7,7 +7,8 @@ properties the exchange should have and prove or refute them.
 
 Two kinds of model live in the session, and the rules below keep them apart.
 The **code-level model** is the executable model of the C++ (the arithmetic,
-adjustment, layered-divide, lifecycle, and migration theories). The
+adjustment, layered-divide, lifecycle, stored-offer, and migration
+theories). The
 **specification** is `Offer_Exchange_Specification.thy`: an abstract model
 written for maximum simplicity that deliberately does not follow the C++,
 need not be executable, and is connected to the code-level model by the

@@ -43,6 +43,11 @@ overflow, `std::runtime_error`), in the order the C++ checks them.
   protocols. `mixed_exchange_options_are_unreachable` shows that no ledger
   version selects either of the two one-sided settings, which survive only
   as diagnostic mutants.
+- **Stored offers** (`Offer_Exchange_Stored_Offers.thy`): a single resting
+  offer, through the stored-offer invariant `stored_offer`. The invariant
+  does not depend on the protocol version. This theory also holds the
+  protocol-29 takeability and limit-adjustment results for ManageSell and
+  ManageBuy.
 - **Migration** (`Offer_Exchange_Migration.thy`): offers posted at protocol
   28 and crossed at protocol 29.
 - **Specification** (`Offer_Exchange_Specification.thy`): an abstract model
