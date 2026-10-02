@@ -16,12 +16,15 @@ text \<open>
   those results to offers posted at protocol 28: it establishes the
   invariant for them and restates the results through the protocol mapping.
 
-  The local model does not prove that every historical ledger entry has such
-  provenance.  A theorem derived from a successful legacy @{const post_offer}
-  covers the modeled fresh manage-sell route.  Applying an intrinsic result to
-  offers created by other operation variants, passive offers, updates, or
-  partial-fill remainders additionally requires a reachability argument that
-  those live entries satisfy the intrinsic invariant.  In real ledger state,
+  The invariant is proved for the modeled creation routes: a successful
+  protocol-28 @{const post_offer}, a successful @{const post_buy_offer} at
+  any ledger version, and any positive remainder left by a successful
+  crossing under either option record.  The local model does not prove that
+  every historical ledger entry has such provenance.  Applying an intrinsic
+  result to passive offers, offer updates, or offers that survived earlier
+  protocol migrations or an administrative upgrade pass additionally requires
+  a reachability argument that those live entries satisfy the intrinsic
+  invariant.  In real ledger state,
   the local assumption @{const maker_covers_offer_liabilities} is supplied by
   the global invariant relating aggregate liabilities to all open offers.
 \<close>
@@ -262,7 +265,8 @@ lemma legacy_post_created_is_stored_offer:
 text \<open>
   Proof sketch: invert the created posting branch to recover its positive
   legacy adjustment and the actual posted amount.  Well-formedness makes both
-  posting capacities non-negative.  The preceding replay lemma lifts that
+  posting capacities non-negative.
+  @{thm [source] legacy_positive_adjustment_replays_unlimited} lifts that
   positive result to the unlimited legacy fixed point, while the created-
   outcome facts supply positivity of the price and stored amount.
 \<close>
@@ -366,8 +370,9 @@ theorem legacy_fully_taken_posted_offer_exchanges_posted_amount_repaired:
     "cross_wheat_received crossed = posted \<and>
      cross_offer_amount crossed = 0"
 text \<open>
-  Proof sketch: legacy posting establishes the intrinsic fixed point; the
-  preceding theorem then applies to the independently supplied covered
+  Proof sketch: legacy posting establishes the intrinsic fixed point;
+  @{thm [source] stored_offer_nonstaying_repaired_cross_is_full_take} then
+  applies to the independently supplied covered
   crossing state, arbitrary taker, and arbitrary rounding mode.
 \<close>
   using stored_offer_nonstaying_repaired_cross_is_full_take
@@ -610,15 +615,17 @@ qed
 text \<open>
   \<^bold>\<open>Reachability.\<close>  The corollaries above assume
   @{const stored_offer}, the intrinsic stored-offer invariant, and
-  @{const maker_covers_offer_liabilities}.  The first is established here for
-  the modeled fresh manage-sell route, by
-  @{thm [source] legacy_post_cover_implies_repaired_adjust_stable} from a
-  successful protocol-28 @{const post_offer}, and for manage-buy creation by
-  @{thm [source] buy_post_created_is_stored_offer} in the stored-offer
-  theory.  It is \<^emph>\<open>not\<close> established for passive sell offers, offer updates,
-  positive partial-fill remainders carried over from earlier protocols, or
-  offers that survived earlier protocol migrations or an administrative
-  upgrade pass.
+  @{const maker_covers_offer_liabilities}.  The first is established for
+  the modeled fresh manage-sell route by
+  @{thm [source] legacy_post_created_is_stored_offer} from a successful
+  protocol-28 @{const post_offer}, for manage-buy creation by
+  @{thm [source] buy_post_created_is_stored_offer}, and for any positive
+  remainder of a successful crossing by
+  @{thm [source] legacy_positive_cross_remainder_is_stored_offer} and
+  @{thm [source] repaired_positive_cross_remainder_is_stored_offer}; the last
+  three are in the stored-offer theory.  It is \<^emph>\<open>not\<close> established for
+  passive sell offers, offer updates, or offers that survived earlier
+  protocol migrations or an administrative upgrade pass.
   Applying these results to such an entry requires a separate argument that it
   satisfies the intrinsic invariant.
 
@@ -633,8 +640,10 @@ text \<open>
 section \<open>The ManageBuy route at protocol 29\<close>
 
 text \<open>
-  Every result above enters the ladder through @{const post_offer}, the
-  ManageSell route.  The stored-offer theory establishes the invariant for
+  The ladder assumes only @{const stored_offer}, whatever route created the
+  offer, but the protocol-28 corollaries above discharge that premise through
+  @{const post_offer}, the ManageSell route.  The stored-offer theory
+  establishes the invariant for
   offers created by @{const post_buy_offer} at any ledger version, as
   @{thm [source] buy_post_created_is_stored_offer}.  The probes below test
   ManageBuy-created offers on both sides of the boundary, and the
@@ -727,10 +736,10 @@ text \<open>
   @{thm [source] buy_post_created_is_stored_offer} holds at every ledger
   version, not just before protocol 29, because the intrinsic invariant is
   about the \<^emph>\<open>stored\<close> projection and both configurations of the adjustment
-  produce a legacy unlimited fixed point when they succeed positively.  It is
-  therefore strictly stronger than
-  @{thm [source] legacy_post_created_is_stored_offer}, which is stated for the
-  legacy configuration only.  The request-time liabilities remain genuinely
+  produce a legacy unlimited fixed point when they succeed positively.  Unlike
+  @{thm [source] legacy_post_created_is_stored_offer}, which is stated for
+  ManageSell posting in the legacy configuration, it covers every creation
+  version and needs no well-formedness assumption on the posting state.  The request-time liabilities remain genuinely
   version-dependent, as
   @{thm [source] manage_buy_request_liabilities_change_at_activation} records;
   they influence \<^emph>\<open>whether\<close> a buy request is admitted, not what the created

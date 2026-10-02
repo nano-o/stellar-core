@@ -30,6 +30,10 @@
 \urlstyle{rm}
 \isabellestyle{it}
 
+% let long identifiers break after their underscores, typeset as hyphens
+\def\isacharunderscore{\mbox{-}\penalty\exhyphenpenalty}%
+\def\isacharunderscorekeyword{\mbox{-}\penalty\exhyphenpenalty}%
+
 % for uniform font size
 %\renewcommand{\isastyle}{\isastyleminor}
 
@@ -40,10 +44,18 @@
 \author{nano}
 \maketitle
 
+% number the front matter separately, so that the body's page numbers, and
+% hence the contents, do not depend on the length of the contents
+\pagenumbering{roman}
 \tableofcontents
+\clearpage
+\pagenumbering{arabic}
 
 % sane default for proof documents
 \parindent 0pt\parskip 0.5ex
+
+% prefer loose lines to text running past the margin
+\setlength{\emergencystretch}{3em}
 
 % generated text of all theories
 \input{session}

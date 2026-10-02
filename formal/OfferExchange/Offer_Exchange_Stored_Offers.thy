@@ -14,8 +14,9 @@ text \<open>
   (\<open>stored_offer_iff_repaired\<close> below).
 
   The results below show that a covered offer satisfying the invariant is
-  safe to cross at protocol 29, has a maximum-capacity full-take witness,
-  and leaves a positive remainder that satisfies the invariant again.  The
+  safe to cross at protocol 29 and has a maximum-capacity full-take witness,
+  and that any positive remainder left by a successful crossing satisfies the
+  invariant again.  The
   last two sections derive the protocol-29 takeability and limit-adjustment
   stability properties for the ManageSell and ManageBuy routes.  The
   migration theory applies the same results to offers posted at protocol 28
@@ -1697,13 +1698,15 @@ text \<open>
 section \<open>Protocol-29 takeability and limit stability for ManageBuy\<close>
 
 text \<open>
-  Every result above enters through @{const post_offer}, the ManageSell
-  route.  A \<open>ManageBuyOffer\<close> reaches the book through
+  The provenance and catalogue results above enter through
+  @{const post_offer}, the ManageSell route.  A \<open>ManageBuyOffer\<close> reaches the book through
   @{const post_buy_offer}, which differs in three ways that matter here: the
   resting offer sits at the inverted canonical price @{term "(price_d, price_n)"},
   the operation caps are an unlimited send cap and a finite receive cap of
-  @{term buy_amount}, and the request-time liabilities are versioned.  None of
-  the results above applies to it directly.
+  @{term buy_amount}, and the request-time liabilities are versioned.  The
+  results about a covered offer satisfying @{const stored_offer} apply to
+  such an offer once it is known to satisfy the invariant; the ManageSell
+  provenance and catalogue results do not apply to it.
 
   This section supplies the missing provenance.  Its pivot is that neither
   @{thm [source] positive_legacy_adjustment_is_stored_offer} nor
