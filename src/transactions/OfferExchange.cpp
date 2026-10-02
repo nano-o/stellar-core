@@ -259,6 +259,22 @@ calculateOfferAmountFromValue(int32_t priceN, int32_t priceD, int64_t maxSend,
     return bigDivideOrThrow128(offerValue, priceN, ROUND_DOWN);
 }
 
+#ifdef BUILD_TESTS
+uint128_t
+calculateOfferValueForTesting(int32_t priceN, int32_t priceD, int64_t maxSend,
+                              int64_t maxReceive)
+{
+    return calculateOfferValue(priceN, priceD, maxSend, maxReceive);
+}
+
+int64_t
+calculateOfferAmountFromValueForTesting(int32_t priceN, int32_t priceD,
+                                        int64_t maxSend, int64_t maxReceive)
+{
+    return calculateOfferAmountFromValue(priceN, priceD, maxSend, maxReceive);
+}
+#endif
+
 // exchangeV10 is a system for crossing offers that provides guarantees
 // regarding the direction and magnitude of rounding errors:
 // - When considering two crossing offers subject to a variety of limits,

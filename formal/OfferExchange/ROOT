@@ -1,0 +1,17 @@
+session OfferExchange = HOL +
+  options [document = pdf, document_output = "output",
+    document_variants = "document=-proof"]
+  sessions
+    "HOL-Library"
+  theories
+    Offer_Exchange_Specification
+    Offer_Exchange_Arithmetic
+    Offer_Exchange_Adjustment
+    Offer_Exchange_Posting_Refinement
+    Offer_Exchange_Divide_Layered
+  theories [document = false]
+    Offer_Exchange_Lifecycle
+    Offer_Exchange_Migration
+    Offer_Exchange_Test_Interface
+  document_files
+    "root.tex"

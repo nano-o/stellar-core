@@ -1,0 +1,779 @@
+#schema	offer_value	8	9
+v1	offer_value	regression_example	3	2	10	10	OK	20
+v1	offer_value	regression_both_zero	0	0	0	0	OK	0
+v1	offer_value	regression_send_limited	7	3	4	100	OK	28
+v1	offer_value	regression_receive_limited	7	3	100	4	OK	12
+v1	offer_value	negative_price_n	-1	2	10	10	ERR	ASSERTION
+v1	offer_value	negative_price_d	3	-1	10	10	ERR	ASSERTION
+v1	offer_value	negative_max_send	3	2	-1	10	ERR	ASSERTION
+v1	offer_value	negative_max_receive	3	2	10	-1	ERR	ASSERTION
+v1	offer_value	small_pn0_pd0_send0_recv0	0	0	0	0	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv1	0	0	0	1	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv2	0	0	0	2	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv3	0	0	0	3	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv4	0	0	0	4	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv5	0	0	0	5	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv6	0	0	0	6	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv7	0	0	0	7	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv8	0	0	0	8	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv9	0	0	0	9	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv10	0	0	0	10	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv11	0	0	0	11	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv12	0	0	0	12	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv13	0	0	0	13	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv14	0	0	0	14	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv15	0	0	0	15	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv16	0	0	0	16	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv17	0	0	0	17	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv18	0	0	0	18	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv19	0	0	0	19	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv20	0	0	0	20	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv21	0	0	0	21	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv22	0	0	0	22	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv23	0	0	0	23	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv24	0	0	0	24	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv25	0	0	0	25	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv26	0	0	0	26	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv27	0	0	0	27	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv28	0	0	0	28	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv29	0	0	0	29	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv30	0	0	0	30	OK	0
+v1	offer_value	small_pn0_pd0_send0_recv31	0	0	0	31	OK	0
+#schema	offer_amount_from_value	8	9
+v1	offer_amount_from_value	exact_regression_example	3	2	10	10	OK	7
+v1	offer_amount_from_value	exact_regression_both_zero	0	0	0	0	ERR	ASSERTION
+v1	offer_amount_from_value	exact_regression_send_limited	7	3	4	100	OK	4
+v1	offer_amount_from_value	exact_regression_receive_limited	7	3	100	4	OK	2
+v1	offer_amount_from_value	exact_priced_zero_landmine	3	0	10	10	OK	0
+v1	offer_amount_from_value	exact_priced_zero_send_zero	3	0	0	10	OK	0
+v1	offer_amount_from_value	exact_receive_int64_max	3	2	100	9223372036854775807	OK	100
+v1	offer_amount_from_value	exact_receive_int64_max_minus_one	3	2	100	9223372036854775806	OK	100
+v1	offer_amount_from_value	exact_receive_int64_max_steep	2147483647	663	1000	9223372036854775807	OK	1000
+v1	offer_amount_from_value	exact_both_int64_max	3	2	9223372036854775807	9223372036854775807	OK	6148914691236517204
+v1	offer_amount_from_value	exact_negative_price_n	-1	2	10	10	ERR	ASSERTION
+v1	offer_amount_from_value	exact_negative_price_d	3	-1	10	10	ERR	ASSERTION
+v1	offer_amount_from_value	exact_negative_max_send	3	2	-1	10	ERR	ASSERTION
+v1	offer_amount_from_value	exact_negative_max_receive	3	2	10	-1	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv0	0	0	0	0	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv1	0	0	0	1	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv2	0	0	0	2	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv3	0	0	0	3	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv4	0	0	0	4	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv5	0	0	0	5	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv6	0	0	0	6	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv7	0	0	0	7	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv8	0	0	0	8	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv9	0	0	0	9	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv10	0	0	0	10	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv11	0	0	0	11	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv12	0	0	0	12	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv13	0	0	0	13	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv14	0	0	0	14	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv15	0	0	0	15	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send0_recv16	0	0	0	16	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv0	0	0	1	0	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv1	0	0	1	1	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv2	0	0	1	2	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv3	0	0	1	3	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv4	0	0	1	4	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv5	0	0	1	5	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv6	0	0	1	6	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv7	0	0	1	7	ERR	ASSERTION
+v1	offer_amount_from_value	exact_small_pn0_pd0_send1_recv8	0	0	1	8	ERR	ASSERTION
+#schema	big_multiply	6	7
+v1	big_multiply	bigmul_zero	0	0	OK	0
+v1	big_multiply	bigmul_one	1	1	OK	1
+v1	big_multiply	bigmul_over_64_bits	4611686018427387904	5	OK	23058430092136939520
+v1	big_multiply	bigmul_max_product	9223372036854775807	9223372036854775807	OK	85070591730234615847396907784232501249
+v1	big_multiply	bigmul_negative_a	-1	1	ERR	ASSERTION
+v1	big_multiply	bigmul_negative_b	1	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_negative_both	-1	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b0	-9223372036854775808	-9223372036854775808	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b1	-9223372036854775808	-9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b2	-9223372036854775808	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b3	-9223372036854775808	0	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b4	-9223372036854775808	1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b5	-9223372036854775808	2	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b6	-9223372036854775808	4294967296	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b7	-9223372036854775808	9223372036854775806	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a0_b8	-9223372036854775808	9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b0	-9223372036854775807	-9223372036854775808	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b1	-9223372036854775807	-9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b2	-9223372036854775807	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b3	-9223372036854775807	0	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b4	-9223372036854775807	1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b5	-9223372036854775807	2	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b6	-9223372036854775807	4294967296	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b7	-9223372036854775807	9223372036854775806	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a1_b8	-9223372036854775807	9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b0	-1	-9223372036854775808	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b1	-1	-9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b2	-1	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b3	-1	0	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b4	-1	1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b5	-1	2	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b6	-1	4294967296	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b7	-1	9223372036854775806	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a2_b8	-1	9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a3_b0	0	-9223372036854775808	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a3_b1	0	-9223372036854775807	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a3_b2	0	-1	ERR	ASSERTION
+v1	big_multiply	bigmul_boundary_a3_b3	0	0	OK	0
+v1	big_multiply	bigmul_boundary_a3_b4	0	1	OK	0
+v1	big_multiply	bigmul_boundary_a3_b5	0	2	OK	0
+#schema	price_error_bound	9	10
+v1	price_error_bound	priceerr_symmetric_zero	0	0	0	0	0	OK	1
+v1	price_error_bound	priceerr_symmetric_equal	7	7	11	11	0	OK	1
+v1	price_error_bound	priceerr_symmetric_threshold_low_exact	1	1	100	99	0	OK	1
+v1	price_error_bound	priceerr_symmetric_threshold_low_minus_one	1	1	100	98	0	OK	0
+v1	price_error_bound	priceerr_symmetric_threshold_low_plus_one	1	1	100	100	0	OK	1
+v1	price_error_bound	priceerr_symmetric_threshold_high_exact	1	1	100	101	0	OK	1
+v1	price_error_bound	priceerr_symmetric_threshold_high_plus_one	1	1	100	102	0	OK	0
+v1	price_error_bound	priceerr_symmetric_asymmetric_far	1	1	100	1000000	0	OK	0
+v1	price_error_bound	priceerr_favor_zero	0	0	0	0	1	OK	1
+v1	price_error_bound	priceerr_favor_equal	7	7	11	11	1	OK	1
+v1	price_error_bound	priceerr_favor_threshold_low_exact	1	1	100	99	1	OK	1
+v1	price_error_bound	priceerr_favor_threshold_low_minus_one	1	1	100	98	1	OK	0
+v1	price_error_bound	priceerr_favor_threshold_low_plus_one	1	1	100	100	1	OK	1
+v1	price_error_bound	priceerr_favor_threshold_high_exact	1	1	100	101	1	OK	1
+v1	price_error_bound	priceerr_favor_threshold_high_plus_one	1	1	100	102	1	OK	1
+v1	price_error_bound	priceerr_favor_asymmetric_far	1	1	100	1000000	1	OK	1
+v1	price_error_bound	priceerr_negative_price_n	-1	1	1	1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_negative_price_d	1	-1	1	1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_negative_wheat	1	1	-1	1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_negative_sheep	1	1	1	-1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s0_f0	-2147483648	-2147483648	-9223372036854775808	-9223372036854775808	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s0_f1	-2147483648	-2147483648	-9223372036854775808	-9223372036854775808	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s1_f0	-2147483648	-2147483648	-9223372036854775808	-1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s1_f1	-2147483648	-2147483648	-9223372036854775808	-1	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s2_f0	-2147483648	-2147483648	-9223372036854775808	0	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s2_f1	-2147483648	-2147483648	-9223372036854775808	0	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s3_f0	-2147483648	-2147483648	-9223372036854775808	1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s3_f1	-2147483648	-2147483648	-9223372036854775808	1	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s4_f0	-2147483648	-2147483648	-9223372036854775808	9223372036854775807	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w0_s4_f1	-2147483648	-2147483648	-9223372036854775808	9223372036854775807	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s0_f0	-2147483648	-2147483648	-1	-9223372036854775808	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s0_f1	-2147483648	-2147483648	-1	-9223372036854775808	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s1_f0	-2147483648	-2147483648	-1	-1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s1_f1	-2147483648	-2147483648	-1	-1	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s2_f0	-2147483648	-2147483648	-1	0	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s2_f1	-2147483648	-2147483648	-1	0	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s3_f0	-2147483648	-2147483648	-1	1	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s3_f1	-2147483648	-2147483648	-1	1	1	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s4_f0	-2147483648	-2147483648	-1	9223372036854775807	0	ERR	ASSERTION
+v1	price_error_bound	priceerr_boundary_n0_d0_w1_s4_f1	-2147483648	-2147483648	-1	9223372036854775807	1	ERR	ASSERTION
+#schema	big_divide	8	9
+v1	big_divide	bigdiv_down_zero	0	0	1	DOWN	OK	0
+v1	big_divide	bigdiv_down_exact	10	2	5	DOWN	OK	4
+v1	big_divide	bigdiv_down_remainder	10	1	3	DOWN	OK	3
+v1	big_divide	bigdiv_down_max_exact	9223372036854775807	2	2	DOWN	OK	9223372036854775807
+v1	big_divide	bigdiv_down_max_plus_one	9223372036854775807	9223372036854775807	9223372036854775806	DOWN	ERR	OVERFLOW
+v1	big_divide	bigdiv_up_zero	0	0	1	UP	OK	0
+v1	big_divide	bigdiv_up_exact	10	2	5	UP	OK	4
+v1	big_divide	bigdiv_up_remainder	10	1	3	UP	OK	4
+v1	big_divide	bigdiv_up_max_exact	9223372036854775807	2	2	UP	OK	9223372036854775807
+v1	big_divide	bigdiv_up_max_plus_one	9223372036854775807	9223372036854775807	9223372036854775806	UP	ERR	OVERFLOW
+v1	big_divide	bigdiv_assert_negative_a	-1	1	1	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_assert_negative_b	1	-1	1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_assert_zero_c	1	1	0	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_assert_negative_c	1	1	-1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c0_r0	-9223372036854775808	-9223372036854775808	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c0_r1	-9223372036854775808	-9223372036854775808	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c1_r0	-9223372036854775808	-9223372036854775808	-1	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c1_r1	-9223372036854775808	-9223372036854775808	-1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c2_r0	-9223372036854775808	-9223372036854775808	0	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c2_r1	-9223372036854775808	-9223372036854775808	0	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c3_r0	-9223372036854775808	-9223372036854775808	1	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c3_r1	-9223372036854775808	-9223372036854775808	1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c4_r0	-9223372036854775808	-9223372036854775808	2	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c4_r1	-9223372036854775808	-9223372036854775808	2	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c5_r0	-9223372036854775808	-9223372036854775808	3	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c5_r1	-9223372036854775808	-9223372036854775808	3	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c6_r0	-9223372036854775808	-9223372036854775808	9223372036854775806	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c6_r1	-9223372036854775808	-9223372036854775808	9223372036854775806	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c7_r0	-9223372036854775808	-9223372036854775808	9223372036854775807	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b0_c7_r1	-9223372036854775808	-9223372036854775808	9223372036854775807	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c0_r0	-9223372036854775808	-1	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c0_r1	-9223372036854775808	-1	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c1_r0	-9223372036854775808	-1	-1	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c1_r1	-9223372036854775808	-1	-1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c2_r0	-9223372036854775808	-1	0	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c2_r1	-9223372036854775808	-1	0	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c3_r0	-9223372036854775808	-1	1	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c3_r1	-9223372036854775808	-1	1	UP	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c4_r0	-9223372036854775808	-1	2	DOWN	ERR	ASSERTION
+v1	big_divide	bigdiv_boundary_a0_b1_c4_r1	-9223372036854775808	-1	2	UP	ERR	ASSERTION
+#schema	big_divide_128	7	8
+v1	big_divide_128	bigdiv128_down_zero	0	1	DOWN	OK	0
+v1	big_divide_128	bigdiv128_down_exact	20	5	DOWN	OK	4
+v1	big_divide_128	bigdiv128_down_remainder	10	3	DOWN	OK	3
+v1	big_divide_128	bigdiv128_down_max_exact	18446744073709551614	2	DOWN	OK	9223372036854775807
+v1	big_divide_128	bigdiv128_down_max_minus_remainder	18446744073709551613	2	DOWN	OK	9223372036854775806
+v1	big_divide_128	bigdiv128_down_max_plus_one	18446744073709551616	2	DOWN	ERR	OVERFLOW
+v1	big_divide_128	bigdiv128_up_zero	0	1	UP	OK	0
+v1	big_divide_128	bigdiv128_up_exact	20	5	UP	OK	4
+v1	big_divide_128	bigdiv128_up_remainder	10	3	UP	OK	4
+v1	big_divide_128	bigdiv128_up_max_exact	18446744073709551614	2	UP	OK	9223372036854775807
+v1	big_divide_128	bigdiv128_up_max_minus_remainder	18446744073709551613	2	UP	OK	9223372036854775807
+v1	big_divide_128	bigdiv128_up_max_plus_one	18446744073709551616	2	UP	ERR	OVERFLOW
+v1	big_divide_128	bigdiv128_assert_zero_b	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_assert_negative_b	1	-1	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_round_up_guard	340282366920938463463374607431768211455	2	UP	ERR	OVERFLOW
+v1	big_divide_128	bigdiv128_round_up_guard_edge	340282366920938463463374607431768211454	2	UP	ERR	OVERFLOW
+v1	big_divide_128	bigdiv128_boundary_a0_b0_r0	0	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b0_r1	0	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b1_r0	0	-1	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b1_r1	0	-1	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b2_r0	0	0	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b2_r1	0	0	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a0_b3_r0	0	1	DOWN	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b3_r1	0	1	UP	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b4_r0	0	2	DOWN	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b4_r1	0	2	UP	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b5_r0	0	3	DOWN	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b5_r1	0	3	UP	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b6_r0	0	9223372036854775807	DOWN	OK	0
+v1	big_divide_128	bigdiv128_boundary_a0_b6_r1	0	9223372036854775807	UP	OK	0
+v1	big_divide_128	bigdiv128_boundary_a1_b0_r0	1	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b0_r1	1	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b1_r0	1	-1	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b1_r1	1	-1	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b2_r0	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b2_r1	1	0	UP	ERR	ASSERTION
+v1	big_divide_128	bigdiv128_boundary_a1_b3_r0	1	1	DOWN	OK	1
+v1	big_divide_128	bigdiv128_boundary_a1_b3_r1	1	1	UP	OK	1
+v1	big_divide_128	bigdiv128_boundary_a1_b4_r0	1	2	DOWN	OK	0
+v1	big_divide_128	bigdiv128_boundary_a1_b4_r1	1	2	UP	OK	1
+#schema	big_multiply_unsigned	6	7
+v1	big_multiply_unsigned	bigmulu_zero	0	0	OK	0
+v1	big_multiply_unsigned	bigmulu_one	1	1	OK	1
+v1	big_multiply_unsigned	bigmulu_over_64_bits	4611686018427387904	5	OK	23058430092136939520
+v1	big_multiply_unsigned	bigmulu_signed_max_product	9223372036854775807	9223372036854775807	OK	85070591730234615847396907784232501249
+v1	big_multiply_unsigned	bigmulu_max_product	18446744073709551615	18446744073709551615	OK	340282366920938463426481119284349108225
+v1	big_multiply_unsigned	bigmulu_high_bit	9223372036854775808	2	OK	18446744073709551616
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b0	0	0	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b1	0	1	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b2	0	2	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b3	0	4294967296	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b4	0	9223372036854775807	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b5	0	9223372036854775808	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b6	0	18446744073709551614	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a0_b7	0	18446744073709551615	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b0	1	0	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b1	1	1	OK	1
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b2	1	2	OK	2
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b3	1	4294967296	OK	4294967296
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b4	1	9223372036854775807	OK	9223372036854775807
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b5	1	9223372036854775808	OK	9223372036854775808
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b6	1	18446744073709551614	OK	18446744073709551614
+v1	big_multiply_unsigned	bigmulu_boundary_a1_b7	1	18446744073709551615	OK	18446744073709551615
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b0	2	0	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b1	2	1	OK	2
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b2	2	2	OK	4
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b3	2	4294967296	OK	8589934592
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b4	2	9223372036854775807	OK	18446744073709551614
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b5	2	9223372036854775808	OK	18446744073709551616
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b6	2	18446744073709551614	OK	36893488147419103228
+v1	big_multiply_unsigned	bigmulu_boundary_a2_b7	2	18446744073709551615	OK	36893488147419103230
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b0	4294967296	0	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b1	4294967296	1	OK	4294967296
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b2	4294967296	2	OK	8589934592
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b3	4294967296	4294967296	OK	18446744073709551616
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b4	4294967296	9223372036854775807	OK	39614081257132168792477007872
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b5	4294967296	9223372036854775808	OK	39614081257132168796771975168
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b6	4294967296	18446744073709551614	OK	79228162514264337584954015744
+v1	big_multiply_unsigned	bigmulu_boundary_a3_b7	4294967296	18446744073709551615	OK	79228162514264337589248983040
+v1	big_multiply_unsigned	bigmulu_boundary_a4_b0	9223372036854775807	0	OK	0
+v1	big_multiply_unsigned	bigmulu_boundary_a4_b1	9223372036854775807	1	OK	9223372036854775807
+#schema	big_divide_unsigned	8	9
+v1	big_divide_unsigned	bigdivu_down_zero	0	0	1	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_down_exact	10	2	5	DOWN	OK	1	4
+v1	big_divide_unsigned	bigdivu_down_remainder	10	1	3	DOWN	OK	1	3
+v1	big_divide_unsigned	bigdivu_down_fits_64	18446744073709551615	1	1	DOWN	OK	1	18446744073709551615
+v1	big_divide_unsigned	bigdivu_down_just_over_64	18446744073709551615	2	1	DOWN	OK	0	18446744073709551614
+v1	big_divide_unsigned	bigdivu_down_max_product	18446744073709551615	18446744073709551615	1	DOWN	OK	0	1
+v1	big_divide_unsigned	bigdivu_down_max_product_max_divisor	18446744073709551615	18446744073709551615	18446744073709551615	DOWN	OK	1	18446744073709551615
+v1	big_divide_unsigned	bigdivu_up_zero	0	0	1	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_up_exact	10	2	5	UP	OK	1	4
+v1	big_divide_unsigned	bigdivu_up_remainder	10	1	3	UP	OK	1	4
+v1	big_divide_unsigned	bigdivu_up_fits_64	18446744073709551615	1	1	UP	OK	1	18446744073709551615
+v1	big_divide_unsigned	bigdivu_up_just_over_64	18446744073709551615	2	1	UP	OK	0	18446744073709551614
+v1	big_divide_unsigned	bigdivu_up_max_product	18446744073709551615	18446744073709551615	1	UP	OK	0	1
+v1	big_divide_unsigned	bigdivu_up_max_product_max_divisor	18446744073709551615	18446744073709551615	18446744073709551615	UP	OK	1	18446744073709551615
+v1	big_divide_unsigned	bigdivu_assert_zero_c	1	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_assert_zero_c_up	18446744073709551615	18446744073709551615	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c0_r0	0	0	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c0_r1	0	0	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c1_r0	0	0	1	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c1_r1	0	0	1	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c2_r0	0	0	2	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c2_r1	0	0	2	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c3_r0	0	0	3	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c3_r1	0	0	3	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c4_r0	0	0	9223372036854775807	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c4_r1	0	0	9223372036854775807	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c5_r0	0	0	9223372036854775808	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c5_r1	0	0	9223372036854775808	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c6_r0	0	0	18446744073709551614	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c6_r1	0	0	18446744073709551614	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c7_r0	0	0	18446744073709551615	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b0_c7_r1	0	0	18446744073709551615	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c0_r0	0	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c0_r1	0	1	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c1_r0	0	1	1	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c1_r1	0	1	1	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c2_r0	0	1	2	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c2_r1	0	1	2	UP	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c3_r0	0	1	3	DOWN	OK	1	0
+v1	big_divide_unsigned	bigdivu_boundary_a0_b1_c3_r1	0	1	3	UP	OK	1	0
+#schema	big_divide_nothrow	8	9
+v1	big_divide_nothrow	nothrow_bigdiv_down_zero	0	0	1	DOWN	OK	1	0
+v1	big_divide_nothrow	nothrow_bigdiv_down_exact	10	2	5	DOWN	OK	1	4
+v1	big_divide_nothrow	nothrow_bigdiv_down_remainder	10	1	3	DOWN	OK	1	3
+v1	big_divide_nothrow	nothrow_bigdiv_down_max_exact	9223372036854775807	2	2	DOWN	OK	1	9223372036854775807
+v1	big_divide_nothrow	nothrow_bigdiv_down_max_plus_one	9223372036854775807	9223372036854775807	9223372036854775806	DOWN	OK	0	0
+v1	big_divide_nothrow	nothrow_bigdiv_up_zero	0	0	1	UP	OK	1	0
+v1	big_divide_nothrow	nothrow_bigdiv_up_exact	10	2	5	UP	OK	1	4
+v1	big_divide_nothrow	nothrow_bigdiv_up_remainder	10	1	3	UP	OK	1	4
+v1	big_divide_nothrow	nothrow_bigdiv_up_max_exact	9223372036854775807	2	2	UP	OK	1	9223372036854775807
+v1	big_divide_nothrow	nothrow_bigdiv_up_max_plus_one	9223372036854775807	9223372036854775807	9223372036854775806	UP	OK	0	0
+v1	big_divide_nothrow	nothrow_bigdiv_assert_negative_a	-1	1	1	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_assert_negative_b	1	-1	1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_assert_zero_c	1	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_assert_negative_c	1	1	-1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c0_r0	-9223372036854775808	-9223372036854775808	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c0_r1	-9223372036854775808	-9223372036854775808	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c1_r0	-9223372036854775808	-9223372036854775808	-1	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c1_r1	-9223372036854775808	-9223372036854775808	-1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c2_r0	-9223372036854775808	-9223372036854775808	0	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c2_r1	-9223372036854775808	-9223372036854775808	0	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c3_r0	-9223372036854775808	-9223372036854775808	1	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c3_r1	-9223372036854775808	-9223372036854775808	1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c4_r0	-9223372036854775808	-9223372036854775808	2	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c4_r1	-9223372036854775808	-9223372036854775808	2	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c5_r0	-9223372036854775808	-9223372036854775808	3	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c5_r1	-9223372036854775808	-9223372036854775808	3	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c6_r0	-9223372036854775808	-9223372036854775808	9223372036854775806	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c6_r1	-9223372036854775808	-9223372036854775808	9223372036854775806	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c7_r0	-9223372036854775808	-9223372036854775808	9223372036854775807	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b0_c7_r1	-9223372036854775808	-9223372036854775808	9223372036854775807	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c0_r0	-9223372036854775808	-1	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c0_r1	-9223372036854775808	-1	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c1_r0	-9223372036854775808	-1	-1	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c1_r1	-9223372036854775808	-1	-1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c2_r0	-9223372036854775808	-1	0	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c2_r1	-9223372036854775808	-1	0	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c3_r0	-9223372036854775808	-1	1	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c3_r1	-9223372036854775808	-1	1	UP	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c4_r0	-9223372036854775808	-1	2	DOWN	ERR	ASSERTION
+v1	big_divide_nothrow	nothrow_bigdiv_boundary_a0_b1_c4_r1	-9223372036854775808	-1	2	UP	ERR	ASSERTION
+#schema	big_divide_unsigned_128	7	8
+v1	big_divide_unsigned_128	bigdivu128_down_zero	0	1	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_down_exact	20	5	DOWN	OK	1	4
+v1	big_divide_unsigned_128	bigdivu128_down_remainder	10	3	DOWN	OK	1	3
+v1	big_divide_unsigned_128	bigdivu128_down_fits_64	18446744073709551615	1	DOWN	OK	1	18446744073709551615
+v1	big_divide_unsigned_128	bigdivu128_down_just_over_64	18446744073709551616	1	DOWN	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_down_max_divisor	340282366920938463463374607431768211455	18446744073709551615	DOWN	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_up_zero	0	1	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_up_exact	20	5	UP	OK	1	4
+v1	big_divide_unsigned_128	bigdivu128_up_remainder	10	3	UP	OK	1	4
+v1	big_divide_unsigned_128	bigdivu128_up_fits_64	18446744073709551615	1	UP	OK	1	18446744073709551615
+v1	big_divide_unsigned_128	bigdivu128_up_just_over_64	18446744073709551616	1	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_up_max_divisor	340282366920938463463374607431768211455	18446744073709551615	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_assert_zero_b	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_assert_zero_b_up	340282366920938463463374607431768211455	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_round_up_guard	340282366920938463463374607431768211455	2	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_round_up_guard_edge	340282366920938463463374607431768211454	2	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_round_up_guard_divisor_one	340282366920938463463374607431768211455	1	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_round_up_guard_max_divisor	340282366920938463444927863358058659842	18446744073709551615	UP	OK	0	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b0_r0	0	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b0_r1	0	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b1_r0	0	1	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b1_r1	0	1	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b2_r0	0	2	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b2_r1	0	2	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b3_r0	0	3	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b3_r1	0	3	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b4_r0	0	9223372036854775807	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b4_r1	0	9223372036854775807	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b5_r0	0	9223372036854775808	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b5_r1	0	9223372036854775808	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b6_r0	0	18446744073709551615	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a0_b6_r1	0	18446744073709551615	UP	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b0_r0	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b0_r1	1	0	UP	ERR	ASSERTION
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b1_r0	1	1	DOWN	OK	1	1
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b1_r1	1	1	UP	OK	1	1
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b2_r0	1	2	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b2_r1	1	2	UP	OK	1	1
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b3_r0	1	3	DOWN	OK	1	0
+v1	big_divide_unsigned_128	bigdivu128_boundary_a1_b3_r1	1	3	UP	OK	1	1
+#schema	big_divide_128_nothrow	7	8
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_zero	0	1	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_exact	20	5	DOWN	OK	1	4
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_remainder	10	3	DOWN	OK	1	3
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_max_exact	18446744073709551614	2	DOWN	OK	1	9223372036854775807
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_max_minus_remainder	18446744073709551613	2	DOWN	OK	1	9223372036854775806
+v1	big_divide_128_nothrow	nothrow_bigdiv128_down_max_plus_one	18446744073709551616	2	DOWN	OK	0	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_zero	0	1	UP	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_exact	20	5	UP	OK	1	4
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_remainder	10	3	UP	OK	1	4
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_max_exact	18446744073709551614	2	UP	OK	1	9223372036854775807
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_max_minus_remainder	18446744073709551613	2	UP	OK	1	9223372036854775807
+v1	big_divide_128_nothrow	nothrow_bigdiv128_up_max_plus_one	18446744073709551616	2	UP	OK	0	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_assert_zero_b	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_assert_negative_b	1	-1	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_round_up_guard	340282366920938463463374607431768211455	2	UP	OK	0	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_round_up_guard_edge	340282366920938463463374607431768211454	2	UP	OK	0	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b0_r0	0	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b0_r1	0	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b1_r0	0	-1	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b1_r1	0	-1	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b2_r0	0	0	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b2_r1	0	0	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b3_r0	0	1	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b3_r1	0	1	UP	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b4_r0	0	2	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b4_r1	0	2	UP	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b5_r0	0	3	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b5_r1	0	3	UP	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b6_r0	0	9223372036854775807	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a0_b6_r1	0	9223372036854775807	UP	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b0_r0	1	-9223372036854775808	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b0_r1	1	-9223372036854775808	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b1_r0	1	-1	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b1_r1	1	-1	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b2_r0	1	0	DOWN	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b2_r1	1	0	UP	ERR	ASSERTION
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b3_r0	1	1	DOWN	OK	1	1
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b3_r1	1	1	UP	OK	1	1
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b4_r0	1	2	DOWN	OK	1	0
+v1	big_divide_128_nothrow	nothrow_bigdiv128_boundary_a1_b4_r1	1	2	UP	OK	1	1
+#schema	apply_price_error_thresholds	10	11
+v1	apply_price_error_thresholds	apply_normal_stays0_equal	1	1	100	100	0	NORMAL	OK	100	100	0
+v1	apply_price_error_thresholds	apply_normal_stays0_invalid_direction	1	1	100	101	0	NORMAL	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_normal_stays0_threshold_exact	1	1	100	99	0	NORMAL	OK	100	99	0
+v1	apply_price_error_thresholds	apply_normal_stays0_threshold_outside	1	1	100	98	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_zero_wheat	1	1	0	7	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_negative_wheat	1	1	-1	7	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_zero_sheep	1	1	7	0	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_negative_sheep	1	1	7	-1	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_both_zero	1	1	0	0	0	NORMAL	OK	0	0	0
+v1	apply_price_error_thresholds	apply_normal_stays0_negative_price_n	-1	1	1	1	0	NORMAL	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_normal_stays0_negative_price_d	1	-1	1	1	0	NORMAL	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_normal_stays1_equal	1	1	100	100	1	NORMAL	OK	100	100	1
+v1	apply_price_error_thresholds	apply_normal_stays1_invalid_direction	1	1	100	99	1	NORMAL	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_normal_stays1_threshold_exact	1	1	100	101	1	NORMAL	OK	100	101	1
+v1	apply_price_error_thresholds	apply_normal_stays1_threshold_outside	1	1	100	102	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_zero_wheat	1	1	0	7	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_negative_wheat	1	1	-1	7	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_zero_sheep	1	1	7	0	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_negative_sheep	1	1	7	-1	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_both_zero	1	1	0	0	1	NORMAL	OK	0	0	1
+v1	apply_price_error_thresholds	apply_normal_stays1_negative_price_n	-1	1	1	1	1	NORMAL	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_normal_stays1_negative_price_d	1	-1	1	1	1	NORMAL	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_strict_send_stays0_equal	1	1	100	100	0	STRICT_SEND	OK	100	100	0
+v1	apply_price_error_thresholds	apply_strict_send_stays0_invalid_direction	1	1	100	101	0	STRICT_SEND	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_strict_send_stays0_threshold_exact	1	1	100	99	0	STRICT_SEND	OK	100	99	0
+v1	apply_price_error_thresholds	apply_strict_send_stays0_threshold_outside	1	1	100	98	0	STRICT_SEND	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_strict_send_stays0_zero_wheat	1	1	0	7	0	STRICT_SEND	OK	0	7	0
+v1	apply_price_error_thresholds	apply_strict_send_stays0_negative_wheat	1	1	-1	7	0	STRICT_SEND	OK	-1	7	0
+v1	apply_price_error_thresholds	apply_strict_send_stays0_zero_sheep	1	1	7	0	0	STRICT_SEND	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_strict_send_stays0_negative_sheep	1	1	7	-1	0	STRICT_SEND	OK	7	-1	0
+v1	apply_price_error_thresholds	apply_strict_send_stays0_both_zero	1	1	0	0	0	STRICT_SEND	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_strict_send_stays0_negative_price_n	-1	1	1	1	0	STRICT_SEND	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_strict_send_stays0_negative_price_d	1	-1	1	1	0	STRICT_SEND	ERR	ASSERTION
+v1	apply_price_error_thresholds	apply_strict_send_stays1_equal	1	1	100	100	1	STRICT_SEND	OK	100	100	1
+v1	apply_price_error_thresholds	apply_strict_send_stays1_invalid_direction	1	1	100	99	1	STRICT_SEND	ERR	RUNTIME
+v1	apply_price_error_thresholds	apply_strict_send_stays1_threshold_exact	1	1	100	101	1	STRICT_SEND	OK	100	101	1
+v1	apply_price_error_thresholds	apply_strict_send_stays1_threshold_outside	1	1	100	102	1	STRICT_SEND	OK	100	102	1
+v1	apply_price_error_thresholds	apply_strict_send_stays1_zero_wheat	1	1	0	7	1	STRICT_SEND	OK	0	7	1
+v1	apply_price_error_thresholds	apply_strict_send_stays1_negative_wheat	1	1	-1	7	1	STRICT_SEND	OK	-1	7	1
+v1	apply_price_error_thresholds	apply_strict_send_stays1_zero_sheep	1	1	7	0	1	STRICT_SEND	ERR	RUNTIME
+#schema	exchange_v10_without_price_error_thresholds	12	13
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_strict_send_v28	3	2	100	100	10	100	STRICT_SEND	28	OK	6	10	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_strict_send_v29	3	2	100	100	10	100	STRICT_SEND	29	OK	6	10	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_wheat_more_v28	3	2	100	100	10	100	NORMAL	28	OK	6	9	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_wheat_more_v29	3	2	100	100	10	100	NORMAL	29	OK	6	9	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_strict_receive_v28	2	3	100	100	10	100	STRICT_RECEIVE	28	OK	15	10	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_strict_receive_v29	2	3	100	100	10	100	STRICT_RECEIVE	29	OK	15	10	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_sheep_more_v28	2	3	100	100	10	100	NORMAL	28	OK	15	10	1
+v1	exchange_v10_without_price_error_thresholds	without_wheat_stays_sheep_more_v29	2	3	100	100	10	100	NORMAL	29	OK	15	10	1
+v1	exchange_v10_without_price_error_thresholds	without_sheep_stays_wheat_more_v28	3	2	10	100	100	100	NORMAL	28	OK	10	15	0
+v1	exchange_v10_without_price_error_thresholds	without_sheep_stays_wheat_more_v29	3	2	10	100	100	100	NORMAL	29	OK	10	15	0
+v1	exchange_v10_without_price_error_thresholds	without_sheep_stays_sheep_more_v28	2	3	10	100	100	100	NORMAL	28	OK	9	6	0
+v1	exchange_v10_without_price_error_thresholds	without_sheep_stays_sheep_more_v29	2	3	10	100	100	100	NORMAL	29	OK	9	6	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_all_zero_v28	1	1	0	0	0	0	NORMAL	28	OK	0	0	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_all_zero_v29	1	1	0	0	0	0	NORMAL	29	OK	0	0	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_unit_v28	1	1	1	1	1	1	NORMAL	28	OK	1	1	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_unit_v29	1	1	1	1	1	1	NORMAL	29	OK	1	1	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_exact_division_v28	7	3	30	70	70	30	NORMAL	28	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_exact_division_v29	7	3	30	70	70	30	NORMAL	29	OK	13	30	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_remainder_division_v28	7	3	31	71	69	29	NORMAL	28	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_remainder_division_v29	7	3	31	71	69	29	NORMAL	29	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_0_v28	1	1	100	99	99	100	NORMAL	28	OK	99	99	1
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_0_v29	1	1	100	99	99	100	NORMAL	29	OK	99	99	1
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_1_v28	1	1	100	100	100	100	NORMAL	28	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_1_v29	1	1	100	100	100	100	NORMAL	29	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_2_v28	1	1	100	101	101	100	NORMAL	28	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_normal_value_delta_2_v29	1	1	100	101	101	100	NORMAL	29	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_all_zero_v28	1	1	0	0	0	0	STRICT_SEND	28	OK	0	0	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_all_zero_v29	1	1	0	0	0	0	STRICT_SEND	29	OK	0	0	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_unit_v28	1	1	1	1	1	1	STRICT_SEND	28	OK	1	1	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_unit_v29	1	1	1	1	1	1	STRICT_SEND	29	OK	1	1	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_exact_division_v28	7	3	30	70	70	30	STRICT_SEND	28	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_exact_division_v29	7	3	30	70	70	30	STRICT_SEND	29	OK	13	30	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_remainder_division_v28	7	3	31	71	69	29	STRICT_SEND	28	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_remainder_division_v29	7	3	31	71	69	29	STRICT_SEND	29	OK	12	28	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_0_v28	1	1	100	99	99	100	STRICT_SEND	28	OK	99	99	1
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_0_v29	1	1	100	99	99	100	STRICT_SEND	29	OK	99	99	1
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_1_v28	1	1	100	100	100	100	STRICT_SEND	28	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_1_v29	1	1	100	100	100	100	STRICT_SEND	29	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_2_v28	1	1	100	101	101	100	STRICT_SEND	28	OK	100	100	0
+v1	exchange_v10_without_price_error_thresholds	without_strict_send_value_delta_2_v29	1	1	100	101	101	100	STRICT_SEND	29	OK	100	100	0
+#schema	exchange_v10	12	13
+v1	exchange_v10	exchange_without_wheat_stays_strict_send_v28	3	2	100	100	10	100	STRICT_SEND	28	OK	6	10	1
+v1	exchange_v10	exchange_without_wheat_stays_strict_send_v29	3	2	100	100	10	100	STRICT_SEND	29	OK	6	10	1
+v1	exchange_v10	exchange_without_wheat_stays_wheat_more_v28	3	2	100	100	10	100	NORMAL	28	OK	6	9	1
+v1	exchange_v10	exchange_without_wheat_stays_wheat_more_v29	3	2	100	100	10	100	NORMAL	29	OK	6	9	1
+v1	exchange_v10	exchange_without_wheat_stays_strict_receive_v28	2	3	100	100	10	100	STRICT_RECEIVE	28	OK	15	10	1
+v1	exchange_v10	exchange_without_wheat_stays_strict_receive_v29	2	3	100	100	10	100	STRICT_RECEIVE	29	OK	15	10	1
+v1	exchange_v10	exchange_without_wheat_stays_sheep_more_v28	2	3	100	100	10	100	NORMAL	28	OK	15	10	1
+v1	exchange_v10	exchange_without_wheat_stays_sheep_more_v29	2	3	100	100	10	100	NORMAL	29	OK	15	10	1
+v1	exchange_v10	exchange_without_sheep_stays_wheat_more_v28	3	2	10	100	100	100	NORMAL	28	OK	10	15	0
+v1	exchange_v10	exchange_without_sheep_stays_wheat_more_v29	3	2	10	100	100	100	NORMAL	29	OK	10	15	0
+v1	exchange_v10	exchange_without_sheep_stays_sheep_more_v28	2	3	10	100	100	100	NORMAL	28	OK	9	6	0
+v1	exchange_v10	exchange_without_sheep_stays_sheep_more_v29	2	3	10	100	100	100	NORMAL	29	OK	9	6	0
+v1	exchange_v10	exchange_without_normal_all_zero_v28	1	1	0	0	0	0	NORMAL	28	OK	0	0	0
+v1	exchange_v10	exchange_without_normal_all_zero_v29	1	1	0	0	0	0	NORMAL	29	OK	0	0	0
+v1	exchange_v10	exchange_without_normal_unit_v28	1	1	1	1	1	1	NORMAL	28	OK	1	1	0
+v1	exchange_v10	exchange_without_normal_unit_v29	1	1	1	1	1	1	NORMAL	29	OK	1	1	0
+v1	exchange_v10	exchange_without_normal_exact_division_v28	7	3	30	70	70	30	NORMAL	28	OK	12	28	0
+v1	exchange_v10	exchange_without_normal_exact_division_v29	7	3	30	70	70	30	NORMAL	29	OK	0	0	0
+v1	exchange_v10	exchange_without_normal_remainder_division_v28	7	3	31	71	69	29	NORMAL	28	OK	12	28	0
+v1	exchange_v10	exchange_without_normal_remainder_division_v29	7	3	31	71	69	29	NORMAL	29	OK	12	28	0
+v1	exchange_v10	exchange_without_normal_value_delta_0_v28	1	1	100	99	99	100	NORMAL	28	OK	99	99	1
+v1	exchange_v10	exchange_without_normal_value_delta_0_v29	1	1	100	99	99	100	NORMAL	29	OK	99	99	1
+v1	exchange_v10	exchange_without_normal_value_delta_1_v28	1	1	100	100	100	100	NORMAL	28	OK	100	100	0
+v1	exchange_v10	exchange_without_normal_value_delta_1_v29	1	1	100	100	100	100	NORMAL	29	OK	100	100	0
+v1	exchange_v10	exchange_without_normal_value_delta_2_v28	1	1	100	101	101	100	NORMAL	28	OK	100	100	0
+v1	exchange_v10	exchange_without_normal_value_delta_2_v29	1	1	100	101	101	100	NORMAL	29	OK	100	100	0
+v1	exchange_v10	exchange_without_strict_send_all_zero_v28	1	1	0	0	0	0	STRICT_SEND	28	ERR	RUNTIME
+v1	exchange_v10	exchange_without_strict_send_all_zero_v29	1	1	0	0	0	0	STRICT_SEND	29	ERR	RUNTIME
+v1	exchange_v10	exchange_without_strict_send_unit_v28	1	1	1	1	1	1	STRICT_SEND	28	OK	1	1	0
+v1	exchange_v10	exchange_without_strict_send_unit_v29	1	1	1	1	1	1	STRICT_SEND	29	OK	1	1	0
+v1	exchange_v10	exchange_without_strict_send_exact_division_v28	7	3	30	70	70	30	STRICT_SEND	28	OK	12	28	0
+v1	exchange_v10	exchange_without_strict_send_exact_division_v29	7	3	30	70	70	30	STRICT_SEND	29	ERR	RUNTIME
+v1	exchange_v10	exchange_without_strict_send_remainder_division_v28	7	3	31	71	69	29	STRICT_SEND	28	OK	12	28	0
+v1	exchange_v10	exchange_without_strict_send_remainder_division_v29	7	3	31	71	69	29	STRICT_SEND	29	OK	12	28	0
+v1	exchange_v10	exchange_without_strict_send_value_delta_0_v28	1	1	100	99	99	100	STRICT_SEND	28	OK	99	99	1
+v1	exchange_v10	exchange_without_strict_send_value_delta_0_v29	1	1	100	99	99	100	STRICT_SEND	29	OK	99	99	1
+v1	exchange_v10	exchange_without_strict_send_value_delta_1_v28	1	1	100	100	100	100	STRICT_SEND	28	OK	100	100	0
+v1	exchange_v10	exchange_without_strict_send_value_delta_1_v29	1	1	100	100	100	100	STRICT_SEND	29	OK	100	100	0
+v1	exchange_v10	exchange_without_strict_send_value_delta_2_v28	1	1	100	101	101	100	STRICT_SEND	28	OK	100	100	0
+v1	exchange_v10	exchange_without_strict_send_value_delta_2_v29	1	1	100	101	101	100	STRICT_SEND	29	OK	100	100	0
+#schema	adjust_offer	9	10
+v1	adjust_offer	adjust_limits_low_price_above_v28	1	1000	2001	9223372036854775807	28	OK	2000
+v1	adjust_offer	adjust_limits_low_price_above_v29	1	1000	2001	9223372036854775807	29	OK	2000
+v1	adjust_offer	adjust_limits_low_price_exact_v28	1	1000	2000	9223372036854775807	28	OK	2000
+v1	adjust_offer	adjust_limits_low_price_exact_v29	1	1000	2000	9223372036854775807	29	OK	2000
+v1	adjust_offer	adjust_limits_low_price_below_v28	1	1000	1999	9223372036854775807	28	OK	1000
+v1	adjust_offer	adjust_limits_low_price_below_v29	1	1000	1999	9223372036854775807	29	OK	1000
+v1	adjust_offer	adjust_limits_low_price_recv3_v28	1	1000	2000	3	28	OK	2000
+v1	adjust_offer	adjust_limits_low_price_recv3_v29	1	1000	2000	3	29	OK	2000
+v1	adjust_offer	adjust_limits_low_price_recv2_v28	1	1000	2000	2	28	OK	2000
+v1	adjust_offer	adjust_limits_low_price_recv2_v29	1	1000	2000	2	29	OK	2000
+v1	adjust_offer	adjust_limits_low_price_recv1_v28	1	1000	2000	1	28	OK	1000
+v1	adjust_offer	adjust_limits_low_price_recv1_v29	1	1000	2000	1	29	OK	1000
+v1	adjust_offer	adjust_limits_high_price_above_v28	1000	1	401	9223372036854775807	28	OK	401
+v1	adjust_offer	adjust_limits_high_price_above_v29	1000	1	401	9223372036854775807	29	OK	401
+v1	adjust_offer	adjust_limits_high_price_exact_v28	1000	1	400	9223372036854775807	28	OK	400
+v1	adjust_offer	adjust_limits_high_price_exact_v29	1000	1	400	9223372036854775807	29	OK	400
+v1	adjust_offer	adjust_limits_high_price_below_v28	1000	1	399	9223372036854775807	28	OK	399
+v1	adjust_offer	adjust_limits_high_price_below_v29	1000	1	399	9223372036854775807	29	OK	399
+v1	adjust_offer	adjust_limits_high_price_recv_above_v28	1000	1	400	400001	28	OK	400
+v1	adjust_offer	adjust_limits_high_price_recv_above_v29	1000	1	400	400001	29	OK	400
+v1	adjust_offer	adjust_limits_high_price_recv_exact_v28	1000	1	400	400000	28	OK	400
+v1	adjust_offer	adjust_limits_high_price_recv_exact_v29	1000	1	400	400000	29	OK	400
+v1	adjust_offer	adjust_limits_high_price_recv_below_v28	1000	1	400	399999	28	OK	399
+v1	adjust_offer	adjust_limits_high_price_recv_below_v29	1000	1	400	399999	29	OK	399
+v1	adjust_offer	adjust_idempotent_wheat_more_v28	7	3	1000	9223372036854775807	28	OK	1000
+v1	adjust_offer	adjust_idempotent_wheat_more_v29	7	3	1000	9223372036854775807	29	OK	1000
+v1	adjust_offer	adjust_idempotent_sheep_more_v28	3	7	1000	9223372036854775807	28	OK	999
+v1	adjust_offer	adjust_idempotent_sheep_more_v29	3	7	1000	9223372036854775807	29	OK	999
+v1	adjust_offer	adjust_idempotent_sheep_more_again_v28	3	7	999	9223372036854775807	28	OK	999
+v1	adjust_offer	adjust_idempotent_sheep_more_again_v29	3	7	999	9223372036854775807	29	OK	999
+v1	adjust_offer	adjust_threshold_26_v28	3	2	26	9223372036854775807	28	OK	26
+v1	adjust_offer	adjust_threshold_26_v29	3	2	26	9223372036854775807	29	OK	26
+v1	adjust_offer	adjust_threshold_27_v28	3	2	27	9223372036854775807	28	OK	0
+v1	adjust_offer	adjust_threshold_27_v29	3	2	27	9223372036854775807	29	OK	0
+v1	adjust_offer	adjust_threshold_28_v28	3	2	28	9223372036854775807	28	OK	28
+v1	adjust_offer	adjust_threshold_28_v29	3	2	28	9223372036854775807	29	OK	28
+v1	adjust_offer	adjust_threshold_29_v28	3	2	29	9223372036854775807	28	OK	0
+v1	adjust_offer	adjust_threshold_29_v29	3	2	29	9223372036854775807	29	OK	0
+v1	adjust_offer	adjust_threshold_50_v28	3	2	50	9223372036854775807	28	OK	50
+v1	adjust_offer	adjust_threshold_50_v29	3	2	50	9223372036854775807	29	OK	50
+#schema	offer_selling_liabilities	8	9
+v1	offer_selling_liabilities	offer_selling_liabilities_unit_v28	1	1	28	1	OK	1
+v1	offer_selling_liabilities	offer_selling_liabilities_unit_v29	1	1	29	1	OK	1
+#schema	offer_buying_liabilities	8	9
+v1	offer_buying_liabilities	offer_buying_liabilities_unit_v28	1	1	28	1	OK	1
+v1	offer_buying_liabilities	offer_buying_liabilities_unit_v29	1	1	29	1	OK	1
+v1	offer_selling_liabilities	offer_selling_liabilities_reservation_anomaly_v28	101	100	28	1	OK	1
+v1	offer_selling_liabilities	offer_selling_liabilities_reservation_anomaly_v29	101	100	29	1	OK	1
+v1	offer_buying_liabilities	offer_buying_liabilities_reservation_anomaly_v28	101	100	28	1	OK	1
+v1	offer_buying_liabilities	offer_buying_liabilities_reservation_anomaly_v29	101	100	29	1	OK	1
+v1	offer_selling_liabilities	offer_selling_liabilities_reservation_anomaly_next_v28	101	100	28	2	OK	2
+v1	offer_selling_liabilities	offer_selling_liabilities_reservation_anomaly_next_v29	101	100	29	2	OK	2
+v1	offer_buying_liabilities	offer_buying_liabilities_reservation_anomaly_next_v28	101	100	28	2	OK	2
+v1	offer_buying_liabilities	offer_buying_liabilities_reservation_anomaly_next_v29	101	100	29	2	OK	2
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_sell_anomaly_v28	101	100	28	3	OK	3
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_sell_anomaly_v29	101	100	29	3	OK	3
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_sell_anomaly_v28	101	100	28	3	OK	3
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_sell_anomaly_v29	101	100	29	3	OK	3
+v1	offer_selling_liabilities	offer_selling_liabilities_fractional_bad_v28	5	3	28	20	OK	20
+v1	offer_selling_liabilities	offer_selling_liabilities_fractional_bad_v29	5	3	29	20	OK	20
+v1	offer_buying_liabilities	offer_buying_liabilities_fractional_bad_v28	5	3	28	20	OK	33
+v1	offer_buying_liabilities	offer_buying_liabilities_fractional_bad_v29	5	3	29	20	OK	33
+v1	offer_selling_liabilities	offer_selling_liabilities_fractional_bad_next_v28	5	3	28	21	OK	21
+v1	offer_selling_liabilities	offer_selling_liabilities_fractional_bad_next_v29	5	3	29	21	OK	21
+v1	offer_buying_liabilities	offer_buying_liabilities_fractional_bad_next_v28	5	3	28	21	OK	35
+v1	offer_buying_liabilities	offer_buying_liabilities_fractional_bad_next_v29	5	3	29	21	OK	35
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_buy_anomaly_v28	100	101	28	3	OK	3
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_buy_anomaly_v29	100	101	29	3	OK	3
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_buy_anomaly_v28	100	101	28	3	OK	2
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_buy_anomaly_v29	100	101	29	3	OK	2
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_buy_anomaly_next_v28	100	101	28	4	OK	4
+v1	offer_selling_liabilities	offer_selling_liabilities_raw_buy_anomaly_next_v29	100	101	29	4	OK	4
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_buy_anomaly_next_v28	100	101	28	4	OK	3
+v1	offer_buying_liabilities	offer_buying_liabilities_raw_buy_anomaly_next_v29	100	101	29	4	OK	3
+v1	offer_selling_liabilities	offer_selling_liabilities_low_price_unit_v28	1	2	28	1	OK	0
+v1	offer_selling_liabilities	offer_selling_liabilities_low_price_unit_v29	1	2	29	1	OK	0
+v1	offer_buying_liabilities	offer_buying_liabilities_low_price_unit_v28	1	2	28	1	OK	0
+v1	offer_buying_liabilities	offer_buying_liabilities_low_price_unit_v29	1	2	29	1	OK	0
+v1	offer_selling_liabilities	offer_selling_liabilities_steep_saturated_v28	2147483647	1	28	9223372036854775807	OK	4294967298
+v1	offer_selling_liabilities	offer_selling_liabilities_steep_saturated_v29	2147483647	1	29	9223372036854775807	OK	4294967298
+v1	offer_buying_liabilities	offer_buying_liabilities_steep_saturated_v28	2147483647	1	28	9223372036854775807	OK	9223372036854775806
+v1	offer_buying_liabilities	offer_buying_liabilities_steep_saturated_v29	2147483647	1	29	9223372036854775807	OK	9223372036854775806
+v1	offer_selling_liabilities	offer_selling_liabilities_near_unit_max_v28	2147483647	2147483646	28	9223372036854775807	OK	9223372032559808508
+v1	offer_selling_liabilities	offer_selling_liabilities_near_unit_max_v29	2147483647	2147483646	29	9223372036854775807	OK	9223372032559808508
+v1	offer_buying_liabilities	offer_buying_liabilities_near_unit_max_v28	2147483647	2147483646	28	9223372036854775807	OK	9223372036854775806
+v1	offer_buying_liabilities	offer_buying_liabilities_near_unit_max_v29	2147483647	2147483646	29	9223372036854775807	OK	9223372036854775806
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_price_n_v28	0	1	28	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_price_n_v29	0	1	29	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_price_n_v28	0	1	28	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_price_n_v29	0	1	29	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_price_d_v28	1	0	28	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_price_d_v29	1	0	29	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_price_d_v28	1	0	28	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_price_d_v29	1	0	29	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_price_n_v28	-1	1	28	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_price_n_v29	-1	1	29	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_price_n_v28	-1	1	28	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_price_n_v29	-1	1	29	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_price_d_v28	1	-1	28	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_price_d_v29	1	-1	29	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_price_d_v28	1	-1	28	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_price_d_v29	1	-1	29	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_amount_v28	1	1	28	0	OK	0
+v1	offer_selling_liabilities	offer_selling_liabilities_zero_amount_v29	1	1	29	0	OK	0
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_amount_v28	1	1	28	0	OK	0
+v1	offer_buying_liabilities	offer_buying_liabilities_zero_amount_v29	1	1	29	0	OK	0
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_amount_v28	1	1	28	-1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_negative_amount_v29	1	1	29	-1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_amount_v28	1	1	28	-1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_negative_amount_v29	1	1	29	-1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_minimum_amount_v28	1	1	28	-9223372036854775808	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_minimum_amount_v29	1	1	29	-9223372036854775808	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_minimum_amount_v28	1	1	28	-9223372036854775808	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_minimum_amount_v29	1	1	29	-9223372036854775808	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_small_pn0_pd0_a0_v28	0	0	28	0	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_small_pn0_pd0_a0_v29	0	0	29	0	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_small_pn0_pd0_a0_v28	0	0	28	0	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_small_pn0_pd0_a0_v29	0	0	29	0	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_small_pn0_pd0_a1_v28	0	0	28	1	ERR	ASSERTION
+v1	offer_selling_liabilities	offer_selling_liabilities_small_pn0_pd0_a1_v29	0	0	29	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_small_pn0_pd0_a1_v28	0	0	28	1	ERR	ASSERTION
+v1	offer_buying_liabilities	offer_buying_liabilities_small_pn0_pd0_a1_v29	0	0	29	1	ERR	ASSERTION
+#schema	offer_lifecycle_sell	14	15
+v1	offer_lifecycle_sell	offer_lifecycle_sell_clear_for_zero_101_100_a2_v28	101	100	28	2	2	0	3	0	0	1003	OK	12	1	101	100	2	2	2	3	0	2	1	1003	1001	1	2	2	0	0	0	1003	2	0	9223372036854775805	0	9223372036854775807	2	0
+#schema	offer_lifecycle_buy	14	15
+v1	offer_lifecycle_buy	offer_lifecycle_buy_clear_for_zero_100_101_a3_v28	100	101	28	3	2	0	2	0	0	1002	OK	12	1	101	100	1	2	1	2	0	1	1	1002	1001	1	1	1	0	1	0	1002	1	0	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_adjacent_accept_101_100_a3_v28	101	100	28	3	3	0	4	0	0	4	OK	12	1	101	100	3	3	3	4	0	3	1	4	1	1	3	3	0	0	0	4	3	0	9223372036854775804	0	9223372036854775807	3	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_adjacent_accept_100_101_a4_v28	100	101	28	4	3	0	3	0	0	3	OK	12	1	101	100	2	3	2	3	0	2	1	3	1	1	2	2	0	1	0	3	2	0	9223372036854775805	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_minimum_v28	1	1	28	4	4	0	4	0	0	4	OK	12	1	1	1	4	4	4	4	0	4	1	4	0	1	4	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_one_above_v28	1	1	28	4	4	0	4	0	0	5	OK	12	1	1	1	4	4	4	4	0	4	1	5	1	1	4	4	0	0	0	5	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_headroom_v28	1	1	28	4	4	0	4	0	0	1004	OK	12	1	1	1	4	4	4	4	0	4	1	1004	1000	1	4	4	0	0	0	1004	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_underfunded_v28	1	1	28	4	3	0	4	0	0	4	OK	3	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_line_full_v28	1	1	28	4	4	0	3	0	0	4	OK	2	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_unit_invalid_limit_v28	1	1	28	4	4	0	4	0	0	3	OK	5	1	1	1	4	4	4	4	0	4	0	3	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_preexisting_liabilities_v28	3	2	28	7	9	2	15	1	3	15	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_zero_value_edge_v28	1	2147483647	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_sell_int32_boundary_v28	2147483647	2147483646	28	1000	1000	0	1001	0	0	2001	OK	12	1	2147483647	2147483646	1000	1000	1000	1001	0	1000	1	2001	1001	1	1000	1000	0	0	0	2001	1000	0	9223372036854774807	0	9223372036854775807	1000	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_minimum_v28	1	1	28	4	4	0	4	0	0	4	OK	12	1	1	1	4	4	4	4	0	4	1	4	0	1	4	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_one_above_v28	1	1	28	4	4	0	4	0	0	5	OK	12	1	1	1	4	4	4	4	0	4	1	5	1	1	4	4	0	0	0	5	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_headroom_v28	1	1	28	4	4	0	4	0	0	1004	OK	12	1	1	1	4	4	4	4	0	4	1	1004	1000	1	4	4	0	0	0	1004	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_underfunded_v28	1	1	28	4	3	0	4	0	0	4	OK	3	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_line_full_v28	1	1	28	4	4	0	3	0	0	4	OK	2	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_unit_invalid_limit_v28	1	1	28	4	4	0	4	0	0	3	OK	5	1	1	1	4	4	4	4	0	4	0	3	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_preexisting_liabilities_v28	3	2	28	7	13	2	11	1	3	11	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_zero_value_edge_v28	1	2147483647	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_buy_int32_boundary_v28	2147483647	2147483646	28	1000	1001	0	1000	0	0	2000	OK	12	1	2147483646	2147483647	1001	1001	1001	1000	0	1000	1	2000	1000	1	1001	1000	0	0	0	2000	1000	0	9223372036854774807	0	9223372036854775807	1001	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_000_v28	1	1	28	1	2	1	5	2	2	5	OK	12	1	1	1	1	2	2	5	2	3	1	5	0	1	1	1	0	1	1	5	3	2	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_001_v28	2	1	28	1	1	0	2	0	0	2	OK	12	1	2	1	1	1	1	2	0	2	1	2	0	1	1	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	1	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_002_v28	1	2	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_003_v28	101	100	28	1	1	0	2	0	0	2	OK	12	1	101	100	1	1	1	2	0	1	1	2	1	1	1	1	0	0	0	2	1	0	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_004_v28	100	101	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_005_v28	5	3	28	1	1	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_006_v28	3	5	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_007_v28	2147483647	2147483646	28	1	1	0	2	0	0	2	OK	12	1	2147483647	2147483646	1	1	1	2	0	1	1	2	1	1	1	1	0	0	0	2	1	0	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_008_v28	1	1	28	2	2	0	2	0	0	2	OK	12	1	1	1	2	2	2	2	0	2	1	2	0	1	2	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_009_v28	2	1	28	2	2	0	4	0	0	4	OK	12	1	2	1	2	2	2	4	0	4	1	4	0	1	2	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_010_v28	1	2	28	2	2	0	1	0	0	1	OK	12	1	1	2	2	2	2	1	0	1	1	1	0	1	2	1	0	0	0	1	1	0	9223372036854775806	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_011_v28	101	100	28	2	2	0	3	0	0	3	OK	12	1	101	100	2	2	2	3	0	2	1	3	1	1	2	2	0	0	0	3	2	0	9223372036854775805	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_012_v28	100	101	28	2	2	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_013_v28	5	3	28	2	2	0	4	0	0	4	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_014_v28	3	5	28	2	2	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_015_v28	2147483647	2147483646	28	2	2	0	3	0	0	3	OK	12	1	2147483647	2147483646	2	2	2	3	0	2	1	3	1	1	2	2	0	0	0	3	2	0	9223372036854775805	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_016_v28	1	1	28	3	3	0	3	0	0	3	OK	12	1	1	1	3	3	3	3	0	3	1	3	0	1	3	3	0	0	0	3	3	0	9223372036854775804	0	9223372036854775807	3	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_017_v28	2	1	28	3	4	1	10	1	3	10	OK	12	1	2	1	3	4	4	10	1	9	1	10	0	1	3	6	0	1	1	10	7	3	9223372036854775801	0	9223372036854775807	3	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_018_v28	1	2	28	3	3	0	2	0	0	2	OK	12	1	1	2	2	3	2	2	0	1	1	2	1	1	2	1	0	1	0	2	1	0	9223372036854775806	0	9223372036854775807	2	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_019_v28	101	100	28	3	3	0	4	0	0	4	OK	12	1	101	100	3	3	3	4	0	3	1	4	1	1	3	3	0	0	0	4	3	0	9223372036854775804	0	9223372036854775807	3	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_020_v28	100	101	28	3	3	0	3	0	0	3	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_021_v28	5	3	28	3	3	0	5	0	0	5	OK	12	1	5	3	3	3	3	5	0	5	1	5	0	1	3	5	0	0	0	5	5	0	9223372036854775802	0	9223372036854775807	3	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_022_v28	3	5	28	3	3	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_023_v28	2147483647	2147483646	28	3	3	0	4	0	0	4	OK	12	1	2147483647	2147483646	3	3	3	4	0	3	1	4	1	1	3	3	0	0	0	4	3	0	9223372036854775804	0	9223372036854775807	3	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_024_v28	1	1	28	4	4	0	4	0	0	4	OK	12	1	1	1	4	4	4	4	0	4	1	4	0	1	4	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_025_v28	2	1	28	4	4	0	8	0	0	8	OK	12	1	2	1	4	4	4	8	0	8	1	8	0	1	4	8	0	0	0	8	8	0	9223372036854775799	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_026_v28	1	2	28	4	4	0	2	0	0	2	OK	12	1	1	2	4	4	4	2	0	2	1	2	0	1	4	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_027_v28	101	100	28	4	4	0	5	0	0	5	OK	12	1	101	100	4	4	4	5	0	4	1	5	1	1	4	4	0	0	0	5	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_sell	offer_lifecycle_sell_biased_028_v28	100	101	28	4	4	0	4	0	0	4	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_000_v28	1	1	28	1	2	1	6	2	3	6	OK	12	1	1	1	1	2	2	6	2	4	1	6	0	1	1	1	0	1	1	6	3	3	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_001_v28	2	1	28	1	2	0	1	0	0	1	OK	12	1	1	2	2	2	2	1	0	1	1	1	0	1	2	1	0	0	0	1	1	0	9223372036854775806	0	9223372036854775807	2	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_002_v28	1	2	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_003_v28	101	100	28	1	2	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_004_v28	100	101	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_005_v28	5	3	28	1	2	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_006_v28	3	5	28	1	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_007_v28	2147483647	2147483646	28	1	2	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_008_v28	1	1	28	2	2	0	2	0	0	2	OK	12	1	1	1	2	2	2	2	0	2	1	2	0	1	2	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	2	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_009_v28	2	1	28	2	4	0	2	0	0	2	OK	12	1	1	2	4	4	4	2	0	2	1	2	0	1	4	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	4	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_010_v28	1	2	28	2	1	0	2	0	0	2	OK	12	1	2	1	1	1	1	2	0	2	1	2	0	1	1	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	1	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_011_v28	101	100	28	2	3	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_012_v28	100	101	28	2	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_013_v28	5	3	28	2	4	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_014_v28	3	5	28	2	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_015_v28	2147483647	2147483646	28	2	3	0	2	0	0	2	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_016_v28	1	1	28	3	3	0	3	0	0	3	OK	12	1	1	1	3	3	3	3	0	3	1	3	0	1	3	3	0	0	0	3	3	0	9223372036854775804	0	9223372036854775807	3	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_017_v28	2	1	28	3	9	3	6	2	1	6	OK	12	1	1	2	6	9	9	6	2	4	1	6	0	1	6	3	0	3	3	6	5	1	9223372036854775804	0	9223372036854775807	6	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_018_v28	1	2	28	3	1	0	2	0	0	2	OK	12	1	2	1	1	1	1	2	0	2	1	2	0	1	1	2	0	0	0	2	2	0	9223372036854775805	0	9223372036854775807	1	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_019_v28	101	100	28	3	4	0	3	0	0	3	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_020_v28	100	101	28	3	2	0	2	0	0	2	OK	12	1	101	100	1	2	1	2	0	1	1	2	1	1	1	1	0	1	0	2	1	0	9223372036854775806	0	9223372036854775807	1	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_021_v28	5	3	28	3	5	0	3	0	0	3	OK	12	1	3	5	5	5	5	3	0	3	1	3	0	1	5	3	0	0	0	3	3	0	9223372036854775804	0	9223372036854775807	5	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_022_v28	3	5	28	3	1	0	1	0	0	1	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_023_v28	2147483647	2147483646	28	3	4	0	3	0	0	3	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_024_v28	1	1	28	4	4	0	4	0	0	4	OK	12	1	1	1	4	4	4	4	0	4	1	4	0	1	4	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	4	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_025_v28	2	1	28	4	8	0	4	0	0	4	OK	12	1	1	2	8	8	8	4	0	4	1	4	0	1	8	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	8	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_026_v28	1	2	28	4	2	0	4	0	0	4	OK	12	1	2	1	2	2	2	4	0	4	1	4	0	1	2	4	0	0	0	4	4	0	9223372036854775803	0	9223372036854775807	2	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_027_v28	101	100	28	4	5	0	4	0	0	4	OK	4	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0	0
+v1	offer_lifecycle_buy	offer_lifecycle_buy_biased_028_v28	100	101	28	4	3	0	3	0	0	3	OK	12	1	101	100	2	3	2	3	0	2	1	3	1	1	2	2	0	1	0	3	2	0	9223372036854775805	0	9223372036854775807	2	0

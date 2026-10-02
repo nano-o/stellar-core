@@ -1,0 +1,72 @@
+{
+  "blocks": [
+    {
+      "file": ".codex/config.toml",
+      "sha256": "d003dba742a37b335a81520923bbd33587566d8fcad18903357b5a3779a43c9c",
+      "syntax": "toml"
+    },
+    {
+      "file": "AGENTS.md",
+      "sha256": "2392594e5901b2eebcf0aba43f3276984a256b95e3b3a4c70db10a013242ac04",
+      "syntax": "markdown"
+    }
+  ],
+  "claude_skills": "aliases",
+  "component": "isabelle-tooling",
+  "directories": [
+    ".agents/skills/isabelle-assurance",
+    ".agents/skills/isabelle-differential",
+    ".agents/skills/isabelle-modeling",
+    ".agents/skills/isabelle-proving",
+    ".agents/skills/isabelle-setup"
+  ],
+  "files": {
+    ".agents/skills/isabelle-assurance/SKILL.md": {
+      "executable": false,
+      "sha256": "061a89ade6535c7b5f98f547791605c6e42e7ee68c5d2258a2743e42cfa9d268"
+    },
+    ".agents/skills/isabelle-differential/SKILL.md": {
+      "executable": false,
+      "sha256": "7390cf0ea483beef65f14cc1714e38ea71fe358712a0d6ffaf21c6500797fefd"
+    },
+    ".agents/skills/isabelle-modeling/SKILL.md": {
+      "executable": false,
+      "sha256": "70ca9239ef902f636ed0349ab2e922f15c52c823f1f0a43b7d812029381581a8"
+    },
+    ".agents/skills/isabelle-proving/SKILL.md": {
+      "executable": false,
+      "sha256": "cd4e0889ff3c3bd3e19fa639384ae7c1d7bccc9a1751f78226e0a926f59b9f47"
+    },
+    ".agents/skills/isabelle-setup/SKILL.md": {
+      "executable": false,
+      "sha256": "7cb70c7ba030d47d06dacccf2c6b0a78090e1bee2a01428629c2df5a48f62347"
+    },
+    ".claude/agents/ic2-prover.md": {
+      "executable": false,
+      "sha256": "a12f173b372e520d58a5f34ab9ec386973761c3ca6dda7ea499776e4c4b99409"
+    },
+    ".codex/agents/ic2_prover.toml": {
+      "executable": false,
+      "sha256": "0a225a0a96a6443a572208fec287e6795fbfff57aa7c7a2a32617e9f8bf1ec35"
+    }
+  },
+  "format": 1,
+  "json_entries": [
+    {
+      "element": false,
+      "file": ".mcp.json",
+      "pointer": "/mcpServers/iq",
+      "sha256": "c67305659e15e0e63a3b6729ac5de8870642bc500db04d8f8cb3d6b7ab7f0737"
+    }
+  ],
+  "link_source": null,
+  "mode": "copy",
+  "revision": "015f774efea03f13780fc8bd96e03d97fbbd716a",
+  "symlinks": {
+    ".claude/skills/isabelle-assurance": "../../.agents/skills/isabelle-assurance",
+    ".claude/skills/isabelle-differential": "../../.agents/skills/isabelle-differential",
+    ".claude/skills/isabelle-modeling": "../../.agents/skills/isabelle-modeling",
+    ".claude/skills/isabelle-proving": "../../.agents/skills/isabelle-proving",
+    ".claude/skills/isabelle-setup": "../../.agents/skills/isabelle-setup"
+  }
+}

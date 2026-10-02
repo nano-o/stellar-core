@@ -1,0 +1,10 @@
+# BEGIN isabelle-tooling
+# Managed by isabelle-tooling; change it with `isabelle-tooling update`.
+[mcp_servers.iq]
+command = "bash"
+args = ["-c", "exec \"$ISABELLE_TOOLING_ROOT/extension/bin/iq-bridge.sh\""]
+env_vars = ["ISABELLE_TOOLING_ROOT", "IQ_TOKEN_FILE", "XDG_CONFIG_HOME"]
+
+[mcp_servers.iq.env]
+IQ_MCP_BRIDGE_PORT = "8765"
+# END isabelle-tooling

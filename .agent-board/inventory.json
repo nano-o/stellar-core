@@ -1,0 +1,63 @@
+{
+  "blocks": [
+    {
+      "file": "AGENTS.md",
+      "sha256": "a34f6e30425eafa9c12ffa5b8d5930e3219d85237d63106580d64aa22a545ec2",
+      "syntax": "markdown"
+    }
+  ],
+  "claude_skills": "aliases",
+  "component": "agent-board",
+  "directories": [
+    ".agents/skills/agent-coordination"
+  ],
+  "files": {
+    ".agent-board/claude-hook.sh": {
+      "executable": true,
+      "sha256": "02c600b7c36d10cb0a6af0e6de40bffb8cddf2b2336484dc128934cb936b6b48"
+    },
+    ".agents/skills/agent-coordination/SKILL.md": {
+      "executable": false,
+      "sha256": "aaf45df1a7f57014fb30300e9cf51cb4ebbad9ff2b931e2166a5dca1da015b46"
+    },
+    ".agents/skills/agent-coordination/references/commands.md": {
+      "executable": false,
+      "sha256": "dfcb394539d59a3ca47122853211980a538adeb70a13c38a695b193024bf617c"
+    },
+    ".agents/skills/agent-coordination/references/delegation.md": {
+      "executable": false,
+      "sha256": "c18df26f439f2d3208c02a9d1634f67ddcba49e64190fbd6fc1b4cc6eca93b78"
+    },
+    ".agents/skills/agent-coordination/references/git.md": {
+      "executable": false,
+      "sha256": "804372924122df1a09b1ca4550ce81a12849b4700fc2b8f774b3580e14a10e69"
+    },
+    ".agents/skills/agent-coordination/references/recovery.md": {
+      "executable": false,
+      "sha256": "752d573e896dfdb3dfc8998f57a2a6824bf25fe98b3cea0e40fbe0c318c1d088"
+    }
+  },
+  "format": 1,
+  "json_entries": [
+    {
+      "element": true,
+      "file": ".claude/settings.json",
+      "marker": ".agent-board/claude-hook.sh",
+      "pointer": "/hooks/SessionStart",
+      "sha256": "86406f2063d8e95bd7da86d69f97869ce9c2703d28c6c67e7d7ad646f868e88d"
+    },
+    {
+      "element": true,
+      "file": ".claude/settings.json",
+      "marker": ".agent-board/claude-hook.sh",
+      "pointer": "/hooks/UserPromptSubmit",
+      "sha256": "86406f2063d8e95bd7da86d69f97869ce9c2703d28c6c67e7d7ad646f868e88d"
+    }
+  ],
+  "link_source": null,
+  "mode": "copy",
+  "revision": "6c6d68196280113e78a74095261cfcb9ce8458ba",
+  "symlinks": {
+    ".claude/skills/agent-coordination": "../../.agents/skills/agent-coordination"
+  }
+}

@@ -5,6 +5,9 @@
 #pragma once
 
 #include "transactions/OperationFrame.h"
+#ifdef BUILD_TESTS
+#include "util/numeric128.h"
+#endif
 #include <functional>
 #include <vector>
 
@@ -242,6 +245,19 @@ struct ExchangeResultV10
     int64_t numSheepSend;
     bool wheatStays;
 };
+
+#ifdef BUILD_TESTS
+// Test-only entry points for the two file-static helpers in OfferExchange.cpp.
+// They exist so the Isabelle differential harness can compare the modeled
+// arithmetic against the real implementation directly, rather than only
+// through the exchange branches that call them. They are compiled out of
+// production builds and are not part of the production API.
+uint128_t calculateOfferValueForTesting(int32_t priceN, int32_t priceD,
+                                        int64_t maxSend, int64_t maxReceive);
+int64_t calculateOfferAmountFromValueForTesting(int32_t priceN, int32_t priceD,
+                                                int64_t maxSend,
+                                                int64_t maxReceive);
+#endif
 
 int64_t canSellAtMostBasedOnSheep(LedgerTxnHeader const& header,
                                   Asset const& sheep,
