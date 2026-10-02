@@ -9,10 +9,10 @@ session OfferExchange = HOL +
     Offer_Exchange_Adjustment
     Offer_Exchange_Posting_Refinement
     Offer_Exchange_Divide_Layered
-  theories [document = false]
     Offer_Exchange_Lifecycle
     Offer_Exchange_Stored_Offers
     Offer_Exchange_Migration
+  theories [document = false]
     Offer_Exchange_Test_Interface
   document_files
     "root.tex"
