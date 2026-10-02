@@ -56,7 +56,7 @@
   ],
   "link_source": null,
   "mode": "copy",
-  "revision": "6c6d68196280113e78a74095261cfcb9ce8458ba",
+  "revision": "d0c73a97788687333daa94ec67628c292ae94bbc",
   "symlinks": {
     ".claude/skills/agent-coordination": "../../.agents/skills/agent-coordination"
   }

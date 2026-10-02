@@ -61,7 +61,7 @@
   ],
   "link_source": null,
   "mode": "copy",
-  "revision": "015f774efea03f13780fc8bd96e03d97fbbd716a",
+  "revision": "f013ec623e62051ed3bcdab62eacbe3f8965cb90",
   "symlinks": {
     ".claude/skills/isabelle-assurance": "../../.agents/skills/isabelle-assurance",
     ".claude/skills/isabelle-differential": "../../.agents/skills/isabelle-differential",
