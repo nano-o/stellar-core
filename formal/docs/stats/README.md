@@ -2,8 +2,9 @@
 
 Size and coverage figures for the Isabelle/HOL model of the offer exchange,
 collected for a talk. Every number here comes from `generated.md`, which the
-scripts in this directory regenerate. The figures below are for commit
-`e54c31586`.
+scripts in this directory regenerate. The figures below are for the theories,
+C++ and differential harness as of commit `e54c31586`, the commit named in the
+header of `generated.md`.
 
 | File | What it is |
 |---|---|
@@ -23,49 +24,67 @@ git diff formal/docs/stats/generated.md
 
 ## Headline numbers
 
-**C++ covered.** The code-level model follows **668 lines of C++ code**
-(non-blank, non-comment) in **39 functions**: 30 in full (422 lines) and 9 in
-part (246 of their 682 lines). They come from seven files: `numeric.cpp`,
-`ProtocolVersion.cpp`, `OfferExchange.cpp`, `TransactionUtils.cpp`,
-`ManageOfferOpFrameBase.cpp`, and the ManageSell/ManageBuy frames. The
-largest uncovered part is `ManageOfferOpFrameBase::doApply`: 55 of its 275
-code lines are modelled (only the new-offer path that does not cross).
+**C++ covered.** The code-level model follows **790 lines of C++ code**
+(non-blank, non-comment) in **53 functions**: 38 in full (461 lines) and 15 in
+part (329 of their 838 lines). 270 of the 790 are lone braces or `else`; the
+other 520 are signatures, conditions and statements. They come from eight
+files: `numeric.cpp`, `ProtocolVersion.cpp`, `types.cpp`, `OfferExchange.cpp`,
+`TransactionUtils.cpp`, `ManageOfferOpFrameBase.cpp`, and the
+ManageSell/ManageBuy frames. The largest uncovered part is
+`ManageOfferOpFrameBase::doApply`: 53 of its 275 code lines are modelled
+(only the new-offer path that does not cross).
 
 **Isabelle.** There are 25,485 lines in 9 theories (24,414 non-blank):
 
 | Kind | Lines |
 |---|---|
-| Proofs | 13,676 |
-| Theorem statements | 4,822 |
-| Prose (`text` and `section` blocks, comments) | 3,094 |
-| Definitions | 2,737 |
+| Proofs | 13,477 |
+| Theorem statements | 4,000 |
+| Prose (`text` and `section` blocks, comments) | 4,195 |
+| Definitions | 2,657 |
 
-The session has **397 theorems** and no `sorry`. Of these, 42 are concrete
-checks proved by `by eval` alone. The median proof is 12 lines, the mean 34,
-and the longest 446. 88 proofs are one-liners and 33 run to 100 lines or
-more. There are about 2,490 Isar steps. Proof methods: `simp` 1,580,
-`linarith` 175, `auto` 162, `cases` 133, `blast` 118, `meson` 19, `metis` 5,
-and no `smt`.
+The session has **397 theorems** and no `sorry`. (One unfinished theorem
+sits inside a `(* *)` comment in `Offer_Exchange_Specification.thy`, lines
+560–594. It is not part of the session, and its lines count as prose.) Of
+the 397, 42 are concrete checks proved by `by eval` alone. The median proof
+is 12 lines, the mean 34, and the longest 446. 93 proofs are one-liners and
+29 run to 100 lines or more. There are about 2,860 Isar steps (`have` 2,050,
+`show` 650, `obtain` 161). Counting the first method of each `by` or
+`apply`: `simp` 1,580, `linarith` 175, `auto` 162, `cases` 133, `blast` 118,
+`simp_all` 88, `meson` 19, `metis` 5, and no `smt`.
 
-**Definition lines by layer:**
+**Definition lines by layer** (comment lines excluded):
 
 | Layer | Lines |
 |---|---|
-| Code-level model, one definition per C++ function (59 `C++:` tags) | 749 |
-| Code-level plumbing (word types, `cxx_result` monad, records, protocol options) | 176 |
+| Code-level model, one definition per C++ function (52 `C++:` tags) | 685 |
+| Code-level plumbing (word types, `cxx_result` monad, records, protocol options) | 172 |
 | Integer characterizations | 250 |
 | Property predicates (the intended properties, as definitions) | 328 |
-| Abstract specification (`Offer_Exchange_Specification.thy`) | 307 |
+| Abstract specification (`Offer_Exchange_Specification.thy`) | 304 |
 | Ideal real-valued exchange | 83 |
 | Scenarios and witnesses | 129 |
 | Exported test interface | 406 |
-| Repeated in `Offer_Exchange_Posting_Refinement.thy` | 178 |
+| Repeated in `Offer_Exchange_Posting_Refinement.thy` (7 more `C++:` tags) | 169 |
 
 **Ratios.**
-- About 20 proof lines per modelled C++ line (13,676 / 668).
-- About 38 theory lines per modelled C++ line (25,485 / 668).
-- The code-level definitions are about the same size as the C++ they follow
-  (749 / 668 ≈ 1.1), as expected of a statement-by-statement model.
+- About 17 proof lines per modelled C++ code line (13,477 / 790), or 26 per
+  line that is not just a brace or `else` (13,477 / 520).
+- About 32 theory lines per modelled C++ code line (25,485 / 790).
+- The tagged definitions are 685 lines, against 790 lines of C++ code. About
+  155 of the 685 are a second form of a function that already has one:
+  - `big_divide_or_throw`, `big_divide_or_throw128` and `big_multiply`,
+    beside the layered forms;
+  - `offer_*_liabilities` and `manage_buy_*_liabilities`, beside their
+    `_at_version` forms;
+  - `preflight_offer` and `post_offer`, beside the `_core` forms;
+  - `exchange_v10`, `exchange_v10_without_price_error_thresholds` and
+    `adjust_offer`, beside their `_with_options` forms.
+
+  Another 10 lines are tagged constants such as `int64_max`. The comparison
+  is between line counts. It does not check that the model follows the C++
+  statement by statement; that check is the review in step 4 of the
+  checklist.
 
 **Differential testing.**
 - **667,238 records over 19 tags**. By kind, split approximately on case-id
@@ -73,7 +92,8 @@ and no `smt`.
   - about 415k exhaustive small-domain cases;
   - about 221k random;
   - about 30k boundary;
-  - 679 hand-written.
+  - 679 other: hand-written cases, and generated cases whose ids carry none
+    of the keywords.
 - The ledger-versioned tags run at protocols 28 and 29 equally (212,789
   records each).
 - The two lifecycle tags have 422 records each: 211 scenarios at each
@@ -84,9 +104,10 @@ and no `smt`.
 - The harness is `generate_cases.py` (2,474 lines), `model_dispatch.ML`
   (660), `run.sh` (365) and the test-interface theory (482).
 
-**C++ tests.** `ExchangeTests.cpp` gains 1,992 lines: five regression
-`TEST_CASE`s plus the differential driver. `OfferExchange.cpp/.h` gain 32
-lines, all test-only entry points under `BUILD_TESTS`.
+**C++ tests.** `ExchangeTests.cpp` gains 1,992 lines: five new `TEST_CASE`s
+plus the differential driver. Two of the five are tagged `[exchange]` only,
+and three are tagged `[exchangerandom]` as well. `OfferExchange.cpp/.h` gain
+32 lines, all test-only entry points under `BUILD_TESTS`.
 
 **Build.** The last recorded `OfferExchange` build on this machine took
 27 s elapsed and 136 s CPU on 8 threads. That figure is read from the
@@ -103,14 +124,28 @@ Each line is given the category of the top-level command it belongs to:
 - **proof**: from there to the next top-level command.
 - **definition**: `definition`, `fun`, `datatype`, `record`,
   `export_code`, ... (the list is `DEF_COMMANDS`).
-- **text**: `text`/`section` blocks wherever they occur, including the
-  proof-sketch `text` blocks between a statement and its proof. `(* *)`
-  comments are counted with text.
+- **text**: `text`/`section` blocks wherever they occur. This includes the
+  indented proof-sketch `text` blocks between a statement and its proof, and
+  `txt` blocks inside proofs.
+- **comment**: `(* *)` blocks, and lines that begin with `\<comment>`,
+  wherever they occur. Inside a definition such a line still marks the
+  definition as code-level if it carries the `C++:` tag. Definition lines
+  therefore exclude comments, as the C++ code lines do. Comments are
+  reported with text as "prose".
 
 Two simplifications:
-- A one-line `lemma ... by m` counts as statement.
+- A `lemma ... by m` on a single line would count as statement. The current
+  theories have none.
 - A theorem's `proof` lines run to the next top-level command, so trailing
   `qed` lines are included.
+
+Proof methods and Isar steps are counted on statement and proof lines only,
+with quoted terms and trailing `\<comment>`s removed:
+- **Methods**: only the first method of each `by` or `apply`. The closing
+  method of `by (induct x) simp_all` is not counted.
+- **Isar steps**: every `have`, `show`, `obtain`, `thus` and `hence`
+  keyword, wherever it stands on the line. So `then have` and
+  `moreover from x have` both count.
 
 To check the classification on any theory, run
 
@@ -132,15 +167,22 @@ are reported separately as "(repeated)" so they are not counted twice.
 
 `coverage.tsv` has one row per C++ function the model follows. Each row
 gives:
-- the line where the function's name starts;
+- the line where the function's name starts, and the line of its closing
+  brace;
 - `all`, or the line ranges the model follows;
 - the Isabelle definitions involved;
 - for partial rows, a note on what is left out.
 
-`cxx_coverage.py` checks each row against the source and fails if a function
-no longer starts where the table says, or a range falls outside the function.
-It finds each body by brace matching and counts code lines (non-blank, not
-`//`) over the whole function and over the modelled ranges.
+`cxx_coverage.py` checks each row against the source. It finds each body by
+brace matching and fails if:
+- a function no longer starts or ends where the table says (so an edit that
+  changes a function's length is caught);
+- a range falls outside the function.
+
+It then counts two things, over the whole function and over the modelled
+ranges:
+- **code lines**: non-blank, not `//`, not `ZoneScoped`;
+- **statement lines**: code lines that are not just braces or `else`.
 
 **Judgement call: the ranges.** They come from reading each C++ function next
 to its model definition. The script cannot check this part. What is left out
@@ -148,16 +190,37 @@ is mostly the same few things:
 - loading ledger entries;
 - native-asset (XLM) branches, since `party_state` models trustlines only;
 - trustline authorization checks;
+- `releaseAssertOrThrow` preconditions, and fast paths that no modelled
+  caller reaches;
 - sponsorship and reserves;
 - for `doApply`, everything except a new offer that does not cross (the
   order-book loop `convertWithOffersAndPools`, modifying and deleting
-  offers, offer IDs and results).
+  offers, the branch for an offer that does not stay, offer IDs and
+  results).
 
-Signature lines and braces are counted inside the ranges.
-`TrustLineWrapper::addBalance` only dispatches, so it is represented by the
-`addBalance` and `addBalanceSkipAuthorization` rows it reaches. The ledger
-`adjustOffer` overload is counted as full because `cross_offer_v10` writes its
-steps out at both call sites.
+Counting rules:
+- **Signature lines and braces** are counted inside the ranges. A range that
+  starts at the name line also takes a return type on the line before, as
+  `all` does.
+- **Pure dispatch is not counted.** `TrustLineWrapper` and its
+  `NonIssuerImpl` only forward `addBalance`, `addBuyingLiabilities`,
+  `addSellingLiabilities`, `getAvailableBalance` and `getMaxAmountReceive`.
+  The `TransactionUtils.cpp` functions they reach are counted instead,
+  including those functions' one-line `LedgerTxnEntry` overloads (the rows
+  noted "wrapper").
+- **Const copies are not counted.** `doApply` calls the
+  `ConstTrustLineWrapper` copies of `canSellAtMost` and `canBuyAtMost`, and
+  through them the `ConstLedgerTxnEntry` overloads of `getAvailableBalance`
+  and `getMaxAmountReceive`. These are not counted a second time.
+- **Liability getters have no definition.** `getBuyingLiabilities` and
+  `getSellingLiabilities` correspond to the `buy_liabilities` and
+  `sell_liabilities` fields of `party_state`.
+- **One `all` row is restated.** `addBalanceSkipAuthorization` is restated as
+  one headroom test per direction, not followed line by line: `party_state`
+  has no selling liabilities on the bought asset and no limit on the sold
+  one.
+- **The ledger `adjustOffer` overload is counted as full**, because
+  `cross_offer_v10` writes its steps out at both call sites.
 
 ### Tests and build (`test_stats.py`)
 
@@ -165,8 +228,9 @@ steps out at both call sites.
   into a temporary directory (it is deterministic, with seed 1592639710) and
   counts records per tag.
 - **Case kinds.** These are keyword matches on the case id (`KINDS` in the
-  script). Case ids are not uniformly structured, so treat the kind split as
-  approximate. The per-tag totals are exact.
+  script). A case matching no keyword is "other". Case ids are not uniformly
+  structured, so treat the kind split as approximate. The per-tag totals are
+  exact.
 - **Mutants.** The count follows `run.sh`: one perturbed result per tag, plus
   one rotated error code per tag. The exceptions are the tags listed in
   `run.sh`'s `tags_without_err_rows`, which produce no ERR rows.
@@ -181,41 +245,41 @@ steps out at both call sites.
 - **The C++ figure depends on the hand-made ranges** in `coverage.tsv`.
   Moving a range by a line or two changes the total by a few lines, not by
   tens.
-- **Not all `C++:` tags are distinct functions.** The 59 tags count
-  definitions. Several definitions follow the same function:
+- **A third of the modelled C++ lines are braces.** 270 of the 790 modelled
+  code lines are lone braces or `else`. The statement-line figure (520) is
+  the one to use where that matters.
+- **Not all `C++:` tags are distinct functions.** The 52 tags (59 with the
+  7 copies in `Posting_Refinement`) count definitions. Several definitions
+  follow the same function:
   - collapsed and layered forms of `bigDivideOrThrow`;
-  - `_at_version` variants;
-  - the copies in `Posting_Refinement`.
+  - `_at_version`, `_with_options` and `_core` variants.
 - **The build time is a single cached measurement.**
-- **Three corrections to the first draft of these figures**, which were given
-  in conversation before the scripts existed:
-  - the mutant count is 35, not 38;
-  - 42 theorems are proved by `by eval` alone; the 93 figure counts every
-    `eval` occurrence, not theorems;
-  - the C++ estimate rose from about 620 to 668 lines once every range was
-    listed.
-- **`formal/RESULTS.md` overstates the mutants slightly.** It says "for every
-  tag, a perturbed result and a rotated error code must both be rejected".
-  Three tags (`big_multiply_unsigned` and the two lifecycle tags) have no ERR
-  rows, so they get only the perturbed-result mutant. That file is not
-  changed here.
+- **The `eval` count is not a theorem count.** 42 theorems are proved by
+  `by eval` alone, while `eval` is the first method 93 times.
 
 ## Review checklist
 
 1. Run `formal/docs/stats/collect.sh`. Check that it succeeds and that
-   `git diff formal/docs/stats/generated.md` is empty at the commit above.
+   `git diff formal/docs/stats/generated.md` is empty. The build line may
+   differ, because it reads this machine's Isabelle log. The header names
+   the last commit that touched the theories, the C++ or the harness. It
+   adds "(with uncommitted changes)" when any of them is modified.
 2. Check that every number under "Headline numbers" appears in
-   `generated.md`. The ratios and the "≈" figures are derived from it.
-3. Spot-check the line classifier with `--dump` on two theories. Look at
-   statements followed by `text` blocks, one-line `by` lemmas, and long
-   `proof ... qed` blocks.
+   `generated.md`. The ratios, the "about" figures and the 270 brace lines
+   (790 − 520) are derived from it.
+   The 155 lines of second forms are summed from the list of `C++:`-tagged
+   definitions there.
+3. Spot-check the line classifier with `--dump` on two theories. Look at:
+   - statements followed by indented `text` blocks;
+   - `\<comment>` lines inside definitions and statements;
+   - long `proof ... qed` blocks.
 4. For a sample of `coverage.tsv` rows, open the C++ ranges next to the named
    Isabelle definition:
    - every `all` row should be followed in full;
    - partial ranges should match what the definition does;
    - the lines left out should be ones the note names.
-   The rows with the most judgement in them are `crossOfferV10`, `doApply` and
-   `computeOfferExchangeParameters`.
+   The rows with the most judgement in them are `crossOfferV10`, `doApply`,
+   `computeOfferExchangeParameters` and `doCheckValid`.
 5. Check the layer sets in `theory_stats.py` against the definitions they
    name. The `C++:` tag rule should agree with `formal/AGENTS.md`: there,
    integer characterizations are theorems *about* the model, not part of it.

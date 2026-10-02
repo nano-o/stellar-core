@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Line and theorem statistics for the Isabelle theories in formal/OfferExchange.
+r"""Line and theorem statistics for the Isabelle theories in formal/OfferExchange.
 
 Each non-blank line is attributed to the top-level command it belongs to:
 
@@ -8,8 +8,12 @@ Each non-blank line is attributed to the top-level command it belongs to:
   proof       from the first proof command (by, apply, proof, using, ...)
               to the next top-level command
   text        text/section/... blocks, wherever they occur (including
-              between a statement and its proof)
-  comment     (* ... *) blocks
+              indented text/txt blocks between a statement and its proof
+              and inside proofs)
+  comment     (* ... *) blocks, and lines that begin with \<comment>
+              (in definitions too, so definition lines, like the C++ code
+              lines, exclude comments; a "C++:" tag still marks the
+              definition it sits in)
   header      theory/imports/begin/end and tooling glue
 
 Definitions are then grouped into layers (see LAYERS below).  The grouping
@@ -51,6 +55,10 @@ PROOF_START = re.compile(
     r"^\s*(proof|by|apply|using|unfolding|including|supply|subgoal|sorry|"
     r"oops|done|apply_end)\b|^\s*\.\.?\s*$")
 COMMAND = re.compile(r"^([a-z_]+)\b")
+INDENTED_TEXT = re.compile(r"^\s+(?:text|txt)\s*\\<open>")
+# An Isar step keyword as a word of its own (not shows, obtains, have_foo,
+# or part of a fact name such as foo.show).
+ISAR_STEP = re.compile(r"(?<![A-Za-z_'.])(have|show|obtain|thus|hence)\b")
 DEF_NAME = re.compile(
     r"^[a-z_]+\s+(?:\(open\)\s*)?(?:'[a-z]+\s+)?([A-Za-z_][A-Za-z_0-9]*)")
 
@@ -96,9 +104,9 @@ DUPLICATING_THEORIES = {"Offer_Exchange_Posting_Refinement.thy"}
 
 UNFINISHED = []  # sorry/oops found in statements or proofs, as FILE:LINE
 
-METHODS = ["simp", "auto", "linarith", "blast", "cases", "eval", "rule",
-           "meson", "intro", "subst", "metis", "smt", "fastforce", "force",
-           "presburger", "arith", "argo", "clarsimp", "induct"]
+METHODS = ["simp", "simp_all", "auto", "linarith", "blast", "cases", "eval",
+           "rule", "meson", "intro", "subst", "metis", "smt", "fastforce",
+           "force", "presburger", "arith", "argo", "clarsimp", "induct"]
 
 
 def classify(path):
@@ -116,6 +124,7 @@ def classify(path):
     items = []
     mode, current = "header", None
     text_depth, comment_depth = 0, 0
+    cartouche_label = "text"  # label of the lines of an open cartouche
     for number, line in enumerate(open(path).read().splitlines(), 1):
         stripped = line.strip()
         if not stripped:
@@ -129,12 +138,20 @@ def classify(path):
             continue
         if text_depth:
             text_depth += line.count("\\<open>") - line.count("\\<close>")
-            count("text")
+            count(cartouche_label)
+            continue
+        if stripped.startswith("\\<comment>"):
+            if mode == "definition":
+                current["cxx"] |= "C++:" in line
+            text_depth = line.count("\\<open>") - line.count("\\<close>")
+            cartouche_label = "comment"
+            count("comment")
             continue
         match = COMMAND.match(line)
         keyword = match.group(1) if match else None
-        if keyword in TEXT_COMMANDS:
+        if keyword in TEXT_COMMANDS or INDENTED_TEXT.match(line):
             text_depth = line.count("\\<open>") - line.count("\\<close>")
+            cartouche_label = "text"
             count("text")
             continue  # the surrounding mode resumes after the block
         if keyword in STATEMENT_COMMANDS:
@@ -154,9 +171,10 @@ def classify(path):
             mode = "header"
         if mode == "statement" and PROOF_START.match(line):
             mode = "proof"
-        if mode == "statement" and re.search(r"\sby\s", line):
+        one_liner = re.search(r"\sby\s", line.split("\\<comment>")[0])
+        if mode == "statement" and one_liner:
             # one-line "lemma ... by method": count it as statement
-            current["proof_head"] = line[line.index(" by ") + 1:].strip()
+            current["proof_head"] = line[one_liner.start() + 1:].strip()
             count("statement")
             current["statement"] += 1
             mode = "proof"
@@ -219,20 +237,28 @@ def main():
     total = collections.Counter()
     layers = collections.Counter()
     theorems = []
+    proof_lines = []  # proof and statement lines, for methods and Isar steps
+    tagged = []  # (theory, C++-tagged definitions), outside duplicating ones
     print("## Lines per theory\n")
     print("| Theory | total | proof | statement | definition | text | "
           "theorems | C++-tagged defs |")
     print("|---|---|---|---|---|---|---|---|")
     for path in theories:
         theory = os.path.basename(path)
-        counts, items, _ = classify(path)
+        counts, items, labels = classify(path)
         total.update(counts)
+        if theory not in TOOLING_THEORIES:
+            proof_lines += [
+                line for label, line in zip(labels, open(path).read().splitlines())
+                if label in ("proof", "statement")]
         thms = [i for i in items if i["kind"] == "thm"]
         defs = [i for i in items if i["kind"] == "def"]
         theorems += [(i, theory) for i in thms]
         if theory not in TOOLING_THEORIES:
             for item in defs:
                 layers[layer(theory, item)] += item["lines"]
+        if theory not in DUPLICATING_THEORIES and any(d["cxx"] for d in defs):
+            tagged.append((theory, [d for d in defs if d["cxx"]]))
         print(f"| {theory} | {sum(counts.values())} | {counts['proof']} | "
               f"{counts['statement']} | {counts['definition']} | "
               f"{counts['text'] + counts['comment']} | {len(thms)} | "
@@ -250,6 +276,10 @@ def main():
     print("|---|---|")
     for name, lines in layers.most_common():
         print(f"| {name} | {lines} |")
+    print("\n`C++:`-tagged definitions and their lines (not repeated):\n")
+    for theory, defs in tagged:
+        print(f"- {theory}: " + ", ".join(
+            f"`{d['name']}` {d['lines']}" for d in defs))
 
     proofs = [t["proof"] for t, _ in theorems]
     print("\n## Theorems\n")
@@ -265,17 +295,22 @@ def main():
         print(f"- {t['proof']} lines: `{theory}:{t['line']}` "
               f"`{t['head'][:70]}`")
 
-    source = "\n".join(open(p).read() for p in theories
-                       if os.path.basename(p) not in TOOLING_THEORIES)
+    # Only statement and proof lines, with quoted terms and trailing
+    # \<comment>s removed, so prose and terms do not contribute.
+    source = "\n".join(re.sub(r'"[^"]*"', '""', line.split("\\<comment>")[0])
+                       for line in proof_lines)
     print("\n## Proof methods and Isar steps\n")
-    print("Occurrences of `by M`, `by (M ...)`, `apply M`, `apply (M ...)`:\n")
+    print("First method of each `by M`, `by (M ...)`, `apply M`, "
+          "`apply (M ...)` (a closing method, as in `by (induct x) simp_all`, "
+          "is not counted):\n")
     method_counts = collections.Counter(
-        re.findall(r"\b(?:by|apply)\s*\(?\s*([a-z_]+)", source))
+        re.findall(r"\b(?:by|apply)\b\s*\(?\s*([a-z_]+)", source))
     print(", ".join(f"{m} {method_counts[m]}" for m in METHODS
                     if method_counts[m]))
-    steps = collections.Counter(
-        re.findall(r"^\s*(have|show|obtain|thus|hence)\b", source, re.M))
-    print(f"\nIsar steps: {sum(steps.values())} "
+    steps = collections.Counter(ISAR_STEP.findall(source))
+    print(f"\nIsar steps (`have`/`show`/`obtain`/`thus`/`hence` keywords, "
+          f"including after `then`/`moreover`/`from ...`): "
+          f"{sum(steps.values())} "
           f"({', '.join(f'{k} {v}' for k, v in steps.most_common())})")
     print(f"\n`sorry`/`oops` outside comments and prose: {len(UNFINISHED)}"
           f"{' (' + ', '.join(UNFINISHED) + ')' if UNFINISHED else ''}; "

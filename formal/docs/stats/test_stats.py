@@ -15,7 +15,9 @@
     Isabelle build log database, if one exists.
 
 Case kinds are classified by keywords in the case id (see KINDS); case ids
-are not uniformly structured, so this split is approximate.
+are not uniformly structured, so this split is approximate, and "other" is
+the residue (hand-written cases, and generated sweeps whose ids carry none of
+the keywords).
 
 Usage: test_stats.py [BASE]   (default BASE: a9d72b0ca); run from the
 repository root.
@@ -50,7 +52,7 @@ def kind(case_id):
     for name, pattern in KINDS:
         if re.search(pattern, case_id):
             return name
-    return "named (hand-written)"
+    return "other"
 
 
 def read_corpus(path):
@@ -83,7 +85,7 @@ def corpus_stats():
         counter[kind(case_id)] += 1
         version = re.search(r"_v(\d+)$", case_id)
         counter["v" + version.group(1) if version else "no version"] += 1
-    kinds = [name for name, _ in KINDS] + ["named (hand-written)"]
+    kinds = [name for name, _ in KINDS] + ["other"]
     print("\n| tag | records | " + " | ".join(kinds) +
           " | v28 / v29 / unversioned |")
     print("|---|---|" + "---|" * len(kinds) + "---|")
@@ -108,9 +110,11 @@ def golden_stats():
     tags = collections.Counter(fields[1] for fields in records)
     err = collections.Counter(fields[1] for fields in records
                               if fields[schema[fields[1]][0] - 1] == "ERR")
+    low, high = min(tags.values()), max(tags.values())
+    per_tag = str(low) if low == high else f"{low} to {high}"
     print(f"\nGolden subset (`formal/differential/golden/expected.tsv`): "
           f"{len(records)} records over {len(tags)} tags "
-          f"({min(tags.values())}-{max(tags.values())} per tag), "
+          f"({per_tag} per tag), "
           f"{sum(err.values())} of them ERR rows.")
     # The corpus holds inputs only and the golden file is a subset, so which
     # tags get an error-code mutant is read from run.sh itself, which fixes
@@ -145,10 +149,12 @@ def cxx_test_stats(base):
     diff = subprocess.run(["git", "diff", base, "HEAD", "--",
                            "src/transactions/test/ExchangeTests.cpp"],
                           check=True, capture_output=True, text=True).stdout
-    cases = re.findall(r'^\+TEST_CASE\("((?:[^"]|"\s*\n\+\s*")*)"', diff, re.M)
+    cases = re.findall(r'^\+TEST_CASE\("((?:[^"]|"\s*\n\+\s*")*)",'
+                       r'\s*(?:\n\+\s*)?"([^"]*)"', diff, re.M)
     print("\nNew `TEST_CASE`s in ExchangeTests.cpp:\n")
-    for case in cases:
-        print(f"- {re.sub(r'\"\s*\n\+\s*\"', '', case)}")
+    continuation = re.compile(r'"\s*\n\+\s*"')
+    for case, tags in cases:
+        print(f"- {continuation.sub('', case)} `{tags}`")
 
 
 def build_stats():
@@ -162,14 +168,19 @@ def build_stats():
     row = sqlite3.connect(path).execute(
         "select session_timing from isabelle_session_info").fetchone()
     blob = row[0] if row else b""
-    for decode in (lambda b: b, zlib.decompress, lzma.decompress):
+    text = ""
+    # Isabelle may store the column compressed; the plain decoding goes last
+    # because it never fails.
+    for decode in (zlib.decompress, lzma.decompress, lambda b: b):
         try:
             text = decode(blob).decode("utf8", "replace")
-            break
         except Exception:
-            text = ""
+            continue
+        if "elapsed=" in text:
+            break
     timing = dict(re.findall(r"(threads|elapsed|cpu|gc)=([\d.]+)", text))
-    print(f"From `{path}` (modified "
+    shown = path.replace(os.path.expanduser("~"), "~", 1)
+    print(f"From `{shown}` (modified "
           f"{subprocess.run(['date', '-r', path, '+%F %T'], capture_output=True, text=True).stdout.strip()}): "
           f"elapsed {timing.get('elapsed', '?')} s, CPU {timing.get('cpu', '?')} s, "
           f"GC {timing.get('gc', '?')} s, {timing.get('threads', '?')} threads. "

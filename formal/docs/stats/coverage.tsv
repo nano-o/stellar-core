@@ -6,6 +6,8 @@
 #   file        source path under src/
 #   function    name as written on the definition line
 #   name_line   line number of the line that starts with the function name
+#   end_line    line of the closing brace; cxx_coverage.py fails if the body
+#               no longer ends there (an edit inside the function)
 #   modelled    "all", or comma-separated line ranges (inclusive) of the
 #               lines the model follows; ranges must lie inside the function
 #   model       Isabelle definition(s) that follow it
@@ -14,43 +16,57 @@
 # Reviewer: for every "all" row, the model definition should follow the whole
 # body; for every partial row, the listed ranges should be exactly what the
 # definition follows, and the lines left out should be ones the note names.
-file	function	name_line	modelled	model	note
-util/numeric.cpp	bigDivide	16	all	big_divide_layered
-util/numeric.cpp	bigDivideUnsigned	32	all	big_divide_unsigned
-util/numeric.cpp	bigDivideOrThrow	48	all	big_divide_or_throw_layered, big_divide_or_throw	big_divide_or_throw is the collapsed integer form, proved equal
-util/numeric.cpp	bigDivide128	59	all	big_divide128_layered
-util/numeric.cpp	bigDivideUnsigned128	74	all	big_divide_unsigned128
-util/numeric.cpp	bigDivideOrThrow128	108	all	big_divide_or_throw128_layered, big_divide_or_throw128
-util/numeric.cpp	bigMultiplyUnsigned	119	all	big_multiply_unsigned
-util/numeric.cpp	bigMultiply	127	all	big_multiply_layered, big_multiply
-util/ProtocolVersion.cpp	protocolVersionStartsFrom	16	all	protocol_version_starts_from
-transactions/OfferExchange.cpp	canSellAtMost	55	55-57,64-70	can_sell_at_most	non-const overload; trustline branch only; native-asset branch and the authorization test are not modelled (party_state has no native balance or authorization flag)
-transactions/OfferExchange.cpp	canBuyAtMost	91	91-93,98-104	can_buy_at_most	non-const overload; trustline branch only; native-asset branch not modelled
-transactions/OfferExchange.cpp	checkPriceErrorBound	187	all	check_price_error_bound
-transactions/OfferExchange.cpp	calculateOfferValue	219	all	calculate_offer_value
-transactions/OfferExchange.cpp	calculateOfferAmountFromValue	241	all	calculate_offer_amount_from_value
-transactions/OfferExchange.cpp	exchangeV10	603	all	exchange_v10, exchange_v10_with_options
-transactions/OfferExchange.cpp	exchangeV10WithoutPriceErrorThresholds	684	all	exchange_v10_without_price_error_thresholds(_with_options)
-transactions/OfferExchange.cpp	applyPriceErrorThresholds	766	all	apply_price_error_thresholds
-transactions/OfferExchange.cpp	adjustOffer	875	all	inlined in cross_offer_v10	static ledger-level overload; cross_offer_v10 writes out its min/canSellAtMost/canBuyAtMost/adjustOffer steps at both call sites
-transactions/OfferExchange.cpp	adjustOffer	1014	all	adjust_offer, adjust_offer_with_options
-transactions/OfferExchange.cpp	crossOfferV10	1197	1197-1201,1203-1204,1221,1235-1249,1252-1253,1261-1268,1270-1271,1279-1300,1305-1306,1310-1315,1326-1327	cross_offer_v10	not modelled: header/offer/account loads, the missing-account check, native-asset balance branches, sponsorship on erase, the claim atom; the taker's balance moves (done by the caller in C++) are folded in
-transactions/TransactionUtils.cpp	acquireOrReleaseLiabilities	485	485-488,516-518,527-534,536-538,547-555	acquire_offer_liabilities, release_offer_liabilities	trustline branches only; same-asset check, entry loads and native-asset branches not modelled
-transactions/TransactionUtils.cpp	acquireLiabilities	558	all	acquire_offer_liabilities	wrapper
-transactions/TransactionUtils.cpp	releaseLiabilities	1177	all	release_offer_liabilities	wrapper
-transactions/TransactionUtils.cpp	addBalance	592	592-593,625-631,637-638,643	party_receive_buy_asset, party_spend_sell_asset	ledger-entry overload, trustline branch only; authorization not modelled; reached through TrustLineWrapper::addBalance
-transactions/TransactionUtils.cpp	addBalanceSkipAuthorization	565	all	party_receive_buy_asset, party_spend_sell_asset	restated as one headroom test per direction rather than line by line
-transactions/TransactionUtils.cpp	addBuyingLiabilities	646	646-655,669-670,676-685,690	add_liability_checked	trustline branch; authorization not modelled
-transactions/TransactionUtils.cpp	addSellingLiabilities	693	693-702,722-723,729-738,743	add_liability_checked	trustline branch; authorization not modelled
-transactions/TransactionUtils.cpp	getOfferBuyingLiabilities	940	all	offer_buying_liabilities(_at_version)
-transactions/TransactionUtils.cpp	getOfferBuyingLiabilities	957	all	offer_buying_liabilities(_at_version)	wrapper
-transactions/TransactionUtils.cpp	getOfferSellingLiabilities	964	all	offer_selling_liabilities(_at_version)
-transactions/TransactionUtils.cpp	getOfferSellingLiabilities	981	all	offer_selling_liabilities(_at_version)	wrapper
-transactions/ManageOfferOpFrameBase.cpp	ManageOfferOpFrameBase::computeOfferExchangeParameters	108	108-111,151-153,157-206,212-213	preflight_offer, preflight_offer_core	protocol >= 10 path with trustlines; pre-V14 reserve/subentry checks, entry loads and the pre-V10 branch not modelled
-transactions/ManageOfferOpFrameBase.cpp	ManageOfferOpFrameBase::doApply	225	225-229,286-288,331-345,458-462,470-483,490-495,539-547	post_offer, post_offer_core, post_sell_offer, post_buy_offer	new offer that does not cross (sheepStays with nothing sent): parameters, line-full check, adjustment, liability acquisition; not modelled: modify/delete of existing offers, sponsorship and reserves, convertWithOffersAndPools and its result handling, offer IDs and results
-transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::getOfferBuyingLiabilities	58	all	offer_buying_liabilities_at_version
-transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::getOfferSellingLiabilities	67	all	offer_selling_liabilities_at_version
-transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::applyOperationSpecificLimits	76	all	preflight_offer_core
-transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::getOfferBuyingLiabilities	53	all	manage_buy_buying_liabilities(_at_version)
-transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::getOfferSellingLiabilities	62	all	manage_buy_selling_liabilities(_at_version)
-transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::applyOperationSpecificLimits	71	all	preflight_offer_core
+file	function	name_line	end_line	modelled	model	note
+util/numeric.cpp	bigDivide	16	29	all	big_divide_layered
+util/numeric.cpp	bigDivideUnsigned	32	45	all	big_divide_unsigned
+util/numeric.cpp	bigDivideOrThrow	48	56	all	big_divide_or_throw_layered, big_divide_or_throw	big_divide_or_throw is the collapsed integer form, proved equal
+util/numeric.cpp	bigDivide128	59	71	all	big_divide128_layered
+util/numeric.cpp	bigDivideUnsigned128	74	105	all	big_divide_unsigned128
+util/numeric.cpp	bigDivideOrThrow128	108	116	all	big_divide_or_throw128_layered, big_divide_or_throw128
+util/numeric.cpp	bigMultiplyUnsigned	119	124	all	big_multiply_unsigned
+util/numeric.cpp	bigMultiply	127	131	all	big_multiply_layered, big_multiply
+util/ProtocolVersion.cpp	protocolVersionStartsFrom	16	19	all	protocol_version_starts_from
+util/types.cpp	addBalance	282	307	282-283,295-298,300-307	add_liability_checked; restated in party_receive_buy_asset, party_spend_sell_asset	int64 overload, reached from addBuyingLiabilities, addSellingLiabilities and addBalanceSkipAuthorization; the releaseAssertOrThrow preconditions and the delta == 0 fast path (unreachable: every modelled caller returns early on a zero delta) are not modelled
+transactions/OfferExchange.cpp	canSellAtMost	55	70	55-57,65-67,70	can_sell_at_most	non-const overload (the ConstTrustLineWrapper overload at line 73, which doApply calls, is a copy and not counted again); trustline branch only; the native-asset branch and the authorization test with its return 0 are not modelled (party_state has no native balance or authorization flag)
+transactions/OfferExchange.cpp	canBuyAtMost	91	104	91-93,98-104	can_buy_at_most	non-const overload (the const copy at line 107 is not counted again); trustline branch only; native-asset branch not modelled
+transactions/OfferExchange.cpp	checkPriceErrorBound	187	216	all	check_price_error_bound
+transactions/OfferExchange.cpp	calculateOfferValue	219	225	all	calculate_offer_value
+transactions/OfferExchange.cpp	calculateOfferAmountFromValue	241	260	all	calculate_offer_amount_from_value
+transactions/OfferExchange.cpp	exchangeV10	603	614	all	exchange_v10, exchange_v10_with_options
+transactions/OfferExchange.cpp	exchangeV10WithoutPriceErrorThresholds	684	762	all	exchange_v10_without_price_error_thresholds(_with_options)
+transactions/OfferExchange.cpp	applyPriceErrorThresholds	766	844	all	apply_price_error_thresholds
+transactions/OfferExchange.cpp	adjustOffer	875	886	all	inlined in cross_offer_v10	static ledger-level overload; cross_offer_v10 writes out its min/canSellAtMost/canBuyAtMost/adjustOffer steps at both call sites
+transactions/OfferExchange.cpp	adjustOffer	1014	1021	all	adjust_offer, adjust_offer_with_options
+transactions/OfferExchange.cpp	crossOfferV10	1197	1327	1197-1201,1203-1204,1221,1235-1249,1252-1253,1261-1268,1270-1271,1279-1300,1305-1306,1310-1315,1326-1327	cross_offer_v10	not modelled: header/offer/account loads, the missing-account check, native-asset balance branches, sponsorship on erase, the claim atom; the taker's balance moves (done by the caller in C++) are folded in
+transactions/TransactionUtils.cpp	acquireOrReleaseLiabilities	485	555	485-488,516-518,527-528,530-534,536-538,547-548,550-555	acquire_offer_liabilities, release_offer_liabilities	trustline branches only; same-asset check, entry loads and native-asset branches not modelled
+transactions/TransactionUtils.cpp	acquireLiabilities	558	562	all	acquire_offer_liabilities	wrapper
+transactions/TransactionUtils.cpp	addBalanceSkipAuthorization	565	589	all	party_receive_buy_asset, party_spend_sell_asset	restated as one headroom test per direction rather than line by line
+transactions/TransactionUtils.cpp	addBalance	592	643	592-593,625-631,637-638,643	party_receive_buy_asset, party_spend_sell_asset	ledger-entry overload, trustline branch only; authorization not modelled; reached through TrustLineWrapper::addBalance
+transactions/TransactionUtils.cpp	addBuyingLiabilities	646	690	646-655,669-670,676-685,690	add_liability_checked	trustline branch; authorization not modelled
+transactions/TransactionUtils.cpp	addSellingLiabilities	693	743	693-702,722-723,729-738,743	add_liability_checked	trustline branch; authorization not modelled
+transactions/TransactionUtils.cpp	getAvailableBalance	752	778	752-754,760-761,766-767,773-778	can_sell_at_most, preflight_offer_core	LedgerEntry overload, reached through TrustLineWrapper::getAvailableBalance; trustline branch at protocol >= 10; account branch, the authorization check and the unknown-type throw not modelled
+transactions/TransactionUtils.cpp	getAvailableBalance	781	784	all	can_sell_at_most, preflight_offer_core	wrapper (the ConstLedgerTxnEntry copy at line 787, reached from doApply, is not counted again)
+transactions/TransactionUtils.cpp	getBuyingLiabilities	794	813	794-795,807-811,813	buy_liabilities field of party_state	trustline branch; the pre-V10 throw, account branch and unknown-type throw not modelled
+transactions/TransactionUtils.cpp	getBuyingLiabilities	816	819	all	buy_liabilities field of party_state	wrapper
+transactions/TransactionUtils.cpp	getMaxAmountReceive	822	855	822-823,835-836,842-850,855	can_buy_at_most, preflight_offer_core	LedgerEntry overload, reached through TrustLineWrapper::getMaxAmountReceive; trustline branch at protocol >= 10; account branch, the authorization check and the unknown-type throw not modelled
+transactions/TransactionUtils.cpp	getMaxAmountReceive	858	861	all	can_buy_at_most, preflight_offer_core	wrapper (the ConstLedgerTxnEntry copy at line 864, reached from doApply, is not counted again)
+transactions/TransactionUtils.cpp	getOfferBuyingLiabilities	940	954	all	offer_buying_liabilities(_at_version)
+transactions/TransactionUtils.cpp	getOfferBuyingLiabilities	957	961	all	offer_buying_liabilities(_at_version)	wrapper
+transactions/TransactionUtils.cpp	getOfferSellingLiabilities	964	978	all	offer_selling_liabilities(_at_version)
+transactions/TransactionUtils.cpp	getOfferSellingLiabilities	981	985	all	offer_selling_liabilities(_at_version)	wrapper
+transactions/TransactionUtils.cpp	getSellingLiabilities	988	1006	988-989,1000-1004,1006	sell_liabilities field of party_state	trustline branch; the pre-V10 throw, account branch and unknown-type throw not modelled
+transactions/TransactionUtils.cpp	getSellingLiabilities	1009	1013	all	sell_liabilities field of party_state	wrapper
+transactions/TransactionUtils.cpp	releaseLiabilities	1177	1181	all	release_offer_liabilities	wrapper
+transactions/ManageOfferOpFrameBase.cpp	ManageOfferOpFrameBase::computeOfferExchangeParameters	108	213	108-111,151-206,212-213	preflight_offer, preflight_offer_core	protocol >= 10 path with trustlines; pre-V14 reserve/subentry checks, entry loads and the pre-V10 branch not modelled
+transactions/ManageOfferOpFrameBase.cpp	ManageOfferOpFrameBase::doApply	225	565	225-229,286-288,331-346,458-462,470-478,483,490-495,539-547	post_offer, post_offer_core, post_sell_offer, post_buy_offer	new offer that does not cross (sheepStays with nothing sent): parameters, line-full check, adjustment, liability acquisition; not modelled: modify/delete of existing offers, sponsorship and reserves, convertWithOffersAndPools and its result handling, the branch for an offer that does not stay (amount = 0), offer IDs and results
+transactions/ManageOfferOpFrameBase.cpp	ManageOfferOpFrameBase::doCheckValid	600	644	600-602,615-627,634,643-644	post_offer_core (Post_Malformed)	the price and amount checks and the V11+ rejection of deleting offer 0, which the model folds into one positivity test; asset validity, the same-asset check, the pre-V11 deletion branches and the negative offer-ID check are not modelled
+transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::isAmountValid	46	49	all	post_sell_offer
+transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::isDeleteOffer	52	55	all	post_sell_offer, post_offer_core
+transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::getOfferBuyingLiabilities	58	64	all	offer_buying_liabilities_at_version
+transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::getOfferSellingLiabilities	67	73	all	offer_selling_liabilities_at_version
+transactions/ManageSellOfferOpFrame.cpp	ManageSellOfferOpFrame::applyOperationSpecificLimits	76	81	all	preflight_offer_core
+transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::isAmountValid	41	44	all	post_buy_offer
+transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::isDeleteOffer	47	50	all	post_buy_offer, post_offer_core
+transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::getOfferBuyingLiabilities	53	59	all	manage_buy_buying_liabilities(_at_version)
+transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::getOfferSellingLiabilities	62	68	all	manage_buy_selling_liabilities(_at_version)
+transactions/ManageBuyOfferOpFrame.cpp	ManageBuyOfferOpFrame::applyOperationSpecificLimits	71	78	all	preflight_offer_core

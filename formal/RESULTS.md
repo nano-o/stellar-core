@@ -225,8 +225,12 @@ stellar-core.
   - The two lifecycle tags apply real ManageSell or ManageBuy, ChangeTrust
     and ManageBuy-counteroffer transactions, 211 cases each in a protocol-28
     and in a protocol-29 ledger.
-  - For every tag, a perturbed result and a rotated error code must both be
-    rejected, so a comparison that silently checks nothing cannot pass.
+  - For every tag, a perturbed result must be rejected. For each of the 16
+    tags that produce ERR rows, a rotated error code must be rejected too.
+    The other three tags (`big_multiply_unsigned` and the two lifecycle
+    tags) are listed in `run.sh`, which fails if any of them starts
+    producing ERR rows. That is 35 mutants in all, so a comparison that
+    silently checks nothing cannot pass.
   - A committed 40-record-per-tag subset, `differential/golden/expected.tsv`,
     is checked by ordinary test runs without Isabelle.
 - **C++ regression tests.** `ExchangeTests.cpp` also gains:
