@@ -61,8 +61,8 @@ explains why crossing does not refine the specification even at protocol
 ## What is proved
 
 The session has no `sorry` and no `oops`; `isabelle build -D
-formal/OfferExchange` checks every result below. Two stated properties are
-unproved; they are listed under Open items.
+formal/OfferExchange` checks every result below. One stated property is
+unproved; it is listed under Open items.
 
 ### Exchange arithmetic
 
@@ -116,10 +116,6 @@ each protocol:
   the posted amount alone. Proved at protocol 29:
   `cover_implies_adjust_stable_p29`. False at protocol 28, shown by the
   reservation anomaly below (`covering_does_not_imply_adjust_stability`).
-- **Takeability with an unchanged maker.** Stated as
-  `unchanged_maker_offers_are_takeable`. Not proved at either protocol (see
-  Open items). The adjustment step is proved:
-  `unchanged_maker_cover_implies_adjust_stable`.
 - **Takeability after lowering the maker's buying limit.** If the maker
   only lowers its buying limit, and the new limit still covers the booked
   liability, the offer stays takeable. Proved at protocol 29:
@@ -132,7 +128,8 @@ each protocol:
   29: `posted_offers_remain_takeable_p29`,
   `posted_buy_offers_remain_takeable_p29`, and
   `posted_request_offers_remain_takeable_p29`, which covers both request
-  kinds. False at protocol 28: `no_taker_can_take_the_griefed_offer`.
+  kinds. A maker left exactly as posting returned it is a special case.
+  False at protocol 28: `no_taker_can_take_the_griefed_offer`.
 - **A fully taken posted offer transfers its stored amount.** Proved at
   protocol 29: `fully_taken_posted_offer_exchanges_posted_amount_p29`. False
   at protocol 28: `fully_taken_posted_offer_exchanges_posted_amount_p28_false`.
@@ -243,8 +240,6 @@ stellar-core.
 
 ## Open items
 
-- `unchanged_maker_offers_are_takeable` is stated and unproved, at both
-  protocols.
 - The specification's
   `sufficiently_large_incoming_offer_fully_takes_covered_posted_offer` is
   stated in a comment and not proved.

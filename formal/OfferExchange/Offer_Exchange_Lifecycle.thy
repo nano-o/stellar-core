@@ -1197,41 +1197,6 @@ text \<open>
   below demonstrates.
 \<close>
 
-subsubsection \<open>Takeability with an unchanged maker\<close>
-
-definition unchanged_maker_offers_are_takeable :: "exchange_options \<Rightarrow> bool"
-  where
-    "unchanged_maker_offers_are_takeable options \<longleftrightarrow>
-      (\<forall>price_n price_d amount maker_at_post posted maker_after.
-        party_state_wf maker_at_post \<and>
-        post_offer price_n price_d amount maker_at_post options =
-          Cxx_Ok (Post_Created posted maker_after) \<longrightarrow>
-        (\<exists>taker taker_amount crossed.
-          party_state_wf taker \<and>
-          0 < sint (can_buy_at_most taker) \<and>
-          0 < sint
-            (signed_min64 taker_amount (can_sell_at_most taker)) \<and>
-          cross_offer_v10 price_n price_d posted maker_after taker
-            taker_amount Exchange_Normal options =
-              Cxx_Ok crossed \<and>
-          0 < sint (cross_wheat_received crossed) \<and>
-          0 < sint (cross_sheep_send crossed)))"
-
-text \<open>
-  @{const unchanged_maker_offers_are_takeable} uses the state returned by
-  successful posting directly as the maker state supplied to crossing.  It
-  says that, for either exact-receive-cap setting, some well-formed normal-mode
-  taker
-  can cross the posted offer successfully and transfer strictly positive
-  amounts of both assets.
-
-  As with the changed-state property below, this is existential in the taker
-  and does not promise a nonzero fill to every counterparty.  The
-  unchanged-maker stability lemma proved below establishes only that the
-  crossing-time adjustment is the identity; this property additionally states
-  the positive end-to-end crossing result.  It is stated here without a proof.
-\<close>
-
 subsubsection \<open>Takeability after adjusting the maker's sheep limit\<close>
 
 definition limit_adjustment_stable :: "exchange_options \<Rightarrow> bool"
